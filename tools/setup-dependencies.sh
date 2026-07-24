@@ -19,14 +19,42 @@ readonly SDK_PATH="${2:-}"
 # Bump deliberately, after verifying a build actually runs on the device.
 readonly TDLIB_COMMIT="${TDLIB_COMMIT:-022d60202e446ad1287b9fb68e687c8a0760788b}"
 
-# Check if TOOLCHAIN_PREFIX is set, if needed
-check_toolchain_prefix() {
-    if [[ "$ARGS" == "harmattan" ]]; then
-        if [[ -z "${TOOLCHAIN_PREFIX:-}" ]]; then
-            error "TOOLCHAIN_PREFIX is not set. Please define it before running the script."
-            exit 1
-        fi
+# Validate everything the Harmattan path needs up front. All of these used to fail
+# late - the SDK path in particular is only read at the very end, after TDLib has
+# finished building, so a missing one wasted the whole compile.
+check_harmattan_env() {
+    if [[ "$ARGS" != "harmattan" ]]; then
+        return
     fi
+
+    if [[ -z "${TOOLCHAIN_PREFIX:-}" ]]; then
+        error "TOOLCHAIN_PREFIX is not set. Please define it before running the script."
+        error "  export TOOLCHAIN_PREFIX=arm-none-linux-gnueabi"
+        exit 1
+    fi
+
+    if ! command -v "$TOOLCHAIN_PREFIX-gcc" >/dev/null 2>&1; then
+        error "$TOOLCHAIN_PREFIX-gcc is not on PATH."
+        error "Build it with tools/build-toolchain.sh, then add its bin/ directory to PATH."
+        exit 1
+    fi
+
+    if [[ -z "$SDK_PATH" ]]; then
+        error "No SDK path given. Usage: $0 harmattan /path/to/QtSDK"
+        error "Without it TDLib would be installed into /Madde/... at the filesystem root."
+        exit 1
+    fi
+
+    local sysroot="$SDK_PATH/Madde/sysroots/harmattan_sysroot_10.2011.34-1_slim"
+
+    if [[ ! -d "$sysroot" ]]; then
+        error "Harmattan sysroot not found: $sysroot"
+        error "Check that SDK_PATH points at the Qt SDK root (the directory holding Madde/)."
+        exit 1
+    fi
+
+    info "Toolchain: $(command -v "$TOOLCHAIN_PREFIX-gcc")"
+    info "Sysroot:   $sysroot"
 }
 
 # Functions for colored output
@@ -250,7 +278,7 @@ build_tdlib() {
 # Main function to run the build process
 main() {
     validate_args
-    check_toolchain_prefix
+    check_harmattan_env
     build_zlib
     build_openssl
     build_tdlib
