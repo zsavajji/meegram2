@@ -24,14 +24,14 @@ export TOOLCHAIN_PREFIX=arm-none-linux-gnueabi
 ./tools/setup-dependencies.sh harmattan "$QT_SDK_PATH"
 
 # 3. build
-cmake -B build \
+cmake -B build-app \
   -DCMAKE_TOOLCHAIN_FILE=tools/toolchain.cmake \
   -DQT_SDK_PATH="$QT_SDK_PATH" \
   -DBUILD_HARMATTAN=ON
-cmake --build build -j4
+cmake --build build-app -j4
 
 # 4. package
-cmake --build build --target package
+cmake --build build-app --target package
 ```
 
 Everything below explains a step or a failure mode.
@@ -245,20 +245,28 @@ partway through — drop to `JOBS=2`.
 ## 5. Configure and build
 
 ```bash
-cmake -B build \
+cmake -B build-app \
   -DCMAKE_TOOLCHAIN_FILE=tools/toolchain.cmake \
   -DQT_SDK_PATH="$QT_SDK_PATH" \
   -DBUILD_HARMATTAN=ON
 
-cmake --build build -j4
+cmake --build build-app -j4
 ```
 
 Confirm optimisation actually reaches the compiler — the project builds `Release`
 by default now, but it is worth checking once:
 
 ```bash
-cmake --build build -- VERBOSE=1 | grep -o '\-O[0-9s]' | sort -u    # expect -O2
+cmake --build build-app -- VERBOSE=1 | grep -o '\-O[0-9s]' | sort -u    # expect -O2
 ```
+
+::: danger Do not build the app into `build/`
+`tools/setup-dependencies.sh` owns that directory — `build/crypto`, `build/zlib`,
+`build/tdlib`, `build/generate` and `build/rlottie` all live there, along with the
+stamps that let re-runs skip completed work. Pointing CMake at `build/` and then
+clearing the cache with `rm -rf build` destroys every dependency build tree.
+Installed artefacts in the sysroot survive, but the trees and stamps do not.
+:::
 
 ### Build options
 
@@ -277,7 +285,7 @@ Run the app over SSH when profiling — `invoker` in the `.desktop` swallows std
 ## 6. Package
 
 ```bash
-cmake --build build --target package
+cmake --build build-app --target package
 ```
 
 Runs `mad dpkg-buildpackage -nc -uc -us` in the build directory. CMake copies
