@@ -346,9 +346,16 @@ build_rlottie() {
     # 3.5, so configuring fails outright without this. It also covers rlottie's
     # bundled freetype/pixman/stb subprojects. Harmless on older CMake, which just
     # reports it as an unused variable. TDLib declares 3.10 and needs no such help.
+    # LIB_INSTALL_DIR is pinned because rlottie defaults it to a bare "/usr/lib"
+    # while installing its headers to a *relative* "include", i.e. under
+    # CMAKE_INSTALL_PREFIX. Left alone the install splits itself across
+    # <sysroot>/usr/lib and <sysroot>/usr/local/include. Setting both puts
+    # everything under /usr/local, matching where TDLib installs.
     local rlottie_options=(
         -DCMAKE_BUILD_TYPE=MinSizeRel
         -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+        -DCMAKE_INSTALL_PREFIX=/usr/local
+        -DLIB_INSTALL_DIR=/usr/local/lib
         -DBUILD_SHARED_LIBS=OFF
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON
         -DLOTTIE_MODULE=OFF
