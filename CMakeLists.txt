@@ -173,12 +173,17 @@ if (NOT BUILD_HARMATTAN AND COMMAND add_sanitizers)
 endif()
 
 if (BUILD_HARMATTAN)
-    # Standard Harmattan/MADDE target ABI for the N9's OMAP3630 Cortex-A8.
-    # -mthumb shrinks code (helps the small i-cache); NEON needs softfp to be usable.
-    # If the mad toolchain disagrees on the float ABI this fails loudly at link,
-    # which is the intended behaviour - do not paper over it.
+    # Target ABI for the N9's OMAP3630 Cortex-A8. -mthumb shrinks code, which helps
+    # the small i-cache.
+    #
+    # hard, not softfp: the Harmattan sysroot's libc reports
+    #   Tag_ABI_VFP_args: VFP registers
+    # i.e. floating-point arguments are passed in VFP registers. Building softfp
+    # against it fails at link with "uses VFP register arguments, output does not".
+    # Re-check with:
+    #   readelf -A "$SYSROOT/lib/libc.so.6" | grep Tag_ABI_VFP_args
     target_compile_options(meegram PRIVATE
-        -march=armv7-a -mtune=cortex-a8 -mfpu=neon -mfloat-abi=softfp -mthumb)
+        -march=armv7-a -mtune=cortex-a8 -mfpu=neon -mfloat-abi=hard -mthumb)
 
     target_compile_options(meegram PRIVATE ${boostable_CFLAGS})
     target_include_directories(meegram PRIVATE ${boostable_INCLUDE_DIRS})
