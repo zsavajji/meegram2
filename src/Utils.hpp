@@ -11,6 +11,7 @@ class Locale;
 class Message;
 class MessageAudio;
 class MessageCall;
+class MessageContent;
 class StorageManager;
 class User;
 
@@ -34,6 +35,13 @@ public:
     static QString getMessageDate(Message *message) noexcept;
 
     static QString getContent(Message *message, std::shared_ptr<StorageManager> storage, std::shared_ptr<Locale> locale) noexcept;
+
+    // Renders content on its own, without a surrounding Message. Needed for reply
+    // previews: messageReplyToMessage carries a MessageContent inline, with no
+    // Message to hang it off. Service messages are not reachable this way - they
+    // need the Message, so the overload above handles them before delegating here.
+    // No StorageManager: nothing in this path resolves an entity.
+    static QString getContent(MessageContent *content, int contentType, bool isOutgoing, std::shared_ptr<Locale> locale) noexcept;
     static QString getServiceContent(Message *message, std::shared_ptr<StorageManager> storage, std::shared_ptr<Locale> locale, bool openUser = false) noexcept;
 
     static QString getChatTitle(std::shared_ptr<Chat> chat, std::shared_ptr<StorageManager> storage, bool showSavedMessages = true) noexcept;

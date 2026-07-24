@@ -6,6 +6,13 @@
 #include <unordered_map>
 #include <unordered_set>
 
+namespace {
+
+// Defined further down, next to the content table it owns.
+std::unique_ptr<MessageContent> makeMessageContent(td::td_api::object_ptr<td::td_api::MessageContent> content);
+
+}  // namespace
+
 Message::Message(td::td_api::object_ptr<td::td_api::message> message, QObject *parent)
     : QObject(parent)
     , m_content(nullptr)
@@ -43,7 +50,67 @@ Message::Message(td::td_api::object_ptr<td::td_api::message> message, QObject *p
     m_date = QDateTime::fromMSecsSinceEpoch(static_cast<qlonglong>(m_message->date_) * 1000);
     m_editDate = QDateTime::fromMSecsSinceEpoch(static_cast<qlonglong>(m_message->edit_date_) * 1000);
 
+    setReplyTo(std::move(m_message->reply_to_));
+
     setContent(std::move(m_message->content_));
+}
+
+void Message::setReplyTo(td::td_api::object_ptr<td::td_api::MessageReplyTo> replyTo)
+{
+    m_replyTo.reset();
+
+    if (!replyTo || replyTo->get_id() != td::td_api::messageReplyToMessage::ID)
+    {
+        // The other variant is messageReplyToStory, which this client does not show.
+        return;
+    }
+
+    auto reply = td::td_api::move_object_as<td::td_api::messageReplyToMessage>(replyTo);
+
+    auto info = std::make_unique<ReplyInfo>();
+    info->messageId = reply->message_id_;
+
+    if (reply->origin_)
+    {
+        switch (reply->origin_->get_id())
+        {
+            case td::td_api::messageOriginUser::ID:
+                info->senderUserId = static_cast<const td::td_api::messageOriginUser *>(reply->origin_.get())->sender_user_id_;
+                break;
+            case td::td_api::messageOriginChat::ID:
+                info->senderChatId = static_cast<const td::td_api::messageOriginChat *>(reply->origin_.get())->sender_chat_id_;
+                break;
+            case td::td_api::messageOriginChannel::ID:
+                info->senderChatId = static_cast<const td::td_api::messageOriginChannel *>(reply->origin_.get())->chat_id_;
+                break;
+            case td::td_api::messageOriginHiddenUser::ID:
+                info->hiddenSenderName =
+                    QString::fromStdString(static_cast<const td::td_api::messageOriginHiddenUser *>(reply->origin_.get())->sender_name_);
+                break;
+            default:
+                break;
+        }
+    }
+
+    // A manually selected quote wins over the message preview, since that is the
+    // part the sender chose to reply to.
+    if (reply->quote_ && reply->quote_->text_)
+    {
+        info->quote = QString::fromStdString(reply->quote_->text_->text_);
+    }
+
+    if (reply->content_)
+    {
+        info->contentType = reply->content_->get_id();
+        info->content = makeMessageContent(std::move(reply->content_));
+    }
+
+    m_replyTo = std::move(info);
+}
+
+const Message::ReplyInfo *Message::replyTo() const noexcept
+{
+    return m_replyTo.get();
 }
 
 qlonglong Message::id() const
@@ -223,11 +290,16 @@ Message::SenderType Message::senderType() const
     return m_senderType;
 }
 
-void Message::setContent(td::td_api::object_ptr<td::td_api::MessageContent> content)
-{
-    m_content = nullptr;
-    m_contentType = content->get_id();
+namespace {
 
+// Builds the concrete MessageContent wrapper for a td_api content object.
+//
+// Lifted out of Message::setContent so it can also wrap the content that arrives
+// inline on a reply (messageReplyToMessage carries its own MessageContent), rather
+// than duplicating this table. Internal linkage for now: the only caller is in this
+// translation unit. Promote it to a header if that stops being true.
+std::unique_ptr<MessageContent> makeMessageContent(td::td_api::object_ptr<td::td_api::MessageContent> content)
+{
     using MessageContentHandler = std::function<std::unique_ptr<MessageContent>(td::td_api::object_ptr<td::td_api::MessageContent>)>;
     static const std::unordered_map<int32_t, MessageContentHandler> contentFactory = {
         {td::td_api::messageText::ID, [](auto content) { return std::make_unique<MessageText>(td::td_api::move_object_as<td::td_api::messageText>(content)); }},
@@ -261,14 +333,20 @@ void Message::setContent(td::td_api::object_ptr<td::td_api::MessageContent> cont
         {td::td_api::messageCall::ID,
          [](auto content) { return std::make_unique<MessageCall>(td::td_api::move_object_as<td::td_api::messageCall>(content)); }}};
 
-    if (auto it = contentFactory.find(m_contentType); it != contentFactory.end())
+    if (auto it = contentFactory.find(content->get_id()); it != contentFactory.end())
     {
-        m_content = it->second(std::move(content));
+        return it->second(std::move(content));
     }
-    else
-    {
-        m_content = std::make_unique<MessageService>(std::move(content));
-    }
+
+    return std::make_unique<MessageService>(std::move(content));
+}
+
+}  // namespace
+
+void Message::setContent(td::td_api::object_ptr<td::td_api::MessageContent> content)
+{
+    m_contentType = content->get_id();
+    m_content = makeMessageContent(std::move(content));
 
     emit messageChanged();
 }

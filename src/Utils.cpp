@@ -383,10 +383,20 @@ QString Utils::getContent(Message *message, std::shared_ptr<StorageManager> stor
     if (!message)
         return {};
 
-    auto content = message->content();
-    auto contentType = message->contentType();
-    auto isOutgoing = message->isOutgoing();
+    // Service messages need the whole Message, so they are resolved here rather than
+    // in the content-only overload. Hoisting this out of the switch's default branch
+    // is behaviour-preserving: Message::isService() matches on content type, and its
+    // 43 service types are disjoint from the 16 cases the switch handles.
+    if (message->isService())
+    {
+        return getServiceContent(message, storage, locale);
+    }
 
+    return getContent(message->content(), message->contentType(), message->isOutgoing(), std::move(locale));
+}
+
+QString Utils::getContent(MessageContent *content, int contentType, bool isOutgoing, std::shared_ptr<Locale> locale) noexcept
+{
     auto formatCaption = [&](const QString &text) noexcept -> QString { return text.isEmpty() ? text : QLatin1String(": ") + text; };
 
     switch (contentType)
@@ -467,14 +477,10 @@ QString Utils::getContent(Message *message, std::shared_ptr<StorageManager> stor
 
             return text;
         }
-        default: {
-            if (message->isService())
-            {
-                return getServiceContent(message, storage, locale);
-            }
-
+        default:
+            // Service messages were handled by the Message* overload before we got
+            // here, so anything reaching this point really is unsupported.
             return tr("UnsupportedAttachment");
-        }
     }
 }
 
