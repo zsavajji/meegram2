@@ -137,20 +137,12 @@ write_toolchain_file() {
 SET(CMAKE_SYSTEM_NAME Linux)
 SET(CMAKE_SYSTEM_PROCESSOR arm)
 
-# libstdc++ only pulls the C99 math functions (lround, trunc, nearbyint, ...) into
-# namespace std when the corresponding macro is defined, and that is decided when
-# GCC is configured, by probing the target's libc. Against the 2011 Harmattan
-# headers that probe fails, so <cmath> declares ::lround but not std::lround and
-# rlottie fails with "'lround' is not a member of 'std'".
-#
-# The symbols themselves are present - glibc has had lround since 2.1 - so only the
-# declaration is missing and defining the macro is enough.
-#
-# Both spellings are set on purpose. GCC 13 renamed the guard: up to 12 it is
-# _GLIBCXX_USE_C99_MATH_TR1, from 13 onwards <cmath> tests
-# _GLIBCXX_USE_C99_MATH_FUNCS. Defining only the old name is silently inert on
-# GCC 14, which is exactly how this first appeared to "not work".
-SET(CMAKE_CXX_FLAGS_INIT "-D_GLIBCXX_USE_C99_MATH_FUNCS=1 -D_GLIBCXX_USE_C99_MATH_TR1=1")
+# Note: do NOT force _GLIBCXX_USE_C99_MATH_FUNCS on here to get std::lround. That
+# guard also covers the long double variants, and the Harmattan glibc does not
+# declare acoshl/asinhl/... at all (on ARM EABI long double is double, and old glibc
+# gates them behind __NO_LONG_DOUBLE_MATH). Forcing it just moves the failure to
+# "'acoshl' has not been declared in '::'". libstdc++'s probe is right; the affected
+# rlottie call sites are patched in build_rlottie instead.
 
 SET(CMAKE_C_COMPILER   ${TOOLCHAIN_PREFIX}-gcc)
 SET(CMAKE_CXX_COMPILER ${TOOLCHAIN_PREFIX}-g++)
@@ -313,6 +305,24 @@ build_rlottie() {
         git -C rlottie remote add origin https://github.com/Samsung/rlottie
         git -C rlottie fetch --quiet --depth=1 origin "$RLOTTIE_COMMIT"
         git -C rlottie checkout --quiet FETCH_HEAD
+    fi
+
+    # std::lround does not exist against this sysroot: libstdc++ leaves the whole
+    # C99 math block out of namespace std because the Harmattan glibc lacks the long
+    # double variants. ::lround is declared and works, so rewrite the call sites.
+    #
+    # Idempotent by construction - once rewritten there is no std::lround left to
+    # match, so a re-run is a no-op rather than an error.
+    local patched=0
+    for f in src/vector/vmatrix.cpp src/lottie/lottieparser.cpp; do
+        if [ -f "rlottie/$f" ] && grep -q "std::lround" "rlottie/$f"; then
+            sed -i 's/std::lround/lround/g' "rlottie/$f"
+            patched=$((patched + 1))
+        fi
+    done
+
+    if [ "$patched" -gt 0 ]; then
+        info "Rewrote std::lround -> lround in $patched rlottie file(s)."
     fi
 
     rm -rf build/rlottie
