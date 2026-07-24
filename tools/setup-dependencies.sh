@@ -360,22 +360,38 @@ build_rlottie() {
         info "Configuring rlottie for Harmattan..."
         write_toolchain_file "$rlottie_root/toolchain.cmake"
 
+        # -DARCH=arm is required, not optional. src/vector/pixman/CMakeLists.txt
+        # adds pixman-arm-neon-asm.S only under IF("${ARCH}" STREQUAL "arm"), and
+        # ARCH is never assigned anywhere in rlottie - it has to come from here.
+        # Meanwhile vdrawhelper_neon.cpp compiles its NEON path whenever the
+        # compiler defines __ARM_NEON__, which ours does by default (built
+        # --with-fpu=neon). Without ARCH you get the calls but not the assembly:
+        # "undefined reference to pixman_composite_over_n_8888_asm_neon".
+        # Setting it also buys the NEON raster fast paths on the Cortex-A8.
         cmake -B build/rlottie -S "$rlottie_root" \
             -DCMAKE_TOOLCHAIN_FILE="$rlottie_root/toolchain.cmake" \
+            -DARCH=arm \
             "${rlottie_options[@]}"
     else
         info "Configuring rlottie..."
         cmake -B build/rlottie -S "$rlottie_root" "${rlottie_options[@]}"
     fi
 
+    # Only the library. rlottie's CMakeLists adds example/ unconditionally - there is
+    # no option for it - and lottie2gif is dead weight here. Building the named
+    # target skips it.
     info "Building rlottie..."
-    cmake --build build/rlottie --parallel "$JOBS"
+    cmake --build build/rlottie --target rlottie --parallel "$JOBS"
 
+    # cmake --install, not make install: the generated `install` target depends on
+    # `all`, which would build example/lottie2gif again and undo the --target above.
+    # This installs what is already built. example/ has no install rules, so nothing
+    # is missing.
     if [[ "$ARGS" == "harmattan" ]]; then
         info "Installing rlottie to Harmattan SDK..."
-        make -C build/rlottie DESTDIR="$SDK_PATH/Madde/sysroots/harmattan_sysroot_10.2011.34-1_slim" install
+        DESTDIR="$SDK_PATH/Madde/sysroots/harmattan_sysroot_10.2011.34-1_slim" cmake --install build/rlottie
     else
-        make -C build/rlottie install
+        cmake --install build/rlottie
     fi
 
     echo "$want" > "$stamp"
