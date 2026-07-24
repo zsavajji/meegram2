@@ -7,15 +7,47 @@ useful for editing and for deploying to the device, but it does not drive the bu
 
 ---
 
+## The whole thing, start to finish
+
+```bash
+# 0. host packages - see section 1
+git submodule update --init --recursive
+
+# 1. cross-toolchain (long; only needed once)
+export QT_SDK_PATH=/path/to/QtSDK
+./tools/build-toolchain.sh
+
+export PATH="$HOME/cross/arm-harmattan/bin:$PATH"
+export TOOLCHAIN_PREFIX=arm-none-linux-gnueabi
+
+# 2. dependencies - note BOTH arguments are required
+./tools/setup-dependencies.sh harmattan "$QT_SDK_PATH"
+
+# 3. build
+cmake -B build \
+  -DCMAKE_TOOLCHAIN_FILE=tools/toolchain.cmake \
+  -DQT_SDK_PATH="$QT_SDK_PATH" \
+  -DBUILD_HARMATTAN=ON
+cmake --build build -j4
+
+# 4. package
+cmake --build build --target package
+```
+
+Everything below explains a step or a failure mode.
+
+---
+
 ## The one thing that will block you
 
 The Qt SDK's bundled MADDE toolchain is **GCC 4.4.1**, which predates C++11.
 This codebase is **C++23** (`CMAKE_CXX_STANDARD 23`) and uses `std::jthread`
 (`src/Client.cpp`), `std::ranges`, and `std::to_array` (`src/Emoji.cpp`).
 
-**You cannot build MeeGram with the stock SDK compiler**, and no combination of
-flags changes that. You need a modern `arm-none-linux-gnueabi` GCC targeting the
-Harmattan sysroot. `tools/build-toolchain.sh` builds one.
+::: danger You cannot build MeeGram with the stock SDK compiler
+No combination of flags changes this. You need a modern `arm-none-linux-gnueabi`
+GCC targeting the Harmattan sysroot — `tools/build-toolchain.sh` builds one.
+:::
 
 Only the *compiler* has to be modern. `CMakeLists.txt` links `-static-libstdc++`,
 so the C++ runtime is baked into the binary and the device's 2011 libstdc++ is
@@ -56,9 +88,11 @@ Two non-obvious entries:
   though the shipped binary uses the cross-built copies.
 - **`flex`, `bison`, `texinfo`** are only for `tools/build-toolchain.sh`.
 
-**Do not install Qt4 on the host.** `debian/control` lists `libqt4-dev`, but that
-is vestigial from the qmake era — `dh_shlibdeps` is commented out in `debian/rules`,
-so build-deps are not enforced. Qt comes from the sysroot.
+::: warning Do not install Qt4 on the host
+`debian/control` lists `libqt4-dev`, but that is vestigial from the qmake era —
+`dh_shlibdeps` is commented out in `debian/rules`, so build-deps are not enforced.
+Qt comes from the sysroot.
+:::
 
 ---
 
@@ -80,7 +114,7 @@ export QT_SDK_PATH=/path/to/QtSDK
 ./tools/build-toolchain.sh
 ```
 
-Builds binutils + GCC into `~/cross/arm-harmattan`, targeting
+Builds **binutils 2.42** + **GCC 14.2.0** into `~/cross/arm-harmattan`, targeting
 `$QT_SDK_PATH/Madde/sysroots/harmattan_sysroot_10.2011.34-1_slim`. Then:
 
 ```bash
@@ -89,10 +123,16 @@ export TOOLCHAIN_PREFIX=arm-none-linux-gnueabi
 ```
 
 Overridable: `PREFIX`, `TARGET`, `GCC_VERSION`, `BINUTILS_VERSION`, `ARM_ARCH`,
-`ARM_FPU`, `FLOAT_ABI`, `WORKDIR`, `SYSROOT`.
+`ARM_FPU`, `FLOAT_ABI`, `WORKDIR`, `SYSROOT`, `FORCE_REBUILD`.
 
-The script ends by compiling a C++23 probe for ARM, so a successful run proves the
-toolchain does what the project needs.
+**Re-running is cheap.** A stage whose output already exists in `$PREFIX` is
+skipped, so a second run only re-verifies. `FORCE_REBUILD=1` rebuilds regardless.
+
+The script ends by compiling a probe for ARM that exercises `std::to_array`,
+`std::ranges` and **`std::jthread`** — the last one matters, because it needs
+libstdc++ built with thread support, which is the usual casualty of a misconfigured
+cross build and only shows up at link time. The probe is compiled and linked, not
+run (it is an ARM binary), and the script asserts `file` reports it as ARM.
 
 ### Float ABI — hard, not softfp
 
@@ -116,8 +156,8 @@ This is set in two places, and **they must agree**:
 The toolchain's `--with-float` also makes everything `setup-dependencies.sh` builds
 (zlib, OpenSSL, TDLib) inherit hard float automatically.
 
-> Note: MeeGo 1.2 ARM used hard float, unlike Maemo 5 before it. N9-era recipes
-> found online that specify softfp are for the wrong lineage — trust `readelf`.
+> MeeGo 1.2 ARM used hard float, unlike Maemo 5 before it. N9-era recipes found
+> online that specify softfp are for the wrong lineage — trust `readelf`.
 
 ### If GCC fails to build
 
@@ -138,15 +178,64 @@ export TOOLCHAIN_PREFIX=arm-none-linux-gnueabi
 ./tools/setup-dependencies.sh harmattan "$QT_SDK_PATH"
 ```
 
-Downloads, verifies and cross-builds **zlib 1.3.1**, **OpenSSL 3.3.1** and **TDLib**
-(`MinSizeRel`, LTO), installing them into the sysroot.
+::: warning Both arguments are required
+The first is the target (`harmattan` or `simulator`); the second is the Qt SDK root.
+:::
+
+The script validates before building: `TOOLCHAIN_PREFIX` is set, `$TOOLCHAIN_PREFIX-gcc` is on `PATH`, an SDK path was
+given, and the sysroot exists.
+
+Cross-builds and installs into the sysroot:
+
+| Dependency | Version | Pinning |
+|---|---|---|
+| zlib | 1.3.2 | version + SHA256 |
+| OpenSSL | 3.5.7 | version + SHA256 |
+| TDLib | 1.8.66 | **commit SHA** (`TDLIB_COMMIT`) |
+
+TDLib tags almost nothing — its git tags stop at `v1.8.0` while it reports versions
+like 1.8.66 — so a commit is the only way to pin it. This used to be
+`git clone --depth=1` of master, meaning no two builds were guaranteed to use the
+same TDLib. Override with `TDLIB_COMMIT=<sha>`; bump deliberately, after verifying
+a build runs on the device.
+
+OpenSSL 3.5 is the current **LTS** branch (supported to 2030-04-08). The previous
+pin, 3.3.1, sat on a branch that went end-of-support on 2026-04-09.
 
 **rlottie is not covered by this script.** `CMakeLists.txt` has
 `find_package(rlottie REQUIRED)`, and there is no `Findrlottie.cmake` in-tree, so
 you must cross-build and install it yourself and may need to pass `rlottie_DIR`.
 
-TDLib is the heavy part — its generated sources want several GB of RAM. The script
-uses `make -j4`; lower it if you hit OOM.
+### What a re-run does
+
+| Stage | Re-run |
+|---|---|
+| zlib, OpenSSL | **Skipped** if `build/*/.built-version` matches the version in the script |
+| TDLib | **Full rebuild, always** (`rm -rf build/generate build/tdlib`) |
+
+The version stamp means bumping a version in the script still triggers a rebuild,
+rather than silently linking against the stale library. `FORCE_REBUILD=1` forces
+both. TDLib's wipe is deliberate: a stale CMake cache in a cross-build is a good way
+to get a subtly wrong binary.
+
+### Parallelism
+
+All three dependencies build with `-j$JOBS`, default **4**:
+
+```bash
+JOBS=8 ./tools/setup-dependencies.sh harmattan "$QT_SDK_PATH"   # more cores
+JOBS=2 ./tools/setup-dependencies.sh harmattan "$QT_SDK_PATH"   # less RAM
+```
+
+TDLib previously built **fully serial** — `cmake --build` defaults to one job with
+the Makefile generator, so the longest build got one core while zlib got four.
+
+::: warning Parallelism costs RAM more than CPU here
+TDLib's generated `td_api` translation units routinely want a gigabyte or more
+each, and `TD_ENABLE_LTO=ON` adds link-time pressure on top. `JOBS=4` is
+comfortable on 8 GB. If the build is OOM-killed — usually a bare `Killed` message
+partway through — drop to `JOBS=2`.
+:::
 
 ---
 
@@ -192,46 +281,13 @@ Runs `mad dpkg-buildpackage -nc -uc -us` in the build directory. CMake copies
 `debian/` there first, and `debian/rules` installs via
 `cmake --build . --target install DESTDIR=debian/meegram`.
 
-**`-nc` means no clean — packaging does not compile.** Always build first.
+::: warning `-nc` means no clean — packaging does not compile
+Always build first. `dpkg-buildpackage` only wraps what is already in the build
+directory.
+:::
 
 The `.deb` appears one level above the build directory. Install on device with
 `dpkg -i`. Layout: binary → `/opt/meegram/bin`, desktop file →
 `/usr/share/applications`, icon → `/usr/share/icons/hicolor/80x80/apps`.
 
 ---
-
-## Known rough edges
-
-**`tools/toolchain.cmake` has no sysroot.** It sets only the compiler names — no
-`CMAKE_SYSROOT`, no `CMAKE_FIND_ROOT_PATH`. If your cross-GCC does not have the
-sysroot baked in, `find_package(Qt4)` may match your *host* Qt and fail
-confusingly. The complication is that the sysroot's `qmake` is an ARM binary and
-cannot run on the host, so `FindQt4` needs a host-runnable qmake (MADDE supplies a
-wrapper; a standalone toolchain needs `QT_QMAKE_EXECUTABLE` pointed somewhere
-sensible).
-
-**MADDE binaries are 32-bit x86.** On a 64-bit host:
-
-```bash
-sudo dpkg --add-architecture i386
-sudo apt install libc6:i386 libstdc++6:i386 zlib1g:i386
-```
-
-**`debian/compat` is 7**, which modern debhelper treats as deprecated and may
-refuse. Packaging normally runs inside MADDE's own environment, so host debhelper
-may never be used — but if you see a compat error, bumping that file is the fix.
-
-**A "slim" sysroot may lack development headers.** `tools/build-toolchain.sh`
-checks for `usr/include/features.h` and stops early rather than failing deep into a
-GCC build.
-
----
-
-## Verification status
-
-Everything above is derived from `CMakeLists.txt`, `tools/setup-dependencies.sh`,
-`debian/rules` and the sysroot's own ELF attributes. The float ABI was confirmed by
-`readelf` against a real Harmattan sysroot. The rest has **not** been validated end
-to end in one pass — there is no CI in this repository and no recorded build
-command, so treat the first run as a shakedown and expect to iterate, particularly
-around rlottie and the sysroot question above.

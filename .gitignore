@@ -56,5 +56,12 @@ compile_commands.json
 # macOS
 .DS_Store
 
+# VitePress docs site (self-contained in docs/).
+# The **/ prefix matters: a pattern containing a slash is anchored to this file's
+# directory, so a bare .vitepress/dist/ would only match one at the repo root.
+node_modules/
+**/.vitepress/dist/
+**/.vitepress/cache/
+
 # graphify: generated knowledge-graph output, rebuilt from the sources
 graphify-out/
