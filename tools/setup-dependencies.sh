@@ -138,15 +138,19 @@ SET(CMAKE_SYSTEM_NAME Linux)
 SET(CMAKE_SYSTEM_PROCESSOR arm)
 
 # libstdc++ only pulls the C99 math functions (lround, trunc, nearbyint, ...) into
-# namespace std when _GLIBCXX_USE_C99_MATH_TR1 is defined, and that is decided when
+# namespace std when the corresponding macro is defined, and that is decided when
 # GCC is configured, by probing the target's libc. Against the 2011 Harmattan
 # headers that probe fails, so <cmath> declares ::lround but not std::lround and
-# rlottie fails to compile with "'lround' is not a member of 'std'".
+# rlottie fails with "'lround' is not a member of 'std'".
 #
 # The symbols themselves are present - glibc has had lround since 2.1 - so only the
-# declaration is missing, and defining the macro is enough. FLAGS_INIT seeds the
-# flags rather than replacing whatever CMake or the project sets.
-SET(CMAKE_CXX_FLAGS_INIT "-D_GLIBCXX_USE_C99_MATH_TR1=1")
+# declaration is missing and defining the macro is enough.
+#
+# Both spellings are set on purpose. GCC 13 renamed the guard: up to 12 it is
+# _GLIBCXX_USE_C99_MATH_TR1, from 13 onwards <cmath> tests
+# _GLIBCXX_USE_C99_MATH_FUNCS. Defining only the old name is silently inert on
+# GCC 14, which is exactly how this first appeared to "not work".
+SET(CMAKE_CXX_FLAGS_INIT "-D_GLIBCXX_USE_C99_MATH_FUNCS=1 -D_GLIBCXX_USE_C99_MATH_TR1=1")
 
 SET(CMAKE_C_COMPILER   ${TOOLCHAIN_PREFIX}-gcc)
 SET(CMAKE_CXX_COMPILER ${TOOLCHAIN_PREFIX}-g++)
