@@ -349,13 +349,19 @@ build_rlottie() {
     # LIB_INSTALL_DIR is pinned because rlottie defaults it to a bare "/usr/lib"
     # while installing its headers to a *relative* "include", i.e. under
     # CMAKE_INSTALL_PREFIX. Left alone the install splits itself across
-    # <sysroot>/usr/lib and <sysroot>/usr/local/include. Setting both puts
-    # everything under /usr/local, matching where TDLib installs.
+    # <sysroot>/usr/lib and <sysroot>/usr/local/include.
+    #
+    # It must be RELATIVE. An absolute install DESTINATION is baked verbatim into
+    # the generated rlottieTargets.cmake, so the imported target points at
+    # /usr/local/lib/librlottie.a on the host rather than inside the sysroot, and
+    # find_package fails with "references the file ... but this file does not
+    # exist". Relative paths are resolved against _IMPORT_PREFIX, which CMake
+    # derives from wherever the config file is actually found.
     local rlottie_options=(
         -DCMAKE_BUILD_TYPE=MinSizeRel
         -DCMAKE_POLICY_VERSION_MINIMUM=3.5
         -DCMAKE_INSTALL_PREFIX=/usr/local
-        -DLIB_INSTALL_DIR=/usr/local/lib
+        -DLIB_INSTALL_DIR=lib
         -DBUILD_SHARED_LIBS=OFF
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON
         -DLOTTIE_MODULE=OFF
