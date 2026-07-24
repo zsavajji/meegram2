@@ -34,7 +34,16 @@ if (BUILD_HARMATTAN)
     pkg_check_modules(boostable QUIET qdeclarative-boostable)
 endif()
 
-set(QML_IMPORT_PATH "/home/insider/QtSDK/Simulator/Qt/gcc/imports" CACHE STRING "")
+# Path to the Qt SDK install (the directory containing Madde/ and Simulator/).
+# Settable with -DQT_SDK_PATH=... or the QT_SDK_PATH environment variable.
+if(NOT DEFINED QT_SDK_PATH AND DEFINED ENV{QT_SDK_PATH})
+    set(QT_SDK_PATH "$ENV{QT_SDK_PATH}")
+endif()
+
+# Consumed only by Qt Creator's QML code model - it has no effect on the build.
+# Derived from QT_SDK_PATH rather than hardcoding one developer's home directory,
+# which is what it used to do.
+set(QML_IMPORT_PATH "${QT_SDK_PATH}/Simulator/Qt/gcc/imports" CACHE STRING "QML import path for the Qt Creator code model")
 
 include(cmake/qr_code_generator.cmake)
 
