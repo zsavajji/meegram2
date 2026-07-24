@@ -226,11 +226,15 @@ if (BUILD_HARMATTAN)
     # configure time, so configuring before the dependencies finish building silently
     # bakes in an empty list and the package ships without OpenSSL. This form is
     # evaluated during install, and handles DESTDIR correctly.
+    # Versioned sonames only. readelf shows the binary needs libssl.so.3 and
+    # libcrypto.so.3; the unversioned libssl.so / libcrypto.so are link-time names.
+    # setup-dependencies.sh copies with plain cp, so those are full duplicates rather
+    # than symlinks - shipping them would add ~5.7 MB of the same bytes twice.
     install(DIRECTORY "${MEEGRAM_OPENSSL_LIB_DIR}/"
             DESTINATION /opt/meegram/lib
             FILES_MATCHING
-                PATTERN "libssl.so*"
-                PATTERN "libcrypto.so*")
+                PATTERN "libssl.so.*"
+                PATTERN "libcrypto.so.*")
 
     add_custom_target(package
         COMMAND mad dpkg-buildpackage -nc -uc -us
