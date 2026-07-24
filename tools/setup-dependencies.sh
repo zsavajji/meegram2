@@ -315,8 +315,15 @@ build_rlottie() {
     #                       the binary.
     # POSITION_INDEPENDENT_CODE - required: meegram links -pie, and a non-PIC static
     #                       archive fails to link into a PIE executable on ARM.
+    #
+    # CMAKE_POLICY_VERSION_MINIMUM - rlottie still declares
+    # cmake_minimum_required(VERSION 3.3), and CMake 4.x removed compatibility below
+    # 3.5, so configuring fails outright without this. It also covers rlottie's
+    # bundled freetype/pixman/stb subprojects. Harmless on older CMake, which just
+    # reports it as an unused variable. TDLib declares 3.10 and needs no such help.
     local rlottie_options=(
         -DCMAKE_BUILD_TYPE=MinSizeRel
+        -DCMAKE_POLICY_VERSION_MINIMUM=3.5
         -DBUILD_SHARED_LIBS=OFF
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON
         -DLOTTIE_MODULE=OFF

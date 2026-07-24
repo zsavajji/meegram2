@@ -23,6 +23,13 @@ Fixed. The CMake options were built as a string containing escaped quotes and th
 expanded unquoted, so CMake received `-DOPENSSL_INCLUDE_DIR="/path"` with the quotes
 inside the value. They are bash arrays now. If you see this, your `tools/` is stale.
 
+**`Compatibility with CMake < 3.5 has been removed from CMake` (rlottie)**
+rlottie still declares `cmake_minimum_required(VERSION 3.3)` and CMake 4.x dropped
+support below 3.5. The script passes `-DCMAKE_POLICY_VERSION_MINIMUM=3.5`, which is
+CMake's own documented escape hatch and also covers rlottie's bundled
+freetype/pixman/stb subprojects. TDLib declares 3.10 and is unaffected. If you see
+this, your `tools/` is stale.
+
 **`Found neither 'TD_HAS_MMSG 1' nor 'TD_HAS_MMSG 0'`**
 The `td/` checkout is reused across runs, so the patch has to be idempotent — this
 error now means the macro genuinely moved upstream, not that it was already applied.
