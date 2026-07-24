@@ -222,18 +222,15 @@ if (BUILD_HARMATTAN)
     set(MEEGRAM_OPENSSL_LIB_DIR "${CMAKE_SOURCE_DIR}/build/crypto/lib"
         CACHE PATH "Directory holding the cross-built libssl/libcrypto to ship")
 
-    file(GLOB MEEGRAM_OPENSSL_LIBS
-        "${MEEGRAM_OPENSSL_LIB_DIR}/libssl.so*"
-        "${MEEGRAM_OPENSSL_LIB_DIR}/libcrypto.so*")
-
-    if(MEEGRAM_OPENSSL_LIBS)
-        install(FILES ${MEEGRAM_OPENSSL_LIBS} DESTINATION /opt/meegram/lib)
-    else()
-        message(WARNING
-            "No libssl/libcrypto found in ${MEEGRAM_OPENSSL_LIB_DIR}. The package will "
-            "build but the app will fail on the device with 'libcrypto.so.3: cannot open "
-            "shared object file'. Set -DMEEGRAM_OPENSSL_LIB_DIR to where they live.")
-    endif()
+    # install(DIRECTORY), not file(GLOB) + install(FILES): a glob is evaluated at
+    # configure time, so configuring before the dependencies finish building silently
+    # bakes in an empty list and the package ships without OpenSSL. This form is
+    # evaluated during install, and handles DESTDIR correctly.
+    install(DIRECTORY "${MEEGRAM_OPENSSL_LIB_DIR}/"
+            DESTINATION /opt/meegram/lib
+            FILES_MATCHING
+                PATTERN "libssl.so*"
+                PATTERN "libcrypto.so*")
 
     add_custom_target(package
         COMMAND mad dpkg-buildpackage -nc -uc -us
