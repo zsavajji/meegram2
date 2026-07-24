@@ -22,9 +22,13 @@ ChatModel::ChatModel(std::unique_ptr<ChatList> list, std::shared_ptr<Locale> loc
     , m_storageManager(std::move(storage))
 {
     connect(&m_sortTimer, SIGNAL(timeout()), this, SLOT(sortChats()));
+    connect(&m_retryTimer, SIGNAL(timeout()), this, SLOT(requestMoreChats()));
 
     m_sortTimer.setInterval(500);
     m_sortTimer.setSingleShot(true);
+
+    m_retryTimer.setInterval(500);
+    m_retryTimer.setSingleShot(true);
 
     connect(m_storageManager.get(), SIGNAL(chatUpdated(qlonglong)), SLOT(handleChatItem(qlonglong)));
     connect(m_storageManager.get(), SIGNAL(chatPositionUpdated(qlonglong)), SLOT(handleChatPosition(qlonglong)));
@@ -253,11 +257,6 @@ void ChatModel::handleChatsLoaded(bool listExhausted)
 {
     m_requestPending = false;
 
-    if (listExhausted)
-    {
-        m_listFullyLoaded = true;
-    }
-
     // Seed once from whatever StorageManager accumulated while this batch loaded.
     // Later batches arrive through handleChatItem/handleChatPosition instead, so
     // the model is never reset out from under a scrolling view.
@@ -265,6 +264,25 @@ void ChatModel::handleChatsLoaded(bool listExhausted)
     {
         m_populated = true;
         populate();
+    }
+
+    // A 404 means "no more chats to load". On a cold cache TDLib answers that before
+    // the server has pushed anything, because it genuinely knows of none locally -
+    // so latching it here left the list permanently empty after a fresh install.
+    // Only believe it once the model holds something; otherwise retry, which is what
+    // the old 500ms loop did implicitly. Bounded, so an account with no chats at all
+    // stops asking instead of polling forever.
+    if (listExhausted && m_chats.empty() && m_emptyRetries < MaxEmptyRetries)
+    {
+        ++m_emptyRetries;
+        m_retryTimer.start();
+
+        return;  // stay in the loading state; the spinner is still correct
+    }
+
+    if (listExhausted)
+    {
+        m_listFullyLoaded = true;
     }
 
     if (m_loading)
@@ -332,6 +350,7 @@ void ChatModel::refresh()
     m_loading = true;
     m_populated = false;
     m_listFullyLoaded = false;
+    m_emptyRetries = 0;
 
     clear();
 

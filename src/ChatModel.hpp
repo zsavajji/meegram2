@@ -70,6 +70,8 @@ private slots:
     // thread - see the note in requestMoreChats().
     void handleChatsLoaded(bool listExhausted);
 
+    void requestMoreChats();
+
     void handleChatItem(qlonglong chatId);
     void handleChatPosition(qlonglong chatId);
 
@@ -87,7 +89,6 @@ private:
 
     void rebuildRowIndex();
     void scheduleSort();
-    void requestMoreChats();
 
     // Adds a chat that has appeared in this list but is not in the model yet.
     // Returns true if it was inserted.
@@ -106,6 +107,12 @@ private:
     bool m_requestPending{false};
     bool m_listFullyLoaded{false};
 
+    // On a cold cache TDLib answers 404 before the server has pushed any chats, so
+    // an exhausted reply is only believed once the model actually holds something.
+    // Bounded so a genuinely empty account stops asking.
+    QTimer m_retryTimer;
+    int m_emptyRetries{0};
+
     int m_count{};
 
     QTimer m_sortTimer;
@@ -114,6 +121,8 @@ private:
 
     std::shared_ptr<Locale> m_locale;
     std::shared_ptr<StorageManager> m_storageManager;
+
+    static constexpr int MaxEmptyRetries = 10;
 
     std::vector<std::weak_ptr<Chat>> m_chats;
 
