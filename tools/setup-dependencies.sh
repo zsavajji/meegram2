@@ -228,16 +228,22 @@ build_tdlib() {
         local config_header="td/tdutils/td/utils/port/config.h"
 
         # The N9's kernel predates recvmmsg/sendmmsg. sed exits 0 even when it
-        # matches nothing, so check first - otherwise a TDLib restructure would
-        # silently produce a binary that fails on the device instead of here.
-        if ! grep -q "TD_HAS_MMSG 1" "$config_header"; then
-            error "Expected 'TD_HAS_MMSG 1' in $config_header, but it is not there."
+        # matches nothing, so verify the macro is actually there - otherwise a TDLib
+        # restructure would silently produce a binary that fails on the device.
+        #
+        # The patch has to be idempotent: td/ is reused across runs, so on a second
+        # run the macro is already 0 and "no match" means "already done", not
+        # "upstream changed".
+        if grep -q "TD_HAS_MMSG 0" "$config_header"; then
+            info "TD_HAS_MMSG already disabled for Harmattan."
+        elif grep -q "TD_HAS_MMSG 1" "$config_header"; then
+            sed -i 's/TD_HAS_MMSG 1/TD_HAS_MMSG 0/g' "$config_header"
+            success "Disabled TD_HAS_MMSG for Harmattan."
+        else
+            error "Found neither 'TD_HAS_MMSG 1' nor 'TD_HAS_MMSG 0' in $config_header."
             error "TDLib has likely moved or renamed it; the Harmattan patch needs revisiting."
             exit 1
         fi
-
-        sed -i 's/TD_HAS_MMSG 1/TD_HAS_MMSG 0/g' "$config_header"
-        success "Disabled TD_HAS_MMSG for Harmattan."
     fi
 
     rm -rf build/generate build/tdlib
