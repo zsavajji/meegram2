@@ -9,7 +9,6 @@
         <file>qml/components/MessageBubble.qml</file>
         <file>qml/components/MessageDelegate.qml</file>
         <file>qml/components/MyCountBubble.qml</file>
-        <file>qml/components/Ripple.qml</file>
         <file>qml/components/ServiceMessageDelegate.qml</file>
         <file>qml/components/TopBar.qml</file>
         <file>qml/components/UIConstants.js</file>

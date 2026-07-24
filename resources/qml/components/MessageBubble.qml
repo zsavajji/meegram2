@@ -35,8 +35,9 @@ Item {
             anchors.fill: parent
 
             onClicked:  {
-                console.log(model.id)
-                console.log(utils.replaceEmoji(model.content.formattedText))
+                // Dropped two debug console.log calls here; the second ran the full
+                // emoji substitution over the message body on every tap purely to
+                // produce a log line.
                 root.clicked()
             }
             onPressAndHold: {

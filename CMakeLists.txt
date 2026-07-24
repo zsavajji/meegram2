@@ -1,6 +1,17 @@
 cmake_minimum_required(VERSION 3.20)
 project(MeeGram VERSION 0.1.7 LANGUAGES CXX)
 
+# Without this an unset CMAKE_BUILD_TYPE means no -O flag at all, i.e. -O0.
+# This codebase leans on std::ranges views and templates, which -O0 punishes hard.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS Debug Release RelWithDebInfo MinSizeRel)
+endif()
+
+# -O2 rather than -O3: the Cortex-A8 has a small i-cache and -O3's extra inlining
+# and unrolling usually costs more in misses than it wins in instruction count.
+set(CMAKE_CXX_FLAGS_RELEASE "-O2 -DNDEBUG")
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -10,7 +21,7 @@ set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/sanitizers-cmake/cmake" ${CMAKE
 
 find_package(Td REQUIRED)
 find_package(rlottie REQUIRED)
-find_package(Qt4 4.7.4 COMPONENTS QtCore QtDBus QtGui QtSvg QtXml QtDeclarative REQUIRED)
+find_package(Qt4 4.7.4 COMPONENTS QtCore QtDBus QtGui QtOpenGL QtSvg QtXml QtDeclarative REQUIRED)
 find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
@@ -40,7 +51,6 @@ set(SRC_FILES
     src/Client.cpp
     src/CountryModel.cpp
     src/Emoji.cpp
-    src/EmojiModel.cpp
     src/File.cpp
     src/LanguagePackInfoModel.cpp
     src/Localization.cpp
@@ -74,7 +84,6 @@ set(HEADER_FILES
     src/Common.hpp
     src/CountryModel.hpp
     src/Emoji.hpp
-    src/EmojiModel.hpp
     src/File.hpp
     src/LanguagePackInfoModel.hpp
     src/Localization.hpp
@@ -85,6 +94,7 @@ set(HEADER_FILES
     src/MessageService.hpp
     src/PluralRules.hpp
     src/QrCodeItem.hpp
+    src/ScopeTimer.hpp
     src/Settings.hpp
     src/StorageManager.hpp
     src/Supergroup.hpp
@@ -112,6 +122,25 @@ set_target_properties(meegram PROPERTIES AUTOMOC ON AUTORCC ON)
 
 target_compile_options(meegram PRIVATE -Wall -Wextra -pedantic $<IF:$<CONFIG:Debug>, -Werror, -Wno-psabi>)
 
+# Let the linker drop unreferenced code/data. Matters here because TDLib is linked
+# statically and pulls in a large object set.
+target_compile_options(meegram PRIVATE $<$<NOT:$<CONFIG:Debug>>:-ffunction-sections -fdata-sections>)
+target_link_options(meegram PRIVATE $<$<NOT:$<CONFIG:Debug>>:-Wl,--gc-sections>)
+
+# qDebug()/qWarning() go to syslog on Harmattan; there are live call sites on the
+# translation and language-pack paths. Compile them out of non-debug builds.
+target_compile_definitions(meegram PRIVATE $<$<NOT:$<CONFIG:Debug>>:QT_NO_DEBUG_OUTPUT>)
+
+# Opt-in profiling: enables the ScopeTimer instrumentation in src/ScopeTimer.hpp.
+option(MEEGRAM_PROFILE "Enable on-device scope timing instrumentation" OFF)
+target_compile_definitions(meegram PRIVATE $<$<BOOL:${MEEGRAM_PROFILE}>:MEEGRAM_PROFILE>)
+
+# Back QDeclarativeView with a QGLWidget viewport. On by default, but exposed as a
+# switch because it is the one change here whose effect on Harmattan's compositor
+# is worth A/B testing on the real device.
+option(MEEGRAM_GL_VIEWPORT "Use a QGLWidget viewport for QDeclarativeView" ON)
+target_compile_definitions(meegram PRIVATE $<$<BOOL:${MEEGRAM_GL_VIEWPORT}>:MEEGRAM_GL_VIEWPORT>)
+
 target_link_libraries(meegram PRIVATE
     Lib::QRCode
     Td::TdStatic
@@ -120,15 +149,28 @@ target_link_libraries(meegram PRIVATE
     Qt4::QtDBus
     Qt4::QtDeclarative
     Qt4::QtGui
+    Qt4::QtOpenGL
     Qt4::QtSvg
     Qt4::QtXml
     ZLIB::ZLIB
     Threads::Threads
 )
 
-add_sanitizers(meegram)
+# ASan costs 2-3x runtime and a large RSS increase - never let it reach the device.
+# The COMMAND check also keeps configure working when the sanitizers-cmake submodule
+# has not been initialised, which is the state a fresh clone starts in.
+if (NOT BUILD_HARMATTAN AND COMMAND add_sanitizers)
+    add_sanitizers(meegram)
+endif()
 
 if (BUILD_HARMATTAN)
+    # Standard Harmattan/MADDE target ABI for the N9's OMAP3630 Cortex-A8.
+    # -mthumb shrinks code (helps the small i-cache); NEON needs softfp to be usable.
+    # If the mad toolchain disagrees on the float ABI this fails loudly at link,
+    # which is the intended behaviour - do not paper over it.
+    target_compile_options(meegram PRIVATE
+        -march=armv7-a -mtune=cortex-a8 -mfpu=neon -mfloat-abi=softfp -mthumb)
+
     target_compile_options(meegram PRIVATE ${boostable_CFLAGS})
     target_include_directories(meegram PRIVATE ${boostable_INCLUDE_DIRS})
 

@@ -1,0 +1,1 @@
+{"nodes": [{"id": "storagemanager_storagemanager", "label": "StorageManager", "file_type": "code", "source_file": "src/StorageManager.cpp"}], "edges": [{"source": "storagemanager_storagemanager", "target": "user_user", "relation": "references", "confidence": "EXTRACTED", "confidence_score": 1.0, "source_file": "src/StorageManager.cpp"}], "hyperedges": []}

@@ -7,6 +7,10 @@
 #include <QModelIndex>
 #include <QTextCodec>
 
+#ifdef MEEGRAM_GL_VIEWPORT
+#include <QGLWidget>
+#endif
+
 #include "AppManager.hpp"
 #include "Authorization.hpp"
 #include "Chat.hpp"
@@ -35,7 +39,11 @@ Q_DECL_EXPORT int main(int argc, char *argv[])
     QCoreApplication::setOrganizationName("insider");
 
     QFontDatabase::addApplicationFont(":/fonts/Icons.ttf");
-    QFontDatabase::addApplicationFont(":/fonts/NotoEmoji-Regular.ttf");
+    // NotoEmoji-Regular.ttf was loaded here but is in neither resources/fonts.qrc nor
+    // on disk, so the call always failed silently. Emoji are rendered as <img> tags by
+    // Utils::replaceEmoji, not by a font.
+    // NotoSansSymbols is kept: nothing names it via font.family, but Qt uses it as an
+    // automatic fallback for glyphs missing from the UI font.
     QFontDatabase::addApplicationFont(":/fonts/NotoSansSymbols-Regular.ttf");
 
     QTextCodec::setCodecForCStrings(QTextCodec::codecForName("UTF-8"));
@@ -88,6 +96,25 @@ Q_DECL_EXPORT int main(int argc, char *argv[])
     qmlRegisterUncreatableType<MessageService>("MyComponent", 1, 0, "MessageService", "MessageService cannot be created from QML.");
 
     QDeclarativeView viewer;
+
+#ifdef MEEGRAM_GL_VIEWPORT
+    // QDeclarativeView is a QGraphicsView, so without a GL viewport every repaint,
+    // clip region and offscreen composite is rasterised on the CPU. Backing it with
+    // a QGLWidget is the standard Harmattan configuration for the SGX530.
+    //
+    // A GL viewport cannot do partial updates, hence FullViewportUpdate; the opaque
+    // attributes stop Qt from clearing the background before each frame.
+    // Configure with -DMEEGRAM_GL_VIEWPORT=OFF to A/B this against software paint.
+    auto *glWidget = new QGLWidget;
+    glWidget->setAutoFillBackground(false);
+
+    viewer.setViewport(glWidget);
+    viewer.setViewportUpdateMode(QGraphicsView::FullViewportUpdate);
+    viewer.setAttribute(Qt::WA_OpaquePaintEvent);
+    viewer.setAttribute(Qt::WA_NoSystemBackground);
+    viewer.viewport()->setAttribute(Qt::WA_OpaquePaintEvent);
+    viewer.viewport()->setAttribute(Qt::WA_NoSystemBackground);
+#endif
 
     AppManager appManager;
     Utils utils;

@@ -47,7 +47,7 @@ public:
         return m_category;
     }
 
-    static const std::array<Emoji, 3773> emojis();
+    static const std::array<Emoji, 3773> &emojis();
 
 private:
     std::u16string_view m_unicode;

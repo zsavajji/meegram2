@@ -1,8 +1,11 @@
 #include "Emoji.hpp"
 
-const std::array<Emoji, 3773> Emoji::emojis()
+// Returned by reference: this array is ~3773 * sizeof(Emoji) and used to be copied
+// out on every call. As a function-local static of a type with constexpr
+// constructors it can be constant-initialised straight into .rodata.
+const std::array<Emoji, 3773> &Emoji::emojis()
 {
-    return std::to_array<Emoji>({
+    static const std::array<Emoji, 3773> table = std::to_array<Emoji>({
         Emoji(u"\U0001F600", u"1f600.png", u"grinning face", Emotion),
         Emoji(u"\U0001F603", u"1f603.png", u"grinning face with big eyes", Emotion),
         Emoji(u"\U0001F604", u"1f604.png", u"grinning face with smiling eyes", Emotion),
@@ -3777,4 +3780,6 @@ const std::array<Emoji, 3773> Emoji::emojis()
         Emoji(u"\U0001F3F4\U000E0067\U000E0062\U000E0073\U000E0063\U000E0074\U000E007F", u"1f3f4-e0067-e0062-e0073-e0063-e0074-e007f.png", u"flag: Scotland", Flags),
         Emoji(u"\U0001F3F4\U000E0067\U000E0062\U000E0077\U000E006C\U000E0073\U000E007F", u"1f3f4-e0067-e0062-e0077-e006c-e0073-e007f.png", u"flag: Wales", Flags),
     });
+
+    return table;
 }

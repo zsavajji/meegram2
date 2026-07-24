@@ -4,6 +4,7 @@
 #include "ChatPosition.hpp"
 
 #include <QAbstractListModel>
+#include <QHash>
 #include <QTimer>
 
 #include <memory>
@@ -68,6 +69,20 @@ private slots:
     void handleChatPosition(qlonglong chatId);
 
 private:
+    // The three roles whose values cost a formatter call. QML1 has no per-row role
+    // cache, so a delegate reading 8 properties calls data() 8 times; without this
+    // every one of those reads re-ran getChatTitle/getMessageDate/getContent.
+    struct FormattedRow
+    {
+        QString title;
+        QString date;
+        QString lastMessage;
+        bool valid{false};
+    };
+
+    void rebuildRowIndex();
+    const FormattedRow &formattedRow(const std::shared_ptr<Chat> &chat) const;
+
     bool m_loading{true};
 
     int m_count{};
@@ -81,4 +96,11 @@ private:
     std::shared_ptr<StorageManager> m_storageManager;
 
     std::vector<std::weak_ptr<Chat>> m_chats;
+
+    // chatId -> row in m_chats. Replaces a linear scan that called weak_ptr::lock()
+    // (an atomic CAS) on every element to resolve one update.
+    QHash<qlonglong, int> m_rowById;
+
+    // Keyed by chatId, so reordering the list does not invalidate it.
+    mutable QHash<qlonglong, FormattedRow> m_formatted;
 };

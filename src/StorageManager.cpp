@@ -89,10 +89,13 @@ std::shared_ptr<User> StorageManager::user(qlonglong userId) const noexcept
 
 qlonglong StorageManager::myId() const noexcept
 {
-    if (const auto value = getOption("my_id"); not value.isNull())
-        return value.toLongLong();
+    if (m_myId != 0)
+        return m_myId;
 
-    return 0;
+    if (const auto value = getOption("my_id"); not value.isNull())
+        m_myId = value.toLongLong();
+
+    return m_myId;
 }
 
 QVariant StorageManager::getOption(const QString &name) const noexcept
@@ -330,6 +333,7 @@ void StorageManager::handleResult(td::td_api::Object *object)
                 }
             };
             m_options.insert(QString::fromStdString(update->name_), optionValue(std::move(update->value_)));
+            m_myId = 0;  // invalidate the myId() cache; cheap, options change rarely
             break;
         }
         default:

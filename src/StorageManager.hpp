@@ -65,6 +65,11 @@ private slots:
 private:
     QVariantMap m_options;
 
+    // myId() is reached once per chat row via getChatTitle()->isMeChat(), and each
+    // call built a QString from a literal to do a map lookup. Reset whenever any
+    // option changes; options are pushed rarely.
+    mutable qlonglong m_myId{0};
+
     std::shared_ptr<Client> m_client;
 
     std::vector<std::shared_ptr<ChatFolderInfo>> m_chatFolders;

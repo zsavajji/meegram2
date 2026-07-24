@@ -13,7 +13,10 @@ Item {
     ListView {
         id: listView
         anchors.fill: parent
-        cacheBuffer: listView.height * 2
+        // height * 2 kept roughly 36 extra ChatItem delegates alive off-screen, each
+        // holding a decoded avatar. Half a screen either side is plenty of runway for
+        // flicking and costs a fraction of the memory.
+        cacheBuffer: listView.height / 2
         delegate: ChatItem {}
         model: root.model
         snapMode: ListView.SnapToItem

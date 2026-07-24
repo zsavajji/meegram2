@@ -1,0 +1,1 @@
+{"nodes": [{"id": "chat_chat", "label": "Chat", "file_type": "code", "source_file": "src/Chat.cpp"}], "edges": [{"source": "chat_chat", "target": "message_message", "relation": "references", "confidence": "EXTRACTED", "confidence_score": 1.0, "source_file": "src/Chat.cpp"}], "hyperedges": []}

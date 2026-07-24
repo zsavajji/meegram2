@@ -1,0 +1,1 @@
+{"nodes": [{"id": "qrcodeitem_qrcodeitem", "label": "QrCodeItem", "file_type": "code", "source_file": "src/QrCodeItem.cpp"}], "edges": [{"source": "qrcodeitem_qrcodeitem", "target": "cmakelists_meegram", "relation": "references", "confidence": "INFERRED", "confidence_score": 0.9, "source_file": "src/QrCodeItem.cpp"}], "hyperedges": []}

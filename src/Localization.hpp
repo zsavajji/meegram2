@@ -37,6 +37,12 @@ private:
     QString m_languagePlural;
     QHash<QString, QString> m_languagePack;
 
+    // getString() backs every tr() in the process and its output is a pure function
+    // of the key plus the loaded language pack. Memoised here because the transform
+    // costs two std::regex executions and ~8 allocations per call. Cleared whenever
+    // the language pack is replaced.
+    mutable QHash<QString, QString> m_stringCache;
+
     std::unique_ptr<PluralRules> m_currentPluralRules;
     std::unordered_map<QString, std::unique_ptr<PluralRules>> m_allRules;
 };

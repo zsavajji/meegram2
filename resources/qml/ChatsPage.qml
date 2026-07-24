@@ -146,10 +146,35 @@ Page {
                         id: folderTabPage
                         anchors.fill: parent
 
-                        ChatListView {
-                            model: modelData
-                            clip: true
+                        // Captured here so the lazily-created ChatListView below does
+                        // not have to resolve modelData from the Repeater scope.
+                        property variant folderModel: modelData
+
+                        // Repeater is eager: without this, opening the chats page built
+                        // a ChatListView for every folder, each running model.refresh()
+                        // and its own 200ms populate timer, while only one tab is ever
+                        // visible. Build a folder's list the first time its tab shows.
+                        Loader {
+                            id: folderListLoader
+                            anchors.fill: parent
                         }
+
+                        Component {
+                            id: folderListComponent
+
+                            ChatListView {
+                                model: folderTabPage.folderModel
+                                clip: true
+                            }
+                        }
+
+                        function ensureLoaded() {
+                            if (visible && !folderListLoader.sourceComponent)
+                                folderListLoader.sourceComponent = folderListComponent;
+                        }
+
+                        onVisibleChanged: ensureLoaded()
+                        Component.onCompleted: ensureLoaded()
                     }
                 }
 

@@ -321,6 +321,25 @@ void ChatManager::updateFolderModels() noexcept
 {
     const auto &chatFolders = m_storage->chatFolders();
 
+    // This runs from the constructor and again on every updateChatFolders push, and
+    // previously only ever appended. Each leftover ChatModel stayed connected to
+    // chatUpdated/chatPositionUpdated for the life of the process, so the per-update
+    // work grew without bound.
+    //
+    // Hand the old models to the event loop rather than destroying them here: QML
+    // holds the previous folderModels list until it re-reads the property after
+    // folderModelsChanged(), so they must outlive the current call.
+    for (auto &model : m_folderModels)
+    {
+        if (auto *released = model.release())
+        {
+            released->deleteLater();
+        }
+    }
+
+    m_folderModels.clear();
+    m_folderModels.reserve(chatFolders.size());
+
     std::ranges::for_each(chatFolders, [this](const auto &folder) {
         m_folderModels.emplace_back(std::make_unique<ChatModel>(std::make_unique<ChatList>(ChatList::Folder, folder->id()), m_locale, m_storage));
     });

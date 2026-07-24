@@ -1,5 +1,7 @@
 #include "Localization.hpp"
 
+#include "ScopeTimer.hpp"
+
 #include <QDebug>
 #include <QStringList>
 
@@ -67,13 +69,26 @@ QString Locale::translate(const char *context, const char *sourceText, const cha
 
 QString Locale::getString(const char *key) const
 {
-    if (!m_languagePack.contains(key))
+    MEEGRAM_SCOPE("Locale::getString");
+
+    const QString cacheKey = QString::fromUtf8(key);
+
+    if (const auto cached = m_stringCache.constFind(cacheKey); cached != m_stringCache.constEnd())
     {
-        qDebug() << "LOC_ERR:" << key;
-        return QString::fromUtf8(key);
+        return cached.value();
     }
 
-    QString result = m_languagePack.value(key);
+    if (!m_languagePack.contains(cacheKey))
+    {
+        qDebug() << "LOC_ERR:" << key;
+
+        // Cache the fallback too - a missing key is missing for every future call,
+        // and this path is otherwise a syslog write per lookup.
+        m_stringCache.insert(cacheKey, cacheKey);
+        return cacheKey;
+    }
+
+    QString result = m_languagePack.value(cacheKey);
 
     for (auto index = result.indexOf('$'); index != -1; index = result.indexOf('$', index))
     {
@@ -101,7 +116,11 @@ QString Locale::getString(const char *key) const
     temp = apply_regex(temp, boldRegex, R"(<b>$1</b>)");
     temp = apply_regex(temp, italicRegex, R"(<i>$1</i>)");
 
-    return QString::fromStdString(temp);
+    auto translated = QString::fromStdString(temp);
+
+    m_stringCache.insert(cacheKey, translated);
+
+    return translated;
 }
 
 QString Locale::formatPluralString(const char *key, int plural) const
@@ -188,6 +207,9 @@ void Locale::setLanguagePlural(const QString &value)
 
 void Locale::setLanguagePackStrings(td::td_api::object_ptr<td::td_api::languagePackStrings> languagePackData)
 {
+    // Any previously memoised translation is derived from the pack being replaced.
+    m_stringCache.clear();
+
     m_languagePack.reserve(languagePackData->strings_.size());  // Reserve to avoid reallocations
 
     for (auto &languageString : languagePackData->strings_)

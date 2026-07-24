@@ -73,10 +73,11 @@ Page {
                         Image {
                             id: profilePhotoImage
                             anchors.fill: parent
-                            cache:  false
+                            sourceSize.width: maskedItem.width
+                            sourceSize.height: maskedItem.height
+                            asynchronous: true
                             smooth: true
                             fillMode: Image.PreserveAspectCrop
-                            clip: true
                             source: chat.photo && chat.photo.localPath !== "" ?
                                         "image://chatPhoto/" + chat.photo.localPath :
                                         "image://theme/icon-l-content-avatar-placeholder"
@@ -144,7 +145,9 @@ Page {
             spacing: 6
 
             clip: true
-            cacheBuffer: listView.height * 2
+            // These delegates are RichText, so each cached one carries a laid-out
+            // QTextDocument. Keep a modest runway rather than three screens' worth.
+            cacheBuffer: listView.height / 2
 
             delegate: MessageDelegate {}
             model: messageModel
@@ -189,7 +192,9 @@ Page {
                 id: busyIndicator
 
                 anchors.horizontalCenter: parent.horizontalCenter
-                running: true
+                // Was hardcoded true, so its animation timer kept running after the
+                // message list populated and the parent Column went invisible.
+                running: visible
                 platformStyle: BusyIndicatorStyle { size: "large" }
             }
         }

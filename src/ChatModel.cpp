@@ -3,6 +3,7 @@
 #include "Client.hpp"
 #include "Common.hpp"
 #include "Message.hpp"
+#include "ScopeTimer.hpp"
 #include "StorageManager.hpp"
 #include "Utils.hpp"
 
@@ -11,7 +12,9 @@
 #include <td/telegram/td_api.h>
 
 #include <algorithm>
+#include <limits>
 #include <ranges>
+#include <utility>
 
 ChatModel::ChatModel(std::unique_ptr<ChatList> list, std::shared_ptr<Locale> locale, std::shared_ptr<StorageManager> storage)
     : m_list(std::move(list))
@@ -70,8 +73,25 @@ void ChatModel::fetchMore(const QModelIndex &parent)
     emit countChanged();
 }
 
+const ChatModel::FormattedRow &ChatModel::formattedRow(const std::shared_ptr<Chat> &chat) const
+{
+    auto &entry = m_formatted[chat->id()];
+
+    if (!entry.valid)
+    {
+        entry.title = Utils::getChatTitle(chat, m_storageManager);
+        entry.date = Utils::getMessageDate(chat->lastMessage());
+        entry.lastMessage = Utils::getContent(chat->lastMessage(), m_storageManager, m_locale);
+        entry.valid = true;
+    }
+
+    return entry;
+}
+
 QVariant ChatModel::data(const QModelIndex &index, int role) const
 {
+    MEEGRAM_SCOPE("ChatModel::data");
+
     if (!index.isValid() || index.row() >= static_cast<int>(m_chats.size()))
         return QVariant();
 
@@ -86,15 +106,20 @@ QVariant ChatModel::data(const QModelIndex &index, int role) const
         case TypeRole:
             return chatPtr->type();
         case TitleRole:
-            return Utils::getChatTitle(chatPtr, m_storageManager);
+            return formattedRow(chatPtr).title;
         case DateRole:
-            return Utils::getMessageDate(chatPtr->lastMessage());
+            return formattedRow(chatPtr).date;
         case PhotoRole:
             return QVariant::fromValue(chatPtr->photo());
         case LastMessageRole:
-            return Utils::getContent(chatPtr->lastMessage(), m_storageManager, m_locale);
+            return formattedRow(chatPtr).lastMessage;
         case IsPinnedRole:
-            return getChatPosition(chatPtr.get())->isPinned();
+        {
+            // getChatPosition() returns null for a chat that is no longer in this list;
+            // the previous code dereferenced it unconditionally.
+            const auto *position = getChatPosition(chatPtr.get());
+            return position ? position->isPinned() : false;
+        }
         case UnreadCountRole:
             return chatPtr->unreadCount();
         case UnreadMentionCountRole:
@@ -134,9 +159,29 @@ bool ChatModel::loading() const
     return m_loading;
 }
 
+void ChatModel::rebuildRowIndex()
+{
+    m_rowById.clear();
+    m_rowById.reserve(static_cast<int>(m_chats.size()));
+
+    for (int row = 0; row < static_cast<int>(m_chats.size()); ++row)
+    {
+        if (const auto chat = m_chats.at(row).lock())
+        {
+            m_rowById.insert(chat->id(), row);
+        }
+    }
+}
+
 void ChatModel::populate()
 {
+    // This replaces the contents wholesale, so the view has to be told. Previously
+    // it mutated m_chats with no begin/endResetModel and left m_count unreconciled.
+    beginResetModel();
+
     m_chats.clear();
+    m_formatted.clear();
+    m_count = 0;
 
     const auto &chatIds = m_storageManager->chatIds();
 
@@ -155,6 +200,12 @@ void ChatModel::populate()
         }
     }
 
+    rebuildRowIndex();
+
+    endResetModel();
+
+    emit countChanged();
+
     if (!m_chats.empty())
     {
         sortChats();
@@ -166,6 +217,8 @@ void ChatModel::clear()
 {
     beginResetModel();
     m_chats.clear();
+    m_rowById.clear();
+    m_formatted.clear();
     m_count = 0;
     endResetModel();
 
@@ -185,47 +238,68 @@ void ChatModel::refresh()
 
 void ChatModel::sortChats()
 {
+    MEEGRAM_SCOPE("ChatModel::sortChats");
+
     emit layoutAboutToBeChanged();
 
-    std::ranges::sort(m_chats, std::greater{}, [&](auto &&chatPtr) {
-        if (auto chat = chatPtr.lock())
+    // Decorate-sort-undecorate. std::ranges::sort re-invokes the projection on every
+    // comparison, and this projection costs a weak_ptr::lock() (atomic CAS) plus a
+    // linear scan of the chat's positions. Computing each key once turns
+    // O(n log n) locks into O(n).
+    std::vector<std::pair<qlonglong, std::weak_ptr<Chat>>> ordered;
+    ordered.reserve(m_chats.size());
+
+    for (const auto &weakChat : m_chats)
+    {
+        auto order = std::numeric_limits<qlonglong>::min();
+
+        if (const auto chat = weakChat.lock())
         {
-            if (auto pos = getChatPosition(chat.get()))
+            if (const auto *position = getChatPosition(chat.get()))
             {
-                return pos->order();
+                order = position->order();
             }
         }
-        return std::numeric_limits<qlonglong>::min();
-    });
+
+        ordered.emplace_back(order, weakChat);
+    }
+
+    std::ranges::sort(ordered, std::greater{}, [](const auto &entry) { return entry.first; });
+
+    m_chats.clear();
+
+    for (auto &entry : ordered)
+    {
+        m_chats.push_back(std::move(entry.second));
+    }
+
+    rebuildRowIndex();
 
     emit layoutChanged();
 }
 
 void ChatModel::handleChatItem(qlonglong chatId)
 {
-    auto chats = m_chats | std::views::transform([](const auto &chat) { return chat.lock(); });
+    const auto it = m_rowById.constFind(chatId);
+    if (it == m_rowById.constEnd())
+        return;
 
-    auto it = std::ranges::find_if(chats, [chatId](const auto &chat) { return chat && chat->id() == chatId; });
-    if (it != chats.end())
-    {
-        auto index = std::distance(chats.begin(), it);
-        QModelIndex modelIndex = createIndex(static_cast<int>(index), 0);
-        emit dataChanged(modelIndex, modelIndex);
-    }
+    // Whatever changed, the cached formatting for this chat is now stale.
+    m_formatted.remove(chatId);
+
+    const auto modelIndex = createIndex(it.value(), 0);
+    emit dataChanged(modelIndex, modelIndex);
 }
 
 void ChatModel::handleChatPosition(qlonglong chatId)
 {
-    auto chats = m_chats | std::views::transform([](const auto &chat) { return chat.lock(); });
+    if (!m_rowById.contains(chatId))
+        return;
 
-    auto it = std::ranges::find_if(chats, [chatId](const auto &chat) { return chat && chat->id() == chatId; });
-    if (it != chats.end())
+    // Coalesce bursts of reordering into one sort.
+    if (!m_sortTimer.isActive())
     {
-        // emit delayed event
-        if (!m_sortTimer.isActive())
-        {
-            m_sortTimer.start();
-        }
+        m_sortTimer.start();
     }
 }
 

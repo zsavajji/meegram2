@@ -25,6 +25,11 @@ public:
 signals:
     void result(td::td_api::Object *object);
 
+private slots:
+    // Frees an update after every queued result() slot invocation has run. See the
+    // ordering argument in Client::initialize().
+    void disposeObject(void *object);
+
 private:
     void initialize();
 

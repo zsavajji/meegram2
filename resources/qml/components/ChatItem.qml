@@ -1,6 +1,7 @@
 import QtQuick 1.1
 import com.nokia.meego 1.1
 import com.nokia.extras 1.1
+import "UIConstants.js" as UI
 
 Item {
     id: root
@@ -9,6 +10,15 @@ Item {
 
     height: 88
     width: parent.width
+
+    // Harmattan list-item "down" state: a flat background fill while pressed.
+    // Declared first so it paints behind the row content. A hidden Rectangle costs
+    // nothing to render, so this stays a single item rather than a Loader.
+    Rectangle {
+        anchors.fill: parent
+        color: UI.COLOR_BACKGROUND
+        visible: mouseArea.pressed
+    }
 
     MaskedItem {
         id: maskedItem
@@ -25,10 +35,13 @@ Item {
         Image {
             id: profilePhotoImage
             anchors.fill: parent
-            cache: false
+            // sourceSize is what makes the provider decode at 64x64 instead of at the
+            // avatar's full resolution. asynchronous keeps that decode off the frame.
+            sourceSize.width: maskedItem.width
+            sourceSize.height: maskedItem.height
+            asynchronous: true
             smooth: true
             fillMode: Image.PreserveAspectCrop
-            clip: true
             source: model.photo && model.photo.localPath !== "" ?
                         "image://chatPhoto/" + model.photo.localPath :
                         "image://theme/icon-l-content-avatar-placeholder"
@@ -49,7 +62,9 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             font.bold: true
             font.pixelSize: 26
-            color: mouseArea.pressed ? "#797979" : "#282828"
+            // Text colour is constant across states: the Harmattan spec signals
+            // "down" with the background fill alone.
+            color: "#282828"
             elide: Text.ElideRight
             text: utils.replaceEmoji(model.title)
         }
@@ -60,7 +75,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             font.weight: Font.Light
             font.pixelSize: 20
-            color: mouseArea.pressed ? "#797979" : "#505050"
+            color: "#505050"
             text: model.date
         }
     }
@@ -77,7 +92,9 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             font.weight: Font.Light
             font.pixelSize: 22
-            color: model.lastMessage.isService ? theme.selectionColor : mouseArea.pressed ? "#797979" : "#505050"
+            // LastMessageRole is a plain string, so the old `model.lastMessage.isService`
+            // test was always undefined and the selection-colour branch never ran.
+            color: "#505050"
             elide: Text.ElideRight
             text: sanitizeText(model.lastMessage);
         }
@@ -151,9 +168,12 @@ Item {
         }
     }
 
-    Ripple {
+    MouseArea {
         id: mouseArea
+
+        z: 1
         anchors.fill: parent
+
         onClicked: {
             appWindow.openChat(model.id)
         }

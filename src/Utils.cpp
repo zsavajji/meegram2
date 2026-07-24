@@ -6,6 +6,7 @@
 #include "Message.hpp"
 #include "MessageContent.hpp"
 #include "MessageService.hpp"
+#include "ScopeTimer.hpp"
 #include "StorageManager.hpp"
 #include "User.hpp"
 
@@ -13,7 +14,10 @@
 #include <QTextStream>
 
 #include <algorithm>
+#include <array>
+#include <set>
 #include <unordered_map>
+#include <vector>
 
 namespace {
 
@@ -22,17 +26,52 @@ constexpr int EmojiSize24 = 24;
 // constexpr int EmojiSize32 = 32;
 // constexpr int EmojiSize48 = 48;
 
-constexpr auto createEmojiMap(int size)
+struct EmojiTable
 {
     std::unordered_map<QString, QString> map;
-    for (const Emoji &emoji : Emoji::emojis())
-    {
-        map.emplace(emoji.unicode(), QString("<img src=\":/emoji/%1\" width=\"%2\" height=\"%2\">").arg(emoji.filename(), QString::number(size)));
-    }
-    return map;
-}
 
-const auto emojiMap24 = createEmojiMap(EmojiSize24);
+    // Distinct key lengths, longest first. Probing only lengths that actually
+    // exist keeps the per-position work to a handful of lookups.
+    std::vector<int> keyLengthsDesc;
+
+    // Indexed by the high byte of a UTF-16 code unit: true if any emoji key
+    // starts with a unit in that block. Lets plain text skip the lookup loop.
+    std::array<bool, 256> canStart{};
+};
+
+// Built on first use rather than during static initialisation. This is ~3773
+// QString allocations plus the img-tag formatting; it does not belong on the
+// path that runs before main().
+const EmojiTable &emojiTable()
+{
+    static const EmojiTable table = [] {
+        EmojiTable t;
+
+        const auto &emojis = Emoji::emojis();
+        t.map.reserve(emojis.size());
+
+        std::set<int> lengths;
+
+        for (const Emoji &emoji : emojis)
+        {
+            auto unicode = emoji.unicode();
+            if (unicode.isEmpty())
+                continue;
+
+            lengths.insert(unicode.size());
+            t.canStart[unicode.at(0).unicode() >> 8] = true;
+
+            t.map.emplace(std::move(unicode),
+                          QString("<img src=\":/emoji/%1\" width=\"%2\" height=\"%2\">").arg(emoji.filename(), QString::number(EmojiSize24)));
+        }
+
+        t.keyLengthsDesc.assign(lengths.rbegin(), lengths.rend());
+
+        return t;
+    }();
+
+    return table;
+}
 
 }  // namespace
 
@@ -212,28 +251,56 @@ QString Utils::formatTime(int totalSeconds) noexcept
 
 QString Utils::replaceEmoji(const QString &text) noexcept
 {
-    const std::unordered_map<QString, QString> *emojiMap = nullptr;
+    MEEGRAM_SCOPE("Utils::replaceEmoji");
 
-    emojiMap = &emojiMap24;
+    const auto &table = emojiTable();
+
+    // Fast path: the overwhelming majority of chat titles and messages contain no
+    // emoji at all. One array index per code unit, and we hand back the original
+    // string with no allocation at all.
+    bool mayContainEmoji = false;
+    for (int i = 0; i < text.size(); ++i)
+    {
+        if (table.canStart[text.at(i).unicode() >> 8])
+        {
+            mayContainEmoji = true;
+            break;
+        }
+    }
+
+    if (!mayContainEmoji)
+        return text;
 
     QString result;
-    result.reserve(text.size() * 1.5);
+    result.reserve(text.size() + text.size() / 2);
 
     int lastPos = 0;
-    for (int i = 0; i < text.size();)
+    int i = 0;
+
+    while (i < text.size())
     {
         bool replaced = false;
 
-        for (const auto &[emojiUnicode, imgTag] : *emojiMap)
+        if (table.canStart[text.at(i).unicode() >> 8])
         {
-            if (text.midRef(i, emojiUnicode.size()) == emojiUnicode)
+            const int remaining = text.size() - i;
+
+            // Longest match first, so a keycap sequence beats its bare base character.
+            for (const int length : table.keyLengthsDesc)
             {
-                result.append(text.mid(lastPos, i - lastPos));
-                result.append(imgTag);
-                i += emojiUnicode.size();
-                lastPos = i;
-                replaced = true;
-                break;  // Exit loop after replacement
+                if (length > remaining)
+                    continue;
+
+                if (const auto it = table.map.find(text.mid(i, length)); it != table.map.end())
+                {
+                    result.append(text.midRef(lastPos, i - lastPos));
+                    result.append(it->second);
+
+                    i += length;
+                    lastPos = i;
+                    replaced = true;
+                    break;
+                }
             }
         }
 
@@ -243,7 +310,7 @@ QString Utils::replaceEmoji(const QString &text) noexcept
         }
     }
 
-    result.append(text.mid(lastPos));
+    result.append(text.midRef(lastPos));
 
     return result;
 }
