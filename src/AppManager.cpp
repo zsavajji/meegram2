@@ -427,14 +427,32 @@ void AppManager::handleAuthorizationState(const td::td_api::AuthorizationState &
 
 void AppManager::handleConnectionState(const td::td_api::ConnectionState &connectionState)
 {
-    static const std::unordered_map<int, std::string> stateMap = {{td::td_api::connectionStateReady::ID, "Ready"},
-                                                                  {td::td_api::connectionStateConnecting::ID, "Connecting"},
-                                                                  {td::td_api::connectionStateUpdating::ID, "Updating"},
-                                                                  {td::td_api::connectionStateWaitingForNetwork::ID, "WaitingForNetwork"}};
+    // All five ConnectionState variants. connectionStateConnectingToProxy used to be
+    // missing even though TopBar.qml already handled the string, and an unmapped
+    // state left m_connectionStateString at its previous value - so the header could
+    // sit on a stale "Connecting" forever with nothing to indicate why.
+    static const std::unordered_map<int, std::string> stateMap = {
+        {td::td_api::connectionStateReady::ID, "Ready"},
+        {td::td_api::connectionStateConnecting::ID, "Connecting"},
+        {td::td_api::connectionStateConnectingToProxy::ID, "ConnectingToProxy"},
+        {td::td_api::connectionStateUpdating::ID, "Updating"},
+        {td::td_api::connectionStateWaitingForNetwork::ID, "WaitingForNetwork"}};
 
-    if (const auto it = stateMap.find(connectionState.get_id()); it != stateMap.end())
+    const auto it = stateMap.find(connectionState.get_id());
+
+    if (it == stateMap.end())
     {
-        m_connectionStateString = QString::fromStdString(it->second);
-        emit connectionStateChanged();
+        qWarning() << "Unmapped connection state id:" << connectionState.get_id();
+        return;
     }
+
+    const auto state = QString::fromStdString(it->second);
+
+    if (state == m_connectionStateString)
+        return;
+
+    qDebug() << "Connection state:" << state;
+
+    m_connectionStateString = state;
+    emit connectionStateChanged();
 }

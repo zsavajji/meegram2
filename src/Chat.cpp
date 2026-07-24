@@ -136,11 +136,14 @@ void Chat::setLastMessage(td::td_api::object_ptr<td::td_api::message> lastMessag
 
 void Chat::setPositions(std::vector<td::td_api::object_ptr<td::td_api::chatPosition>> positions) noexcept
 {
+    // An empty vector means "positions unchanged", not "remove from every list".
+    // updateChatLastMessage and updateChatDraftMessage only populate positions when
+    // they actually changed, so clearing here made any chat that received a message
+    // drop out of the list - leaving only pinned chats, which get their position
+    // re-asserted through updateChatPosition (that update always carries exactly one
+    // position). A chat genuinely leaving a list arrives as a position with order 0.
     if (positions.empty())
     {
-        m_positions.clear();
-        emit chatChanged();
-
         return;
     }
 
