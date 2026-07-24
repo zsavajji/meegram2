@@ -112,6 +112,15 @@ build_openssl() {
     local version="3.5.7"
     local hash="a8c0d28a529ca480f9f36cf5792e2cd21984552a3c8e4aa11a24aa31aeac98e8"
     local filename="openssl-$version.tar.gz"
+    local stamp="build/crypto/.built-version"
+
+    # Only the download and extraction used to be skipped on a re-run: ./Configure
+    # regenerates the makefiles, so make then rebuilt everything anyway. The stamp
+    # records which version is installed, so bumping the version still rebuilds.
+    if [ -z "${FORCE_REBUILD:-}" ] && [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$version" ]; then
+        warn "OpenSSL $version already built in build/crypto, skipping. FORCE_REBUILD=1 to redo."
+        return
+    fi
 
     if [ -d "openssl-$version" ]; then
         warn "OpenSSL directory already exists, skipping download and extraction."
@@ -146,6 +155,7 @@ build_openssl() {
     cp -r include ../build/crypto
 
     cd ..
+    echo "$version" > "$stamp"
     success "OpenSSL built successfully."
 }
 
@@ -154,6 +164,12 @@ build_zlib() {
     local version="1.3.2"
     local hash="d7a0654783a4da529d1bb793b7ad9c3318020af77667bcae35f95d0e42a792f3"
     local filename="zlib-$version.tar.xz"
+    local stamp="build/zlib/.built-version"
+
+    if [ -z "${FORCE_REBUILD:-}" ] && [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$version" ]; then
+        warn "ZLib $version already built in build/zlib, skipping. FORCE_REBUILD=1 to redo."
+        return
+    fi
 
     if [ -d "zlib-$version" ]; then
         warn "ZLib directory already exists, skipping download and extraction."
@@ -187,6 +203,7 @@ build_zlib() {
     cp zconf.h zlib.h ../build/zlib/include
 
     cd ..
+    echo "$version" > "$stamp"
     success "ZLib built successfully."
 }
 
