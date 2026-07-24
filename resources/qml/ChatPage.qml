@@ -254,6 +254,12 @@ Page {
                     onClicked: {
                         messageModel.sendMessage(textArea.text)
                         textArea.text = ""
+
+                        // Tapping the button moves focus off the text area, and the
+                        // "open" state below is bound to textArea.activeFocus - so
+                        // without this the keyboard closes and this whole panel
+                        // collapses after every message.
+                        textArea.forceActiveFocus()
                     }
                 }
 

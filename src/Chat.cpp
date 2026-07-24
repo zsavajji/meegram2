@@ -24,6 +24,15 @@ Chat::Chat(td::td_api::object_ptr<td::td_api::chat> chat, QObject *parent)
         setLastMessage(std::move(m_chat->last_message_));
     }
 
+    // updateNewChat already carries the chat's positions. Without this the chat
+    // starts with an empty position list, so every list model filters it out until
+    // some later update happens to call setPositions - which is why only pinned
+    // chats appeared.
+    if (!m_chat->positions_.empty())
+    {
+        setPositions(std::move(m_chat->positions_));
+    }
+
     setType(std::move(m_chat->type_));
 }
 

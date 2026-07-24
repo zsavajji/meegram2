@@ -297,8 +297,60 @@ Always build first. `dpkg-buildpackage` only wraps what is already in the build
 directory.
 :::
 
-The `.deb` appears one level above the build directory. Install on device with
-`dpkg -i`. Layout: binary → `/opt/meegram/bin`, desktop file →
-`/usr/share/applications`, icon → `/usr/share/icons/hicolor/80x80/apps`.
+### Set the MADDE target first
+
+`CMakeLists.txt` invokes `mad` with no `-t`, so it relies on a default being set.
+Without one it stops with `No '-t <target>' option given nor default target set`.
+
+```bash
+export PATH="$QT_SDK_PATH/Madde/bin:$PATH"
+mad list                              # shows installed targets
+mad set harmattan_10.2011.34-1_rt1.2  # name matches Madde/targets/
+```
+
+MADDE binaries are 32-bit x86; on a 64-bit host see the i386 note under
+[Known rough edges](/troubleshooting#known-rough-edges).
+
+### What ends up in the package
+
+| Path | Contents |
+|---|---|
+| `/opt/meegram/bin/meegram` | the binary (~37 MB — ~20 MB of that is emoji PNGs) |
+| `/opt/meegram/lib/` | `libssl.so.3`, `libcrypto.so.3` |
+| `/opt/meegram/share/` | splash screen |
+| `/usr/share/applications/` | `.desktop` |
+| `/usr/share/icons/hicolor/80x80/apps/` | icon |
+
+The OpenSSL libraries have to travel with the package. TDLib is linked statically
+but pulls OpenSSL in *shared*, and Harmattan ships 0.9.8 — nothing close to 3.5.7.
+They are found via `RPATH=/opt/meegram/lib`, which `INSTALL_RPATH` sets explicitly;
+CMake strips the build-tree rpath on install, so without it the loader would have
+nowhere to look. Only the versioned sonames are shipped: `setup-dependencies.sh`
+copies with plain `cp`, so the unversioned `.so` files are full duplicates.
+
+### Verify before touching the device
+
+```bash
+dpkg-deb -c meegram_0.1.7_armel.deb | grep opt/meegram
+arm-none-linux-gnueabi-readelf -d build-app/debian/meegram/opt/meegram/bin/meegram | grep RPATH
+```
+
+Want both `.so.3` files listed, and `RPATH [/opt/meegram/lib]` with **no host
+paths**. Check the `.changes` filename says `armel`, not `amd64` — an amd64 package
+is simply refused by the device.
+
+### Install
+
+```bash
+scp meegram_0.1.7_armel.deb user@<n9>:/tmp/
+ssh user@<n9> 'dpkg -i /tmp/meegram_0.1.7_armel.deb'
+```
+
+Run it over SSH the first time rather than from the launcher — `invoker` swallows
+stderr, so a missing-library error would otherwise be invisible:
+
+```bash
+/opt/meegram/bin/meegram
+```
 
 ---
