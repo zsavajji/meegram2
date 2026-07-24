@@ -31,6 +31,11 @@ readonly TDLIB_COMMIT="${TDLIB_COMMIT:-022d60202e446ad1287b9fb68e687c8a0760788b}
 # 4 is comfortable on 8 GB. Drop to JOBS=2 or JOBS=1 if the build is OOM-killed.
 readonly JOBS="${JOBS:-4}"
 
+# Link-time optimisation for TDLib. Worth having on a size-constrained device, but
+# it requires the gcc-ar/gcc-ranlib/gcc-nm wrappers (checked in check_harmattan_env).
+# Set TDLIB_LTO=OFF to build without it if your toolchain lacks them.
+readonly TDLIB_LTO="${TDLIB_LTO:-ON}"
+
 # Validate everything the Harmattan path needs up front. All of these used to fail
 # late - the SDK path in particular is only read at the very end, after TDLib has
 # finished building, so a missing one wasted the whole compile.
@@ -49,6 +54,19 @@ check_harmattan_env() {
         error "$TOOLCHAIN_PREFIX-gcc is not on PATH."
         error "Build it with tools/build-toolchain.sh, then add its bin/ directory to PATH."
         exit 1
+    fi
+
+    # TDLib is built with LTO, which needs the gcc-* wrappers rather than plain
+    # binutils - they pass liblto_plugin.so so ar/ranlib/nm can read GIMPLE objects.
+    if [[ "$TDLIB_LTO" == "ON" ]]; then
+        for tool in gcc-ar gcc-ranlib gcc-nm; do
+            if ! command -v "$TOOLCHAIN_PREFIX-$tool" >/dev/null 2>&1; then
+                error "$TOOLCHAIN_PREFIX-$tool is not on PATH, but TDLib is built with LTO."
+                error "Without it you get: 'plugin needed to handle lto object'."
+                error "Either install the wrapper, or build without LTO: TDLIB_LTO=OFF $0 ..."
+                exit 1
+            fi
+        done
     fi
 
     if [[ -z "$SDK_PATH" ]]; then
@@ -288,12 +306,28 @@ build_tdlib() {
 
     if [[ "$ARGS" == "harmattan" ]]; then
         info "Setting up cross-compilation for Harmattan..."
-        echo "
-        SET(CMAKE_SYSTEM_NAME Linux)
-        SET(CMAKE_SYSTEM_PROCESSOR arm)
-        SET(CMAKE_C_COMPILER   ${TOOLCHAIN_PREFIX}-gcc)
-        SET(CMAKE_CXX_COMPILER ${TOOLCHAIN_PREFIX}-g++)
-        " > "$td_root/toolchain.cmake"
+
+        # ar/ranlib/nm must be the gcc-* wrappers, not plain binutils. With LTO the
+        # compiler emits GIMPLE bytecode into the .o files, and plain ar cannot read
+        # it - BFD reports "plugin needed to handle lto object" and then either
+        # silently drops LTO or leaves an incomplete archive index, which shows up
+        # much later as undefined references. The wrappers pass liblto_plugin.so.
+        cat > "$td_root/toolchain.cmake" <<TOOLCHAIN
+SET(CMAKE_SYSTEM_NAME Linux)
+SET(CMAKE_SYSTEM_PROCESSOR arm)
+
+SET(CMAKE_C_COMPILER   ${TOOLCHAIN_PREFIX}-gcc)
+SET(CMAKE_CXX_COMPILER ${TOOLCHAIN_PREFIX}-g++)
+
+SET(CMAKE_AR      ${TOOLCHAIN_PREFIX}-gcc-ar     CACHE FILEPATH "" FORCE)
+SET(CMAKE_RANLIB  ${TOOLCHAIN_PREFIX}-gcc-ranlib CACHE FILEPATH "" FORCE)
+SET(CMAKE_NM      ${TOOLCHAIN_PREFIX}-gcc-nm     CACHE FILEPATH "" FORCE)
+
+SET(CMAKE_C_COMPILER_AR       ${TOOLCHAIN_PREFIX}-gcc-ar)
+SET(CMAKE_CXX_COMPILER_AR     ${TOOLCHAIN_PREFIX}-gcc-ar)
+SET(CMAKE_C_COMPILER_RANLIB   ${TOOLCHAIN_PREFIX}-gcc-ranlib)
+SET(CMAKE_CXX_COMPILER_RANLIB ${TOOLCHAIN_PREFIX}-gcc-ranlib)
+TOOLCHAIN
     fi
 
     if [[ "$ARGS" == "harmattan" ]]; then
@@ -302,7 +336,7 @@ build_tdlib() {
         cd ../..
 
         cd build/tdlib
-        cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DTD_ENABLE_LTO=ON -DCMAKE_TOOLCHAIN_FILE="$td_root/toolchain.cmake" \
+        cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DTD_ENABLE_LTO="$TDLIB_LTO" -DCMAKE_TOOLCHAIN_FILE="$td_root/toolchain.cmake" \
             "${openssl_options[@]}" "${zlib_options[@]}" "$td_root"
         cd ../..
 
