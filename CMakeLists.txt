@@ -196,11 +196,44 @@ if (BUILD_HARMATTAN)
         file(COPY ${CMAKE_SOURCE_DIR}/debian DESTINATION ${CMAKE_BINARY_DIR})
     endif()
 
+    # CMake rewrites RPATH on install and, by default, drops everything - the
+    # -Wl,-rpath above only applies to the binary in the build tree. Without this the
+    # installed binary has no RPATH at all and cannot find the libraries below.
+    # BUILD_WITH_INSTALL_RPATH stays off so the build-tree binary keeps the paths
+    # that let it link.
+    set_target_properties(meegram PROPERTIES
+        INSTALL_RPATH "/opt/meegram/lib"
+        INSTALL_RPATH_USE_LINK_PATH FALSE
+        BUILD_WITH_INSTALL_RPATH FALSE)
+
     install(FILES resources/meegram_harmattan.desktop DESTINATION /usr/share/applications)
     install(FILES resources/meegram80.png DESTINATION /usr/share/icons/hicolor/80x80/apps)
     install(FILES resources/meegram-splash.png DESTINATION /opt/meegram/share)
 
     install(TARGETS meegram DESTINATION /opt/meegram/bin)
+
+    # TDLib is linked statically, but it pulls in OpenSSL *shared*, so the binary
+    # needs libssl.so.3 / libcrypto.so.3 at runtime. Harmattan ships OpenSSL 0.9.8,
+    # so ours has to travel inside the package or the app dies at startup with
+    # "libcrypto.so.3: cannot open shared object file".
+    #
+    # tools/setup-dependencies.sh leaves them in build/crypto/lib rather than
+    # installing them into the sysroot; point this elsewhere if that changes.
+    set(MEEGRAM_OPENSSL_LIB_DIR "${CMAKE_SOURCE_DIR}/build/crypto/lib"
+        CACHE PATH "Directory holding the cross-built libssl/libcrypto to ship")
+
+    file(GLOB MEEGRAM_OPENSSL_LIBS
+        "${MEEGRAM_OPENSSL_LIB_DIR}/libssl.so*"
+        "${MEEGRAM_OPENSSL_LIB_DIR}/libcrypto.so*")
+
+    if(MEEGRAM_OPENSSL_LIBS)
+        install(FILES ${MEEGRAM_OPENSSL_LIBS} DESTINATION /opt/meegram/lib)
+    else()
+        message(WARNING
+            "No libssl/libcrypto found in ${MEEGRAM_OPENSSL_LIB_DIR}. The package will "
+            "build but the app will fail on the device with 'libcrypto.so.3: cannot open "
+            "shared object file'. Set -DMEEGRAM_OPENSSL_LIB_DIR to where they live.")
+    endif()
 
     add_custom_target(package
         COMMAND mad dpkg-buildpackage -nc -uc -us
