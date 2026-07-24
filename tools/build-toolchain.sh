@@ -18,7 +18,10 @@
 #   export PATH="$PREFIX/bin:$PATH"
 #   export TOOLCHAIN_PREFIX=arm-none-linux-gnueabi
 #
-# Expect this to take a while and to need a couple of GB of disk.
+# Re-running is cheap: a stage whose output is already installed in $PREFIX is
+# skipped, so a second run just re-verifies. Force a rebuild with FORCE_REBUILD=1.
+#
+# Expect the first run to take a while and to need a couple of GB of disk.
 
 set -euo pipefail
 
@@ -26,9 +29,11 @@ declare -r COLOR_RESET="\033[0m"
 declare -r COLOR_RED="\033[31m"
 declare -r COLOR_GREEN="\033[32m"
 declare -r COLOR_BLUE="\033[34m"
+declare -r COLOR_MAGENTA="\033[35m"
 
 info()    { echo -e "${COLOR_BLUE}INFO: $*${COLOR_RESET}"; }
 success() { echo -e "${COLOR_GREEN}SUCCESS: $*${COLOR_RESET}"; }
+warn()    { echo -e "${COLOR_MAGENTA}WARNING: $*${COLOR_RESET}"; }
 error()   { echo -e "${COLOR_RED}ERROR: $*${COLOR_RESET}" >&2; }
 
 readonly TARGET="${TARGET:-arm-none-linux-gnueabi}"
@@ -107,6 +112,11 @@ fetch() {
 build_binutils() {
     local name="binutils-$BINUTILS_VERSION"
 
+    if [ -x "$PREFIX/bin/$TARGET-ld" ] && [ -z "${FORCE_REBUILD:-}" ]; then
+        warn "binutils already installed in $PREFIX, skipping. FORCE_REBUILD=1 to redo."
+        return
+    fi
+
     fetch "https://ftp.gnu.org/gnu/binutils/$name.tar.xz" "$name.tar.xz"
     [ -d "$name" ] || tar xf "$name.tar.xz"
 
@@ -130,6 +140,11 @@ build_binutils() {
 
 build_gcc() {
     local name="gcc-$GCC_VERSION"
+
+    if [ -x "$PREFIX/bin/$TARGET-g++" ] && [ -z "${FORCE_REBUILD:-}" ]; then
+        warn "GCC already installed in $PREFIX, skipping. FORCE_REBUILD=1 to redo."
+        return
+    fi
 
     fetch "https://ftp.gnu.org/gnu/gcc/$name/$name.tar.xz" "$name.tar.xz"
     [ -d "$name" ] || tar xf "$name.tar.xz"
@@ -197,8 +212,31 @@ int main()
 }
 CPP
 
-    "$TARGET-g++" -std=c++23 -pthread "$probe" -o "$WORKDIR/probe"
-    file "$WORKDIR/probe"
+    rm -f "$WORKDIR/probe"
+
+    if ! "$TARGET-g++" -std=c++23 -pthread "$probe" -o "$WORKDIR/probe"; then
+        error "Probe failed to compile - the toolchain is not usable for this project."
+        exit 1
+    fi
+
+    # Do not trust the compiler's exit status alone: assert a binary exists and that
+    # it is actually for ARM, otherwise a broken compiler reports success here.
+    if [ ! -f "$WORKDIR/probe" ]; then
+        error "Compiler exited 0 but produced no binary."
+        exit 1
+    fi
+
+    local probe_type
+    probe_type="$(file -b "$WORKDIR/probe")"
+    info "$probe_type"
+
+    case "$probe_type" in
+        *ARM*) ;;
+        *)
+            error "Probe is not an ARM binary. Wrong compiler on PATH?"
+            exit 1
+            ;;
+    esac
 
     success "Toolchain works and compiles C++23 for ARM."
     echo
