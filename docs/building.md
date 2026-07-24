@@ -191,6 +191,7 @@ Cross-builds and installs into the sysroot:
 |---|---|---|
 | zlib | 1.3.2 | version + SHA256 |
 | OpenSSL | 3.5.7 | version + SHA256 |
+| rlottie | master | **commit SHA** (`RLOTTIE_COMMIT`) |
 | TDLib | 1.8.66 | **commit SHA** (`TDLIB_COMMIT`) |
 
 TDLib tags almost nothing — its git tags stop at `v1.8.0` while it reports versions
@@ -202,21 +203,23 @@ a build runs on the device.
 OpenSSL 3.5 is the current **LTS** branch (supported to 2030-04-08). The previous
 pin, 3.3.1, sat on a branch that went end-of-support on 2026-04-09.
 
-**rlottie is not covered by this script.** `CMakeLists.txt` has
-`find_package(rlottie REQUIRED)`, and there is no `Findrlottie.cmake` in-tree, so
-you must cross-build and install it yourself and may need to pass `rlottie_DIR`.
+rlottie is built static, with `LOTTIE_MODULE` and `LOTTIE_THREAD` off:
+`LottieAnimation` calls `renderSync()` on the GUI thread and the N9 is single-core,
+so render threads cost memory and buy nothing. `CMAKE_POSITION_INDEPENDENT_CODE` is
+on because `meegram` links `-pie`, and a non-PIC static archive will not link into a
+PIE executable on ARM.
 
 ### What a re-run does
 
 | Stage | Re-run |
 |---|---|
 | zlib, OpenSSL | **Skipped** if `build/*/.built-version` matches the version in the script |
-| TDLib | **Full rebuild, always** (`rm -rf build/generate build/tdlib`) |
+| rlottie, TDLib | **Skipped** if `build/*/.built-commit` matches the pinned commit, target and LTO setting. The stamp is only written after `install` succeeds, so a failed run always rebuilds. |
 
-The version stamp means bumping a version in the script still triggers a rebuild,
-rather than silently linking against the stale library. `FORCE_REBUILD=1` forces
-both. TDLib's wipe is deliberate: a stale CMake cache in a cross-build is a good way
-to get a subtly wrong binary.
+Stamps mean bumping a version or commit still triggers a rebuild rather than
+silently linking against a stale library. `FORCE_REBUILD=1` forces all of them.
+When a rebuild does happen the build directory is wiped first: a stale CMake cache
+in a cross-build is a good way to get a subtly wrong binary.
 
 ### Parallelism
 

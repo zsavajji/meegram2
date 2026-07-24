@@ -19,6 +19,10 @@ readonly SDK_PATH="${2:-}"
 # Bump deliberately, after verifying a build actually runs on the device.
 readonly TDLIB_COMMIT="${TDLIB_COMMIT:-022d60202e446ad1287b9fb68e687c8a0760788b}"
 
+# Pinned rlottie revision. Its newest tag is v0.2 from 2020, well behind master, so
+# like TDLib this is pinned by commit rather than by tag.
+readonly RLOTTIE_COMMIT="${RLOTTIE_COMMIT:-2cab35db755b0e39df40b679969495e90d39c578}"
+
 # Parallel build jobs.
 #
 # TDLib used to build fully serial here: `cmake --build` defaults to one job with
@@ -115,6 +119,37 @@ validate_args() {
         error "Incorrect device specified. Please specify 'harmattan' or 'simulator'."
         exit 1
     fi
+}
+
+# Writes the CMake toolchain file used by every cross-built CMake dependency.
+#
+# ar/ranlib/nm are the gcc-* wrappers, not plain binutils: with LTO the compiler
+# emits GIMPLE bytecode into the .o files and plain ar cannot read it - BFD reports
+# "plugin needed to handle lto object" and then either silently drops LTO or leaves
+# an incomplete archive index, which surfaces much later as undefined references.
+#
+# ASM is set explicitly because rlottie declares LANGUAGES C CXX ASM for its NEON
+# raster paths, and CMake will not always infer the cross assembler.
+write_toolchain_file() {
+    local out="$1"
+
+    cat > "$out" <<TOOLCHAIN
+SET(CMAKE_SYSTEM_NAME Linux)
+SET(CMAKE_SYSTEM_PROCESSOR arm)
+
+SET(CMAKE_C_COMPILER   ${TOOLCHAIN_PREFIX}-gcc)
+SET(CMAKE_CXX_COMPILER ${TOOLCHAIN_PREFIX}-g++)
+SET(CMAKE_ASM_COMPILER ${TOOLCHAIN_PREFIX}-gcc)
+
+SET(CMAKE_AR      ${TOOLCHAIN_PREFIX}-gcc-ar     CACHE FILEPATH "" FORCE)
+SET(CMAKE_RANLIB  ${TOOLCHAIN_PREFIX}-gcc-ranlib CACHE FILEPATH "" FORCE)
+SET(CMAKE_NM      ${TOOLCHAIN_PREFIX}-gcc-nm     CACHE FILEPATH "" FORCE)
+
+SET(CMAKE_C_COMPILER_AR       ${TOOLCHAIN_PREFIX}-gcc-ar)
+SET(CMAKE_CXX_COMPILER_AR     ${TOOLCHAIN_PREFIX}-gcc-ar)
+SET(CMAKE_C_COMPILER_RANLIB   ${TOOLCHAIN_PREFIX}-gcc-ranlib)
+SET(CMAKE_CXX_COMPILER_RANLIB ${TOOLCHAIN_PREFIX}-gcc-ranlib)
+TOOLCHAIN
 }
 
 # SHA256 checksum verification
@@ -237,6 +272,85 @@ build_zlib() {
     success "ZLib built successfully."
 }
 
+# Build rlottie
+#
+# CMakeLists.txt has find_package(rlottie REQUIRED) but nothing here used to build
+# it, so configuring the app failed on a fresh machine. rlottie renders the .tgs
+# sticker animations on the authentication pages (src/LottieAnimation.cpp).
+build_rlottie() {
+    local stamp="build/rlottie/.built-commit"
+    local want="$RLOTTIE_COMMIT:$ARGS"
+
+    if [ -z "${FORCE_REBUILD:-}" ] && [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$want" ]; then
+        warn "rlottie already built and installed for $ARGS, skipping. FORCE_REBUILD=1 to redo."
+        return
+    fi
+
+    if [ -d "rlottie" ]; then
+        warn "rlottie checkout already exists, skipping fetch. Remove rlottie/ to re-pin."
+    else
+        info "Fetching rlottie at $RLOTTIE_COMMIT..."
+
+        # Same shallow-fetch-a-pinned-commit approach as TDLib. rlottie's newest tag
+        # is v0.2 from 2020, so a tag is not a useful pin.
+        mkdir -p rlottie
+        git -C rlottie init --quiet
+        git -C rlottie remote add origin https://github.com/Samsung/rlottie
+        git -C rlottie fetch --quiet --depth=1 origin "$RLOTTIE_COMMIT"
+        git -C rlottie checkout --quiet FETCH_HEAD
+    fi
+
+    rm -rf build/rlottie
+    mkdir -p build/rlottie
+
+    local rlottie_root
+    rlottie_root=$(realpath rlottie)
+
+    # LOTTIE_MODULE=OFF   - dlopens a separate image-loader .so at runtime. Nothing
+    #                       uses it here and it would mean shipping a second library.
+    # LOTTIE_THREAD=OFF   - LottieAnimation calls renderSync() on the GUI thread and
+    #                       the N9 is a single-core Cortex-A8, so render threads buy
+    #                       nothing and cost memory.
+    # BUILD_SHARED_LIBS=OFF - static, so there is no extra .so to deploy alongside
+    #                       the binary.
+    # POSITION_INDEPENDENT_CODE - required: meegram links -pie, and a non-PIC static
+    #                       archive fails to link into a PIE executable on ARM.
+    local rlottie_options=(
+        -DCMAKE_BUILD_TYPE=MinSizeRel
+        -DBUILD_SHARED_LIBS=OFF
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+        -DLOTTIE_MODULE=OFF
+        -DLOTTIE_THREAD=OFF
+        -DLOTTIE_TEST=OFF
+    )
+
+    if [[ "$ARGS" == "harmattan" ]]; then
+        info "Configuring rlottie for Harmattan..."
+        write_toolchain_file "$rlottie_root/toolchain.cmake"
+
+        cmake -B build/rlottie -S "$rlottie_root" \
+            -DCMAKE_TOOLCHAIN_FILE="$rlottie_root/toolchain.cmake" \
+            "${rlottie_options[@]}"
+    else
+        info "Configuring rlottie..."
+        cmake -B build/rlottie -S "$rlottie_root" "${rlottie_options[@]}"
+    fi
+
+    info "Building rlottie..."
+    cmake --build build/rlottie --parallel "$JOBS"
+
+    if [[ "$ARGS" == "harmattan" ]]; then
+        info "Installing rlottie to Harmattan SDK..."
+        make -C build/rlottie DESTDIR="$SDK_PATH/Madde/sysroots/harmattan_sysroot_10.2011.34-1_slim" install
+    else
+        make -C build/rlottie install
+    fi
+
+    echo "$want" > "$stamp"
+
+    success "rlottie built and installed successfully."
+}
+
 # Build TDLib
 build_tdlib() {
     if [ -d "td" ]; then
@@ -276,6 +390,20 @@ build_tdlib() {
         fi
     fi
 
+    # Written only after install succeeds, so a failed run always rebuilds. Keyed on
+    # everything that changes the output: the pinned commit, the target, and whether
+    # LTO is on. Bumping any of them therefore forces a rebuild rather than silently
+    # reusing the previous one.
+    local stamp="build/tdlib/.built-commit"
+    local want="$TDLIB_COMMIT:$ARGS:$TDLIB_LTO"
+
+    if [ -z "${FORCE_REBUILD:-}" ] && [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$want" ]; then
+        warn "TDLib already built and installed for $ARGS, skipping. FORCE_REBUILD=1 to redo."
+        return
+    fi
+
+    # Deliberately a clean wipe: a stale CMake cache in a cross-build is a good way
+    # to get a subtly wrong binary. The stamp above is what makes re-runs cheap.
     rm -rf build/generate build/tdlib
     mkdir -p build/generate build/tdlib
 
@@ -306,28 +434,7 @@ build_tdlib() {
 
     if [[ "$ARGS" == "harmattan" ]]; then
         info "Setting up cross-compilation for Harmattan..."
-
-        # ar/ranlib/nm must be the gcc-* wrappers, not plain binutils. With LTO the
-        # compiler emits GIMPLE bytecode into the .o files, and plain ar cannot read
-        # it - BFD reports "plugin needed to handle lto object" and then either
-        # silently drops LTO or leaves an incomplete archive index, which shows up
-        # much later as undefined references. The wrappers pass liblto_plugin.so.
-        cat > "$td_root/toolchain.cmake" <<TOOLCHAIN
-SET(CMAKE_SYSTEM_NAME Linux)
-SET(CMAKE_SYSTEM_PROCESSOR arm)
-
-SET(CMAKE_C_COMPILER   ${TOOLCHAIN_PREFIX}-gcc)
-SET(CMAKE_CXX_COMPILER ${TOOLCHAIN_PREFIX}-g++)
-
-SET(CMAKE_AR      ${TOOLCHAIN_PREFIX}-gcc-ar     CACHE FILEPATH "" FORCE)
-SET(CMAKE_RANLIB  ${TOOLCHAIN_PREFIX}-gcc-ranlib CACHE FILEPATH "" FORCE)
-SET(CMAKE_NM      ${TOOLCHAIN_PREFIX}-gcc-nm     CACHE FILEPATH "" FORCE)
-
-SET(CMAKE_C_COMPILER_AR       ${TOOLCHAIN_PREFIX}-gcc-ar)
-SET(CMAKE_CXX_COMPILER_AR     ${TOOLCHAIN_PREFIX}-gcc-ar)
-SET(CMAKE_C_COMPILER_RANLIB   ${TOOLCHAIN_PREFIX}-gcc-ranlib)
-SET(CMAKE_CXX_COMPILER_RANLIB ${TOOLCHAIN_PREFIX}-gcc-ranlib)
-TOOLCHAIN
+        write_toolchain_file "$td_root/toolchain.cmake"
     fi
 
     if [[ "$ARGS" == "harmattan" ]]; then
@@ -348,14 +455,21 @@ TOOLCHAIN
         cd build/tdlib
         cmake -DCMAKE_BUILD_TYPE=Release "${openssl_options[@]}" "${zlib_options[@]}" "$td_root"
         cmake --build . --parallel "$JOBS"
+        cd ../..
     fi
 
+    # -C build/tdlib, not a bare `make`. The Harmattan branch returns to the source
+    # directory after configuring, so a bare `make install` ran here and failed with
+    # "No rule to make target 'install'" - there is no Makefile at the top level.
+    # The simulator branch only worked by accident, because it never undid its cd.
     if [[ "$ARGS" == "harmattan" ]]; then
         info "Installing TDLib to Harmattan SDK..."
-        make DESTDIR="$SDK_PATH/Madde/sysroots/harmattan_sysroot_10.2011.34-1_slim" install
+        make -C build/tdlib DESTDIR="$SDK_PATH/Madde/sysroots/harmattan_sysroot_10.2011.34-1_slim" install
     else
-        make install
+        make -C build/tdlib install
     fi
+
+    echo "$want" > "$stamp"
 
     success "TDLib built and installed successfully."
 }
@@ -366,6 +480,7 @@ main() {
     check_harmattan_env
     build_zlib
     build_openssl
+    build_rlottie
     build_tdlib
 }
 
