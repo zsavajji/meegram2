@@ -1,8 +1,23 @@
 #include "ChatFolderModel.hpp"
 
+namespace {
+
+// chatFolderInfo used to carry a plain `title:string`. It now holds
+// `name:chatFolderName`, which wraps a formattedText, so the folder title lives two
+// levels down. Both pointers are checked because either can be null in principle.
+QString folderTitle(const td::td_api::chatFolderInfo &info) noexcept
+{
+    if (!info.name_ || !info.name_->text_)
+        return {};
+
+    return QString::fromStdString(info.name_->text_->text_);
+}
+
+}  // namespace
+
 ChatFolderInfo::ChatFolderInfo(td::td_api::object_ptr<td::td_api::chatFolderInfo> info)
     : m_id(info->id_)
-    , m_title(QString::fromStdString(info->title_))
+    , m_title(folderTitle(*info))
 {
 }
 

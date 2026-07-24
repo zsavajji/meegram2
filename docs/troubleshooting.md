@@ -44,13 +44,13 @@ Usually means the wrong compiler is first on `PATH`.
 
 ## Known rough edges
 
-**`tools/toolchain.cmake` has no sysroot.** It sets only the compiler names — no
-`CMAKE_SYSROOT`, no `CMAKE_FIND_ROOT_PATH`. If your cross-GCC does not have the
-sysroot baked in, `find_package(Qt4)` may match your *host* Qt and fail
-confusingly. The complication is that the sysroot's `qmake` is an ARM binary and
-cannot run on the host, so `FindQt4` needs a host-runnable qmake (MADDE supplies a
-wrapper; a standalone toolchain needs `QT_QMAKE_EXECUTABLE` pointed somewhere
-sensible).
+**Qt4 not found** — `Found unsuitable Qt version "" from NOTFOUND`.
+`FindQt4` locates Qt by *running* qmake, and the sysroot's qmake is an ARM binary
+that cannot execute on the build host. `tools/toolchain.cmake` resolves this by
+globbing MADDE's host qmake at `$QT_SDK_PATH/Madde/targets/harmattan*/bin/qmake`,
+which conveniently already reports sysroot-prefixed paths. If your SDK lays that
+out differently, pass `-DQT_QMAKE_EXECUTABLE=` explicitly; verify with
+`file <qmake>` that it is an x86 binary, not ARM.
 
 **MADDE binaries are 32-bit x86.** On a 64-bit host:
 

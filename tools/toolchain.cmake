@@ -49,6 +49,24 @@ if(QT_SDK_PATH)
         list(APPEND CMAKE_PREFIX_PATH
             "${HARMATTAN_SYSROOT}/usr/local"
             "${HARMATTAN_SYSROOT}/usr")
+        # FindQt4 works by *running* qmake to ask where Qt lives, so it needs a host
+        # binary - the sysroot's qmake is ARM and cannot execute here. MADDE ships an
+        # x86 qmake per target that already reports sysroot-prefixed paths, which is
+        # exactly what is wanted. Globbed rather than hardcoded: the target directory
+        # carries a runtime suffix (harmattan_10.2011.34-1_rt1.2) that varies by SDK.
+        if(NOT QT_QMAKE_EXECUTABLE)
+            file(GLOB _harmattan_qmake "${QT_SDK_PATH}/Madde/targets/harmattan*/bin/qmake")
+
+            if(_harmattan_qmake)
+                list(GET _harmattan_qmake 0 _harmattan_qmake)
+                set(QT_QMAKE_EXECUTABLE "${_harmattan_qmake}"
+                    CACHE FILEPATH "Host qmake reporting the Harmattan target's Qt" FORCE)
+            else()
+                message(WARNING "No host qmake found under ${QT_SDK_PATH}/Madde/targets/harmattan*/bin. "
+                                "FindQt4 will fail with: Found unsuitable Qt version \"\" from NOTFOUND. "
+                                "Pass -DQT_QMAKE_EXECUTABLE=/path/to/qmake explicitly.")
+            endif()
+        endif()
     else()
         message(WARNING "Harmattan sysroot not found at ${HARMATTAN_SYSROOT} - "
                         "find_package() will search the host instead and pick up the wrong Qt.")
