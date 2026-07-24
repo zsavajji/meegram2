@@ -25,28 +25,18 @@ Item {
     BusyIndicator {
         anchors.centerIn: parent
         running: visible
-        visible: populateTimer.running || model.loading
+        visible: model.loading
         platformStyle: BusyIndicatorStyle { size: "large" }
-    }
-
-    Timer {
-        id: populateTimer
-        interval: 200
-        repeat: false
-        onTriggered: model.populate()
     }
 
     ScrollDecorator {
         flickableItem: listView
     }
 
-    Connections {
-        target: model
-        onLoadingChanged: {
-            if (!model.loading)
-                populateTimer.restart()
-        }
-    }
+    // The populate timer and the loadingChanged->populate() hop that used to live
+    // here are gone: ChatModel now seeds itself when its first batch of chats
+    // arrives, and takes later chats incrementally. Driving populate() from QML as
+    // well would reset the model a second time and throw away the scroll position.
 
     function positionViewAtBeginning() {
         listView.positionViewAtBeginning();

@@ -22,17 +22,20 @@ ChatModel::ChatModel(std::unique_ptr<ChatList> list, std::shared_ptr<Locale> loc
     , m_storageManager(std::move(storage))
 {
     connect(&m_sortTimer, SIGNAL(timeout()), this, SLOT(sortChats()));
-    connect(&m_loadingTimer, SIGNAL(timeout()), this, SLOT(loadChats()));
 
     m_sortTimer.setInterval(500);
     m_sortTimer.setSingleShot(true);
-
-    m_loadingTimer.setInterval(500);
 
     connect(m_storageManager.get(), SIGNAL(chatUpdated(qlonglong)), SLOT(handleChatItem(qlonglong)));
     connect(m_storageManager.get(), SIGNAL(chatPositionUpdated(qlonglong)), SLOT(handleChatPosition(qlonglong)));
 
     setRoleNames(roleNames());
+}
+
+ChatModel::~ChatModel()
+{
+    // Tell any in-flight loadChats callback not to touch this object.
+    m_alive->store(false);
 }
 
 int ChatModel::rowCount(const QModelIndex &parent) const
@@ -71,6 +74,14 @@ void ChatModel::fetchMore(const QModelIndex &parent)
     endInsertRows();
 
     emit countChanged();
+
+    // The view has now consumed everything TDLib has handed us, so pull the next
+    // page. This is what replaces the old "load the entire chat list at startup"
+    // loop: chats are requested as the user actually reaches them.
+    if (m_count >= static_cast<int>(m_chats.size()))
+    {
+        requestMoreChats();
+    }
 }
 
 const ChatModel::FormattedRow &ChatModel::formattedRow(const std::shared_ptr<Chat> &chat) const
@@ -173,6 +184,96 @@ void ChatModel::rebuildRowIndex()
     }
 }
 
+void ChatModel::scheduleSort()
+{
+    // Coalesce bursts of reordering into one sort.
+    if (!m_sortTimer.isActive())
+    {
+        m_sortTimer.start();
+    }
+}
+
+bool ChatModel::insertChatIfInList(qlonglong chatId)
+{
+    if (m_rowById.contains(chatId))
+        return false;
+
+    const auto chat = m_storageManager->chat(chatId);
+    if (!chat)
+        return false;
+
+    if (!std::ranges::any_of(chat->positions(), [&](const auto &pos) { return *pos->list() == *m_list; }))
+        return false;
+
+    // rowCount() is m_count, and m_count <= m_chats.size() always holds, so the
+    // appended chat lands outside the visible range. No row insertion has to be
+    // signalled here: the pending sort places it and layoutChanged makes the view
+    // re-read. Without this the model was write-once - a chat arriving after
+    // populate() could never enter the list, which is why startup had to load
+    // every chat before showing anything.
+    m_chats.emplace_back(chat);
+    m_rowById.insert(chatId, static_cast<int>(m_chats.size()) - 1);
+
+    return true;
+}
+
+void ChatModel::requestMoreChats()
+{
+    if (m_requestPending || m_listFullyLoaded)
+        return;
+
+    auto client = m_storageManager->client();
+    if (!client)
+        return;
+
+    auto request = td::td_api::make_object<td::td_api::loadChats>();
+    request->chat_list_ = Utils::toChatList(m_list);
+    request->limit_ = ChatSliceLimit;
+
+    m_requestPending = true;
+
+    client->send(std::move(request), [this, alive = m_alive](auto &&response) {
+        // This runs on the TDLib worker thread (see Client::initialize), and the
+        // model may already be gone - folder models are replaced whenever the
+        // folder list changes. Bail before dereferencing anything.
+        if (!alive->load())
+            return;
+
+        const auto exhausted = response->get_id() == td::td_api::error::ID &&
+                               td::td_api::move_object_as<td::td_api::error>(response)->code_ == 404;
+
+        // Hop back to the main thread before touching model state or emitting.
+        // A queued call to a QObject that is destroyed first is safe: ~QObject
+        // removes its pending posted events.
+        QMetaObject::invokeMethod(this, "handleChatsLoaded", Qt::QueuedConnection, Q_ARG(bool, exhausted));
+    });
+}
+
+void ChatModel::handleChatsLoaded(bool listExhausted)
+{
+    m_requestPending = false;
+
+    if (listExhausted)
+    {
+        m_listFullyLoaded = true;
+    }
+
+    // Seed once from whatever StorageManager accumulated while this batch loaded.
+    // Later batches arrive through handleChatItem/handleChatPosition instead, so
+    // the model is never reset out from under a scrolling view.
+    if (!m_populated)
+    {
+        m_populated = true;
+        populate();
+    }
+
+    if (m_loading)
+    {
+        m_loading = false;
+        emit loadingChanged();
+    }
+}
+
 void ChatModel::populate()
 {
     // This replaces the contents wholesale, so the view has to be told. Previously
@@ -206,10 +307,11 @@ void ChatModel::populate()
 
     emit countChanged();
 
+    // sortChats() reveals the first page itself once the order is settled, so there
+    // is deliberately no fetchMore() call here - doing both would hand out two pages.
     if (!m_chats.empty())
     {
         sortChats();
-        fetchMore();
     }
 }
 
@@ -228,10 +330,15 @@ void ChatModel::clear()
 void ChatModel::refresh()
 {
     m_loading = true;
+    m_populated = false;
+    m_listFullyLoaded = false;
 
     clear();
 
-    m_loadingTimer.start();
+    // One batch, not the whole list. Previously this started a 500ms repeating timer
+    // that kept calling loadChats until TDLib answered 404 - i.e. until every chat
+    // the account has was loaded, just to fill a list showing about nine rows.
+    requestMoreChats();
 
     emit loadingChanged();
 }
@@ -276,10 +383,26 @@ void ChatModel::sortChats()
     rebuildRowIndex();
 
     emit layoutChanged();
+
+    // On a cold start populate() sees an empty cache, so the first chats to arrive
+    // land beyond the visible range. Reveal them here or the list stays blank until
+    // the user scrolls.
+    if (m_count == 0 && !m_chats.empty())
+    {
+        fetchMore();
+    }
 }
 
 void ChatModel::handleChatItem(qlonglong chatId)
 {
+    // updateNewChat reaches us as chatUpdated, so this is one of the two paths by
+    // which a freshly loaded chat first becomes visible to the model.
+    if (insertChatIfInList(chatId))
+    {
+        scheduleSort();
+        return;
+    }
+
     const auto it = m_rowById.constFind(chatId);
     if (it == m_rowById.constEnd())
         return;
@@ -293,14 +416,12 @@ void ChatModel::handleChatItem(qlonglong chatId)
 
 void ChatModel::handleChatPosition(qlonglong chatId)
 {
-    if (!m_rowById.contains(chatId))
+    const auto inserted = insertChatIfInList(chatId);
+
+    if (!inserted && !m_rowById.contains(chatId))
         return;
 
-    // Coalesce bursts of reordering into one sort.
-    if (!m_sortTimer.isActive())
-    {
-        m_sortTimer.start();
-    }
+    scheduleSort();
 }
 
 ChatPosition *ChatModel::getChatPosition(Chat *chat) const
@@ -332,26 +453,3 @@ void ChatModel::toggleChatIsPinned(qlonglong chatId, bool isPinned)
     client->send(std::move(request));
 }
 
-void ChatModel::loadChats()
-{
-    auto request = td::td_api::make_object<td::td_api::loadChats>();
-    request->chat_list_ = Utils::toChatList(m_list);
-    request->limit_ = ChatSliceLimit;
-
-    auto client = m_storageManager->client();
-    if (!client)
-        return;
-
-    client->send(std::move(request), [this](auto &&response) {
-        if (response->get_id() == td::td_api::error::ID)
-        {
-            if (td::td_api::move_object_as<td::td_api::error>(response)->code_ == 404)
-            {
-                m_loading = false;
-                m_loadingTimer.stop();
-
-                emit loadingChanged();
-            }
-        }
-    });
-}

@@ -7,6 +7,7 @@
 #include <QHash>
 #include <QTimer>
 
+#include <atomic>
 #include <memory>
 #include <vector>
 
@@ -22,6 +23,7 @@ class ChatModel : public QAbstractListModel
 
 public:
     explicit ChatModel(std::unique_ptr<ChatList> list, std::shared_ptr<Locale> locale, std::shared_ptr<StorageManager> storage);
+    ~ChatModel() override;
 
     enum Roles {
         IdRole = Qt::UserRole + 1,
@@ -62,8 +64,11 @@ public slots:
     void refresh();
 
 private slots:
-    void loadChats();
     void sortChats();
+
+    // Invoked (queued) from the loadChats callback, which runs on the TDLib worker
+    // thread - see the note in requestMoreChats().
+    void handleChatsLoaded(bool listExhausted);
 
     void handleChatItem(qlonglong chatId);
     void handleChatPosition(qlonglong chatId);
@@ -81,14 +86,29 @@ private:
     };
 
     void rebuildRowIndex();
+    void scheduleSort();
+    void requestMoreChats();
+
+    // Adds a chat that has appeared in this list but is not in the model yet.
+    // Returns true if it was inserted.
+    bool insertChatIfInList(qlonglong chatId);
+
     const FormattedRow &formattedRow(const std::shared_ptr<Chat> &chat) const;
 
     bool m_loading{true};
 
+    // populate() seeds the model from whatever StorageManager already holds; it runs
+    // once per refresh, after which chats arrive incrementally via the update slots.
+    bool m_populated{false};
+
+    // Guards against stacking loadChats requests, and stops asking once TDLib has
+    // reported the list exhausted.
+    bool m_requestPending{false};
+    bool m_listFullyLoaded{false};
+
     int m_count{};
 
     QTimer m_sortTimer;
-    QTimer m_loadingTimer;
 
     std::unique_ptr<ChatList> m_list;
 
@@ -103,4 +123,9 @@ private:
 
     // Keyed by chatId, so reordering the list does not invalidate it.
     mutable QHash<qlonglong, FormattedRow> m_formatted;
+
+    // Liveness token for the loadChats callback, which Client invokes on the TDLib
+    // worker thread. Folder models are destroyed whenever the folder list changes,
+    // so a response can outlive the model that asked for it.
+    std::shared_ptr<std::atomic_bool> m_alive{std::make_shared<std::atomic_bool>(true)};
 };
