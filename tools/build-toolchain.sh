@@ -172,19 +172,32 @@ verify() {
     info "Verifying toolchain..."
     "$TARGET-g++" --version | head -1
 
+    # Exercises the three things MeeGram actually needs from a modern toolchain:
+    # std::to_array (src/Emoji.cpp), std::ranges (src/ChatModel.cpp), and
+    # std::jthread (src/Client.cpp). jthread is the one worth checking - it needs
+    # libstdc++ built with thread support, which is the usual casualty of a
+    # misconfigured cross build, and it only shows up at link time.
     local probe="$WORKDIR/probe.cpp"
     cat > "$probe" <<'CPP'
-#include <ranges>
+#include <algorithm>
 #include <array>
+#include <ranges>
+#include <thread>
 #include <vector>
-int main() {
-    constexpr auto a = std::to_array({3, 1, 2});
-    std::vector<int> v(a.begin(), a.end());
-    return std::ranges::count(v, 42);
+
+int main()
+{
+    constexpr auto values = std::to_array({3, 1, 2});
+    std::vector<int> v(values.begin(), values.end());
+
+    std::jthread worker([&v] { std::ranges::sort(v); });
+    worker.join();
+
+    return static_cast<int>(std::ranges::count(v, 42));
 }
 CPP
 
-    "$TARGET-g++" -std=c++23 "$probe" -o "$WORKDIR/probe"
+    "$TARGET-g++" -std=c++23 -pthread "$probe" -o "$WORKDIR/probe"
     file "$WORKDIR/probe"
 
     success "Toolchain works and compiles C++23 for ARM."

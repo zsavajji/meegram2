@@ -14,6 +14,11 @@ declare -r COLOR_MAGENTA="\033[35m"
 readonly ARGS="${1:-}"
 readonly SDK_PATH="${2:-}"
 
+# Pinned TDLib revision. TDLib tags almost nothing (its git tags stop at v1.8.0
+# while it reports versions like 1.8.x), so a commit is the only way to pin it.
+# Bump deliberately, after verifying a build actually runs on the device.
+readonly TDLIB_COMMIT="${TDLIB_COMMIT:-022d60202e446ad1287b9fb68e687c8a0760788b}"
+
 # Check if TOOLCHAIN_PREFIX is set, if needed
 check_toolchain_prefix() {
     if [[ "$ARGS" == "harmattan" ]]; then
@@ -73,8 +78,11 @@ check_sha256() {
 
 # Build OpenSSL
 build_openssl() {
-    local version="3.3.1"
-    local hash="777cd596284c883375a2a7a11bf5d2786fc5413255efab20c50d6ffe6d020b7e"
+    # 3.5.x is the current LTS branch (supported to 2030-04-08). The previous pin,
+    # 3.3.1, sat on the 3.3 branch which went end-of-support on 2026-04-09 and so
+    # never received the June 2026 high-severity fixes.
+    local version="3.5.7"
+    local hash="a8c0d28a529ca480f9f36cf5792e2cd21984552a3c8e4aa11a24aa31aeac98e8"
     local filename="openssl-$version.tar.gz"
 
     if [ -d "openssl-$version" ]; then
@@ -115,8 +123,8 @@ build_openssl() {
 
 # Build ZLib
 build_zlib() {
-    local version="1.3.1"
-    local hash="38ef96b8dfe510d42707d9c781877914792541133e1870841463bfa73f883e32"
+    local version="1.3.2"
+    local hash="d7a0654783a4da529d1bb793b7ad9c3318020af77667bcae35f95d0e42a792f3"
     local filename="zlib-$version.tar.xz"
 
     if [ -d "zlib-$version" ]; then
@@ -157,19 +165,35 @@ build_zlib() {
 # Build TDLib
 build_tdlib() {
     if [ -d "td" ]; then
-        warn "TDLib repository already exists, skipping clone."
+        warn "TDLib checkout already exists, skipping fetch. Remove td/ to re-pin."
     else
-        info "Cloning TDLib repository..."
-        git clone --depth=1 https://github.com/tdlib/td
-    fi
+        info "Fetching TDLib at $TDLIB_COMMIT..."
 
-    cd td
+        # Shallow-fetch the pinned commit. This used to be `git clone --depth=1`,
+        # which takes whatever master happens to be that day - so no two builds
+        # were guaranteed to use the same TDLib.
+        mkdir -p td
+        git -C td init --quiet
+        git -C td remote add origin https://github.com/tdlib/td
+        git -C td fetch --quiet --depth=1 origin "$TDLIB_COMMIT"
+        git -C td checkout --quiet FETCH_HEAD
+    fi
 
     if [[ "$ARGS" == "harmattan" ]]; then
-        sed -i 's/TD_HAS_MMSG 1/TD_HAS_MMSG 0/g' tdutils/td/utils/port/config.h
-    fi
+        local config_header="td/tdutils/td/utils/port/config.h"
 
-    cd ..
+        # The N9's kernel predates recvmmsg/sendmmsg. sed exits 0 even when it
+        # matches nothing, so check first - otherwise a TDLib restructure would
+        # silently produce a binary that fails on the device instead of here.
+        if ! grep -q "TD_HAS_MMSG 1" "$config_header"; then
+            error "Expected 'TD_HAS_MMSG 1' in $config_header, but it is not there."
+            error "TDLib has likely moved or renamed it; the Harmattan patch needs revisiting."
+            exit 1
+        fi
+
+        sed -i 's/TD_HAS_MMSG 1/TD_HAS_MMSG 0/g' "$config_header"
+        success "Disabled TD_HAS_MMSG for Harmattan."
+    fi
 
     rm -rf build/generate build/tdlib
     mkdir -p build/generate build/tdlib
