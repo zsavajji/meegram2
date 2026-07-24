@@ -1,7 +1,6 @@
 import QtQuick 1.1
 import com.nokia.meego 1.1
 import com.nokia.extras 1.1
-import "UIConstants.js" as UI
 
 Item {
     id: root
@@ -11,12 +10,17 @@ Item {
     height: 88
     width: parent.width
 
-    // Harmattan list-item "down" state: a flat background fill while pressed.
-    // Declared first so it paints behind the row content. A hidden Rectangle costs
-    // nothing to render, so this stays a single item rather than a Loader.
+    // Harmattan list-item "down" state: a flat wash while pressed. Declared first so
+    // it paints behind the row content; a hidden Rectangle costs nothing to render,
+    // so this stays a single item rather than a Loader.
+    //
+    // Same treatment ListItem.qml uses for its highlight. The first attempt used
+    // UIConstants COLOR_BACKGROUND (#E0E1E2), which is so close to the list
+    // background that the press was invisible.
     Rectangle {
         anchors.fill: parent
-        color: UI.COLOR_BACKGROUND
+        color: "#8c8c8c"
+        opacity: 0.5
         visible: mouseArea.pressed
     }
 

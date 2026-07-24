@@ -10,6 +10,28 @@ Page {
     property variant chatInfo: chatManager.chatInfo
     property variant messageModel: chatManager.messageModel
 
+    // Pending reply target. Named distinctly rather than living on the page root,
+    // because MessageBubble also uses id: root and would shadow it.
+    QtObject {
+        id: replyState
+
+        property variant messageId: 0
+        property string senderName: ""
+        property string preview: ""
+
+        function setTarget(id, sender, text) {
+            messageId = id;
+            senderName = sender;
+            preview = text;
+        }
+
+        function clear() {
+            messageId = 0;
+            senderName = "";
+            preview = "";
+        }
+    }
+
     property bool loading: true
 
     property QtObject platformStyle: SheetStyle {}
@@ -206,6 +228,91 @@ Page {
             anchors.right: parent.right
             anchors.bottom: parent.bottom
 
+            // Sits above the text field while a reply is pending. Collapses to zero
+            // height when there is no target, so it costs nothing the rest of the time.
+            Rectangle {
+                id: replyBanner
+
+                visible: replyState.messageId !== 0
+                width: parent.width
+                height: visible ? 60 : 0
+                color: "white"
+
+                Rectangle {
+                    id: replyBannerBar
+
+                    anchors {
+                        left: parent.left
+                        leftMargin: 16
+                        verticalCenter: parent.verticalCenter
+                    }
+                    width: 3
+                    height: 40
+                    color: "#0077A8"
+                }
+
+                Label {
+                    id: replyBannerSender
+
+                    anchors {
+                        left: replyBannerBar.right
+                        leftMargin: 12
+                        right: replyBannerClose.left
+                        rightMargin: 12
+                        top: replyBannerBar.top
+                    }
+                    text: replyState.senderName
+                    color: "#0077A8"
+                    font.pixelSize: 18
+                    font.bold: true
+                    elide: Text.ElideRight
+                    maximumLineCount: 1
+                }
+
+                Label {
+                    anchors {
+                        left: replyBannerBar.right
+                        leftMargin: 12
+                        right: replyBannerClose.left
+                        rightMargin: 12
+                        top: replyBannerSender.bottom
+                    }
+                    text: replyState.preview
+                    color: "#505050"
+                    font.pixelSize: 18
+                    font.weight: Font.Light
+                    elide: Text.ElideRight
+                    maximumLineCount: 1
+                }
+
+                Label {
+                    id: replyBannerClose
+
+                    anchors {
+                        right: parent.right
+                        rightMargin: 16
+                        verticalCenter: parent.verticalCenter
+                    }
+                    text: icons.close
+                    font.family: icons.fontFamily
+                    font.pixelSize: 32
+                    color: "#505050"
+
+                    MouseArea {
+                        anchors.fill: parent
+                        anchors.margins: -12
+                        onClicked: replyState.clear()
+                    }
+                }
+
+                Rectangle {
+                    anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                    height: 1
+                    opacity: 0.5
+                    color: "#cccccc"
+                }
+            }
+
             TextArea {
                 id: textArea
                 height: 64
@@ -252,13 +359,18 @@ Page {
                     platformStyle: ButtonStyle { inverted: true }
                     text: "Send"
                     onClicked: {
-                        messageModel.sendMessage(textArea.text)
-                        textArea.text = ""
+                        // Whitespace-only counts as empty: TDLib rejects such a
+                        // message, so there is nothing to gain by sending it.
+                        if (textArea.text.trim() !== "") {
+                            messageModel.sendMessage(textArea.text, replyState.messageId)
+                            textArea.text = ""
+                            replyState.clear()
+                        }
 
-                        // Tapping the button moves focus off the text area, and the
-                        // "open" state below is bound to textArea.activeFocus - so
-                        // without this the keyboard closes and this whole panel
-                        // collapses after every message.
+                        // Outside the guard on purpose. Tapping the button moves focus
+                        // off the text area, and the "open" state below is bound to
+                        // textArea.activeFocus - so without this the keyboard closes
+                        // and this whole panel collapses, even on an empty tap.
                         textArea.forceActiveFocus()
                     }
                 }

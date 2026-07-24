@@ -39,7 +39,9 @@ public:
         ContentTypeRole,
         IsServiceRole,
         ServiceMessageRole,
-        SectionRole
+        SectionRole,
+        ReplyToSenderRole,
+        ReplyToTextRole
     };
 
     int rowCount(const QModelIndex &parent = QModelIndex()) const override;
@@ -87,6 +89,11 @@ private:
     void handleDeleteMessages(qlonglong chatId, std::vector<int64_t> &&messageIds, bool isPermanent, bool fromCache) noexcept;
 
     void loadMessages() noexcept;
+
+    // Reply previews. Both return an empty string when the message is not a reply,
+    // which is what the delegate tests to decide whether to show a quote block.
+    QString replyToSender(const Message *message) const noexcept;
+    QString replyToText(const Message *message) const noexcept;
 
     void itemChanged(size_t index) noexcept;
 

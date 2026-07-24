@@ -144,9 +144,57 @@ QVariant MessageModel::data(const QModelIndex &index, int role) const
             else
                 return message->date().toString(QObject::tr("chatFullDate"));
         }
+        case ReplyToSenderRole:
+            return replyToSender(message.get());
+        case ReplyToTextRole:
+            return replyToText(message.get());
     }
 
     return QVariant();
+}
+
+QString MessageModel::replyToSender(const Message *message) const noexcept
+{
+    const auto *reply = message->replyTo();
+    if (!reply)
+        return {};
+
+    // An explicit origin only appears when the replied-to message came from
+    // somewhere else. Prefer it when present.
+    if (!reply->hiddenSenderName.isEmpty())
+        return reply->hiddenSenderName;
+
+    if (reply->senderUserId != 0)
+        return Utils::getUserShortName(m_storage->user(reply->senderUserId));
+
+    if (reply->senderChatId != 0)
+        return Utils::getChatTitle(m_storage->chat(reply->senderChatId), m_storage);
+
+    // Ordinary same-chat reply: no origin, so resolve the sender from the
+    // replied-to message if it happens to be one we have already loaded.
+    if (const auto it = m_messageMap.find(reply->messageId); it != m_messageMap.end() && it->second)
+        return Utils::getSenderName(it->second.get(), m_storage);
+
+    return {};
+}
+
+QString MessageModel::replyToText(const Message *message) const noexcept
+{
+    const auto *reply = message->replyTo();
+    if (!reply)
+        return {};
+
+    // A manually selected quote is what the sender chose to point at, so it beats
+    // the generated preview.
+    if (!reply->quote.isEmpty())
+        return reply->quote;
+
+    if (!reply->content)
+        return {};
+
+    // isOutgoing is only used by call-content wording, which never appears in a
+    // reply preview; false is the neutral choice.
+    return Utils::getContent(reply->content.get(), reply->contentType, false, m_locale);
 }
 
 QHash<int, QByteArray> MessageModel::roleNames() const noexcept
@@ -164,6 +212,8 @@ QHash<int, QByteArray> MessageModel::roleNames() const noexcept
     roles[IsServiceRole] = "isService";
     roles[ServiceMessageRole] = "serviceMessage";
     roles[SectionRole] = "section";
+    roles[ReplyToSenderRole] = "replyToSender";
+    roles[ReplyToTextRole] = "replyToText";
     return roles;
 }
 
@@ -254,7 +304,10 @@ void MessageModel::sendMessage(const QString &message, qlonglong replyToMessageI
 
     if (replyToMessageId != 0)
     {
-        // request->reply_to_ = td::td_api::make_object<td::td_api::inputMessageReplyToMessage>(m_chat->id(), replyToMessageId, nullptr);
+        // Field order is message_id, quote, checklist_task_id, poll_option_id.
+        // The chat_id parameter this used to take was removed from td_api - the
+        // reply target is always in the chat the message is sent to.
+        request->reply_to_ = td::td_api::make_object<td::td_api::inputMessageReplyToMessage>(replyToMessageId, nullptr, 0, "");
     }
 
     request->input_message_content_ = std::move(inputMessageContent);
