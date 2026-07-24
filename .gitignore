@@ -28,7 +28,9 @@ ui_*.h
 *.qmlc
 *.jsc
 Makefile*
-*build*
+# Directory-only: a bare *build* also swallows files such as BUILDING.md and
+# tools/build-toolchain.sh, which then never show up as untracked.
+*build*/
 *.qm
 *.prl
 

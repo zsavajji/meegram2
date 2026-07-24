@@ -3,6 +3,11 @@
 
 MeeGram is an unofficial Telegram client designed for Nokia N9 devices.
 
+## Building
+See [BUILDING.md](BUILDING.md). Note that the Qt SDK's bundled GCC 4.4.1 cannot
+build this project — it is C++23 and needs a modern cross-toolchain, which
+`tools/build-toolchain.sh` will build for you.
+
 ## Contributing
 Contributions to this project are welcome! If you'd like to improve MeeGram, please open pull requests. Any contribution is greatly appreciated.
 
