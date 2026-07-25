@@ -324,21 +324,26 @@ void MessageModel::sendMessage(const QString &message, qlonglong replyToMessageI
 
 void MessageModel::sendPhoto(const QString &filePath, const QString &caption, qlonglong replyToMessageId) noexcept
 {
-    auto content = td::td_api::make_object<td::td_api::inputMessagePhoto>();
+    // The file and its dimensions live on a nested inputPhoto; only the caption sits
+    // on inputMessagePhoto itself.
+    auto photo = td::td_api::make_object<td::td_api::inputPhoto>();
 
-    content->photo_ = td::td_api::make_object<td::td_api::inputFileLocal>(filePath.toStdString());
+    photo->photo_ = td::td_api::make_object<td::td_api::inputFileLocal>(filePath.toStdString());
 
     // Read from the header rather than decoded: QImageReader::size() only parses far
-    // enough to find the dimensions, which matters for a 8MP shot on this hardware.
+    // enough to find the dimensions, which matters for an 8MP shot on this hardware.
     // Zero is acceptable to TDLib; it just means the recipient sees no placeholder
     // geometry until the photo arrives.
     const QImageReader reader(filePath);
     if (const auto size = reader.size(); size.isValid())
     {
-        content->width_ = size.width();
-        content->height_ = size.height();
+        photo->width_ = size.width();
+        photo->height_ = size.height();
     }
 
+    auto content = td::td_api::make_object<td::td_api::inputMessagePhoto>();
+
+    content->photo_ = std::move(photo);
     content->caption_ = td::td_api::make_object<td::td_api::formattedText>();
     content->caption_->text_ = caption.toStdString();
 
