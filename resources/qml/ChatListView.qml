@@ -22,6 +22,71 @@ Item {
         snapMode: ListView.SnapToItem
     }
 
+    // The chat the action menu is acting on. One menu for the whole list - declaring
+    // a ContextMenu inside the delegate would build one popup per visible row.
+    QtObject {
+        id: menuTarget
+
+        property variant chatId: 0
+        property string title: ""
+        property bool isPinned: false
+        property bool isMuted: false
+        property bool isUnread: false
+
+        function open(id, chatTitle, pinned, muted, unread) {
+            chatId = id;
+            title = chatTitle;
+            isPinned = pinned;
+            isMuted = muted;
+            isUnread = unread;
+            chatMenu.open();
+        }
+    }
+
+    ContextMenu {
+        id: chatMenu
+
+        MenuLayout {
+            MenuItem {
+                text: menuTarget.isPinned ? qsTr("UnpinFromTop") : qsTr("PinToTop")
+                onClicked: root.model.toggleChatIsPinned(menuTarget.chatId, !menuTarget.isPinned)
+            }
+
+            MenuItem {
+                text: menuTarget.isUnread ? qsTr("MarkAsRead") : qsTr("MarkAsUnread")
+                onClicked: {
+                    if (menuTarget.isUnread)
+                        root.model.markChatAsRead(menuTarget.chatId)
+                    else
+                        root.model.markChatAsUnread(menuTarget.chatId)
+                }
+            }
+
+            MenuItem {
+                text: menuTarget.isMuted ? qsTr("UnmuteNotifications") : qsTr("MuteNotifications")
+                onClicked: root.model.setChatMuted(menuTarget.chatId, !menuTarget.isMuted)
+            }
+
+            MenuItem {
+                text: qsTr("Delete")
+                onClicked: deleteDialog.open()
+            }
+        }
+    }
+
+    QueryDialog {
+        id: deleteDialog
+
+        titleText: qsTr("DeleteChat")
+        // Groups are left rather than deleted, which the model decides from the chat
+        // type. Naming the chat is what makes the confirmation useful either way.
+        message: menuTarget.title
+        acceptButtonText: qsTr("OK")
+        rejectButtonText: qsTr("Cancel")
+
+        onAccepted: root.model.deleteChat(menuTarget.chatId)
+    }
+
     BusyIndicator {
         anchors.centerIn: parent
         running: visible

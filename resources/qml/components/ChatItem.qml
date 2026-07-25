@@ -5,8 +5,6 @@ import com.nokia.extras 1.1
 Item {
     id: root
 
-    signal pressAndHold
-
     height: 88
     width: parent.width
 
@@ -184,7 +182,11 @@ Item {
         onClicked: {
             appWindow.openChat(model.id)
         }
-        onPressAndHold: root.pressAndHold()
+        // menuTarget lives in ChatListView.qml and resolves through the delegate's
+        // context. Handled here rather than in the delegate block over there because
+        // bare "model" there would sit next to ChatListView's own model property.
+        onPressAndHold: menuTarget.open(model.id, model.title, model.isPinned, model.isMuted,
+                                        model.unreadCount > 0 || model.isMarkedAsUnread)
     }
 
     function sanitizeText(text) {

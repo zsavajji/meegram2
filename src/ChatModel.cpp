@@ -12,7 +12,6 @@
 #include <td/telegram/td_api.h>
 
 #include <algorithm>
-#include <limits>
 #include <ranges>
 #include <utility>
 
@@ -141,6 +140,8 @@ QVariant ChatModel::data(const QModelIndex &index, int role) const
             return chatPtr->unreadMentionCount();
         case IsMutedRole:
             return chatPtr->isMuted();
+        case IsMarkedAsUnreadRole:
+            return chatPtr->isMarkedAsUnread();
         default:
             return QVariant();
     }
@@ -160,6 +161,7 @@ QHash<int, QByteArray> ChatModel::roleNames() const
     roles[UnreadCountRole] = "unreadCount";
     roles[UnreadMentionCountRole] = "unreadMentionCount";
     roles[IsMutedRole] = "isMuted";
+    roles[IsMarkedAsUnreadRole] = "isMarkedAsUnread";
 
     return roles;
 }
@@ -197,6 +199,13 @@ void ChatModel::scheduleSort()
     }
 }
 
+bool ChatModel::isInList(Chat *chat) const
+{
+    const auto *position = getChatPosition(chat);
+
+    return position && position->order() != 0;
+}
+
 bool ChatModel::insertChatIfInList(qlonglong chatId)
 {
     if (m_rowById.contains(chatId))
@@ -206,7 +215,7 @@ bool ChatModel::insertChatIfInList(qlonglong chatId)
     if (!chat)
         return false;
 
-    if (!std::ranges::any_of(chat->positions(), [&](const auto &pos) { return *pos->list() == *m_list; }))
+    if (!isInList(chat.get()))
         return false;
 
     // rowCount() is m_count, and m_count <= m_chats.size() always holds, so the
@@ -313,7 +322,7 @@ void ChatModel::populate()
         if (!chat)
             continue;
 
-        if (std::ranges::any_of(chat->positions(), [&](const auto &pos) { return *pos->list() == *m_list; }))
+        if (isInList(chat.get()))
         {
             m_chats.emplace_back(chat);
         }
@@ -366,8 +375,6 @@ void ChatModel::sortChats()
 {
     MEEGRAM_SCOPE("ChatModel::sortChats");
 
-    emit layoutAboutToBeChanged();
-
     // Decorate-sort-undecorate. std::ranges::sort re-invokes the projection on every
     // comparison, and this projection costs a weak_ptr::lock() (atomic CAS) plus a
     // linear scan of the chat's positions. Computing each key once turns
@@ -377,20 +384,31 @@ void ChatModel::sortChats()
 
     for (const auto &weakChat : m_chats)
     {
-        auto order = std::numeric_limits<qlonglong>::min();
+        const auto chat = weakChat.lock();
 
-        if (const auto chat = weakChat.lock())
+        // Chats that have left this list - deleted, left, archived - used to be kept
+        // and sorted to the bottom, so a deleted chat stayed on screen until restart.
+        if (!chat || !isInList(chat.get()))
         {
-            if (const auto *position = getChatPosition(chat.get()))
-            {
-                order = position->order();
-            }
+            if (chat)
+                m_formatted.remove(chat->id());
+
+            continue;
         }
 
-        ordered.emplace_back(order, weakChat);
+        ordered.emplace_back(getChatPosition(chat.get())->order(), weakChat);
     }
 
     std::ranges::sort(ordered, std::greater{}, [](const auto &entry) { return entry.first; });
+
+    // A pure reorder can go out as layoutChanged. A shrink cannot: rowCount is about
+    // to change, and only a reset lets that happen without lying to the view.
+    const auto shrank = ordered.size() != m_chats.size();
+
+    if (shrank)
+        beginResetModel();
+    else
+        emit layoutAboutToBeChanged();
 
     m_chats.clear();
 
@@ -401,7 +419,16 @@ void ChatModel::sortChats()
 
     rebuildRowIndex();
 
-    emit layoutChanged();
+    if (shrank)
+    {
+        m_count = std::min(m_count, static_cast<int>(m_chats.size()));
+        endResetModel();
+        emit countChanged();
+    }
+    else
+    {
+        emit layoutChanged();
+    }
 
     // On a cold start populate() sees an empty cache, so the first chats to arrive
     // land beyond the visible range. Reveal them here or the list stays blank until
@@ -458,6 +485,14 @@ ChatPosition *ChatModel::getChatPosition(Chat *chat) const
     return nullptr;
 }
 
+void ChatModel::send(td::td_api::object_ptr<td::td_api::Function> request)
+{
+    if (auto client = m_storageManager->client())
+    {
+        client->send(std::move(request));
+    }
+}
+
 void ChatModel::toggleChatIsPinned(qlonglong chatId, bool isPinned)
 {
     auto request = td::td_api::make_object<td::td_api::toggleChatIsPinned>();
@@ -465,10 +500,83 @@ void ChatModel::toggleChatIsPinned(qlonglong chatId, bool isPinned)
     request->chat_id_ = chatId;
     request->is_pinned_ = isPinned;
 
-    auto client = m_storageManager->client();
-    if (!client)
+    send(std::move(request));
+}
+
+void ChatModel::deleteChat(qlonglong chatId)
+{
+    const auto chat = m_storageManager->chat(chatId);
+    if (!chat)
         return;
 
-    client->send(std::move(request));
+    // Private and secret chats cannot be left; groups and channels cannot be cleared
+    // out from under their other members. One menu entry, two different requests.
+    if (chat->type() == Chat::Private || chat->type() == Chat::Secret)
+    {
+        auto request = td::td_api::make_object<td::td_api::deleteChatHistory>();
+        request->chat_id_ = chatId;
+        request->remove_from_chat_list_ = true;
+        // Clearing our own copy only. Wiping the other side's history is a separate
+        // decision and not what a swipe-to-delete style action should imply.
+        request->revoke_ = false;
+
+        send(std::move(request));
+        return;
+    }
+
+    send(td::td_api::make_object<td::td_api::leaveChat>(chatId));
+}
+
+void ChatModel::markChatAsRead(qlonglong chatId)
+{
+    const auto chat = m_storageManager->chat(chatId);
+    if (!chat)
+        return;
+
+    // The manual flag and genuinely unread messages are independent - a chat can have
+    // both - so clearing one does not clear the other.
+    if (chat->isMarkedAsUnread())
+    {
+        send(td::td_api::make_object<td::td_api::toggleChatIsMarkedAsUnread>(chatId, false));
+    }
+
+    if (chat->unreadCount() > 0)
+    {
+        if (const auto *message = chat->lastMessage())
+        {
+            auto request = td::td_api::make_object<td::td_api::viewMessages>();
+            request->chat_id_ = chatId;
+            request->message_ids_ = {message->id()};
+            request->force_read_ = true;
+
+            send(std::move(request));
+        }
+    }
+}
+
+void ChatModel::markChatAsUnread(qlonglong chatId)
+{
+    send(td::td_api::make_object<td::td_api::toggleChatIsMarkedAsUnread>(chatId, true));
+}
+
+void ChatModel::setChatMuted(qlonglong chatId, bool muted)
+{
+    auto settings = td::td_api::make_object<td::td_api::chatNotificationSettings>();
+
+    // setChatNotificationSettings replaces the whole object, so every field left at
+    // its default would silently override that setting for this chat. Only mute_for
+    // is set here; the rest stay on the scope default they already inherit.
+    settings->use_default_mute_for_ = false;
+    settings->mute_for_ = muted ? MutedValueMax : MutedValueMin;
+    settings->use_default_sound_ = true;
+    settings->use_default_show_preview_ = true;
+    settings->use_default_disable_pinned_message_notifications_ = true;
+    settings->use_default_disable_mention_notifications_ = true;
+
+    auto request = td::td_api::make_object<td::td_api::setChatNotificationSettings>();
+    request->chat_id_ = chatId;
+    request->notification_settings_ = std::move(settings);
+
+    send(std::move(request));
 }
 

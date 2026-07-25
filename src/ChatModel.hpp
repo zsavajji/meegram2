@@ -36,6 +36,7 @@ public:
         UnreadMentionCountRole,
         UnreadCountRole,
         IsMutedRole,
+        IsMarkedAsUnreadRole,
     };
 
     int rowCount(const QModelIndex &parent = QModelIndex()) const override;
@@ -51,6 +52,15 @@ public:
     bool loading() const;
 
     Q_INVOKABLE void toggleChatIsPinned(qlonglong chatId, bool isPinned);
+
+    // Leaves groups and channels, clears and unlists private and secret chats -
+    // TDLib has no single request that covers both, and neither works on the other.
+    Q_INVOKABLE void deleteChat(qlonglong chatId);
+
+    Q_INVOKABLE void markChatAsRead(qlonglong chatId);
+    Q_INVOKABLE void markChatAsUnread(qlonglong chatId);
+
+    Q_INVOKABLE void setChatMuted(qlonglong chatId, bool muted);
 
     Q_INVOKABLE ChatPosition *getChatPosition(Chat *chat) const;
 
@@ -89,6 +99,14 @@ private:
 
     void rebuildRowIndex();
     void scheduleSort();
+
+    // Every action below needs the same null check on the client, so they share this.
+    void send(td::td_api::object_ptr<td::td_api::Function> request);
+
+    // setPositions merges per list and never drops an entry, so a chat that has left
+    // this list still has a position for it - with order 0. Membership is the pair,
+    // not the position alone.
+    bool isInList(Chat *chat) const;
 
     // Adds a chat that has appeared in this list but is not in the model yet.
     // Returns true if it was inserted.
