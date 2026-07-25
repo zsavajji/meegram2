@@ -62,6 +62,7 @@ public:
     Q_INVOKABLE void deleteMessage(qlonglong messageId, bool revoke = false) noexcept;
 
     Q_INVOKABLE void sendMessage(const QString &message, qlonglong replyToMessageId = 0) noexcept;
+    Q_INVOKABLE void editMessage(qlonglong messageId, const QString &text) noexcept;
 
     Q_INVOKABLE void fetchMoreBack() noexcept;
 

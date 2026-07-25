@@ -10,25 +10,57 @@ Page {
     property variant chatInfo: chatManager.chatInfo
     property variant messageModel: chatManager.messageModel
 
-    // Pending reply target. Named distinctly rather than living on the page root,
-    // because MessageBubble also uses id: root and would shadow it.
+    // What the composer is currently doing: a plain send, a reply, or an edit.
+    // Named distinctly rather than living on the page root, because MessageBubble
+    // also uses id: root and would shadow it.
     QtObject {
-        id: replyState
+        id: composeState
 
-        property variant messageId: 0
+        property variant replyId: 0
+        property variant editId: 0
         property string senderName: ""
         property string preview: ""
 
-        function setTarget(id, sender, text) {
-            messageId = id;
+        function reply(id, sender, text) {
+            editId = 0;
+            replyId = id;
             senderName = sender;
             preview = text;
         }
 
+        function edit(id, text) {
+            replyId = 0;
+            editId = id;
+            senderName = qsTr("Edit");
+            preview = text;
+            textArea.text = text;
+            textArea.forceActiveFocus();
+        }
+
         function clear() {
-            messageId = 0;
+            replyId = 0;
+            editId = 0;
             senderName = "";
             preview = "";
+        }
+    }
+
+    // The message the action menu is acting on. One menu for the whole page - a
+    // ContextMenu per delegate would build one popup per visible row.
+    QtObject {
+        id: menuTarget
+
+        property variant messageId: 0
+        property string sender: ""
+        property string text: ""
+        property bool isOutgoing: false
+
+        function open(id, sender, text, outgoing) {
+            messageId = id;
+            menuTarget.sender = sender;
+            menuTarget.text = text;
+            isOutgoing = outgoing;
+            messageMenu.open();
         }
     }
 
@@ -228,12 +260,12 @@ Page {
             anchors.right: parent.right
             anchors.bottom: parent.bottom
 
-            // Sits above the text field while a reply is pending. Collapses to zero
-            // height when there is no target, so it costs nothing the rest of the time.
+            // Sits above the text field while a reply or an edit is pending. Collapses
+            // to zero height otherwise, so it costs nothing the rest of the time.
             Rectangle {
                 id: replyBanner
 
-                visible: replyState.messageId !== 0
+                visible: composeState.replyId !== 0 || composeState.editId !== 0
                 width: parent.width
                 height: visible ? 60 : 0
                 color: "white"
@@ -261,7 +293,7 @@ Page {
                         rightMargin: 12
                         top: replyBannerBar.top
                     }
-                    text: replyState.senderName
+                    text: composeState.senderName
                     color: "#0077A8"
                     font.pixelSize: 18
                     font.bold: true
@@ -277,7 +309,7 @@ Page {
                         rightMargin: 12
                         top: replyBannerSender.bottom
                     }
-                    text: replyState.preview
+                    text: composeState.preview
                     color: "#505050"
                     font.pixelSize: 18
                     font.weight: Font.Light
@@ -301,7 +333,14 @@ Page {
                     MouseArea {
                         anchors.fill: parent
                         anchors.margins: -12
-                        onClicked: replyState.clear()
+                        onClicked: {
+                            // Cancelling an edit discards the prefilled draft; cancelling
+                            // a reply must not touch what the user has already typed.
+                            if (composeState.editId !== 0)
+                                textArea.text = ""
+
+                            composeState.clear()
+                        }
                     }
                 }
 
@@ -357,14 +396,18 @@ Page {
                     height: 48
                     width: 120
                     platformStyle: ButtonStyle { inverted: true }
-                    text: "Send"
+                    text: composeState.editId !== 0 ? qsTr("Save") : "Send"
                     onClicked: {
                         // Whitespace-only counts as empty: TDLib rejects such a
                         // message, so there is nothing to gain by sending it.
                         if (textArea.text.trim() !== "") {
-                            messageModel.sendMessage(textArea.text, replyState.messageId)
+                            if (composeState.editId !== 0)
+                                messageModel.editMessage(composeState.editId, textArea.text)
+                            else
+                                messageModel.sendMessage(textArea.text, composeState.replyId)
+
                             textArea.text = ""
-                            replyState.clear()
+                            composeState.clear()
                         }
 
                         // Outside the guard on purpose. Tapping the button moves focus
@@ -384,6 +427,52 @@ Page {
                 ]
             }
         }
+    }
+
+    // Harmattan action menu, raised by a long press on a bubble. Items that cannot
+    // apply to the target hide rather than grey out, which is what the platform does.
+    ContextMenu {
+        id: messageMenu
+
+        MenuLayout {
+            MenuItem {
+                text: qsTr("Reply")
+                onClicked: composeState.reply(menuTarget.messageId, menuTarget.sender, menuTarget.text)
+            }
+
+            MenuItem {
+                text: qsTr("Copy")
+                visible: menuTarget.text !== ""
+                onClicked: utils.copyToClipboard(menuTarget.text)
+            }
+
+            MenuItem {
+                text: qsTr("Edit")
+                // ponytail: outgoing text only. Telegram also refuses edits past 48h
+                // and in channels without rights; TDLib rejects those and the error is
+                // swallowed. Gate properly via getMessageProperties if it bites.
+                visible: menuTarget.isOutgoing && menuTarget.text !== ""
+                onClicked: composeState.edit(menuTarget.messageId, menuTarget.text)
+            }
+
+            MenuItem {
+                text: qsTr("Delete")
+                onClicked: deleteDialog.open()
+            }
+        }
+    }
+
+    QueryDialog {
+        id: deleteDialog
+
+        titleText: qsTr("DeleteMessage")
+        message: qsTr("AreYouSureDeleteSingleMessage")
+        acceptButtonText: qsTr("OK")
+        rejectButtonText: qsTr("Cancel")
+
+        // Deleting for everyone is only offered on your own messages. Incoming ones
+        // are removed from this device only.
+        onAccepted: messageModel.deleteMessage(menuTarget.messageId, menuTarget.isOutgoing)
     }
 
     Connections {

@@ -29,6 +29,9 @@ public:
 
     Q_INVOKABLE static QString replaceEmoji(const QString &text) noexcept;
 
+    // QML1 has no Clipboard element, so the "Copy" message action goes through here.
+    Q_INVOKABLE static void copyToClipboard(const QString &text) noexcept;
+
     static QString getAudioTitle(MessageAudio *audio) noexcept;
     static QString getCallContent(MessageCall *call, bool isOutgoing) noexcept;
 

@@ -10,6 +10,8 @@
 #include "StorageManager.hpp"
 #include "User.hpp"
 
+#include <QApplication>
+#include <QClipboard>
 #include <QStringBuilder>
 #include <QTextStream>
 
@@ -313,6 +315,11 @@ QString Utils::replaceEmoji(const QString &text) noexcept
     result.append(text.midRef(lastPos));
 
     return result;
+}
+
+void Utils::copyToClipboard(const QString &text) noexcept
+{
+    QApplication::clipboard()->setText(text);
 }
 
 QString Utils::getAudioTitle(MessageAudio *audio) noexcept

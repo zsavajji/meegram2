@@ -22,8 +22,8 @@ Item {
 
         MessageBubble {
             // ChatPage's root is also called "root", so it is shadowed in here.
-            // replyState is uniquely named and reachable from the delegate scope.
-            onPressAndHold: replyState.setTarget(model.id, model.sender, model.content && model.content.text ? model.content.text : "")
+            // menuTarget is uniquely named and reachable from the delegate scope.
+            onPressAndHold: menuTarget.open(model.id, model.sender, model.content.text, model.isOutgoing)
 
             childrenWidth: messageText.paintedWidth
 
@@ -49,9 +49,9 @@ Item {
         id: notSupportedMessageComponent
 
         MessageBubble {
-            // ChatPage's root is also called "root", so it is shadowed in here.
-            // replyState is uniquely named and reachable from the delegate scope.
-            onPressAndHold: replyState.setTarget(model.id, model.sender, model.content && model.content.text ? model.content.text : "")
+            // No text to copy or edit on an unsupported content type, so the menu
+            // comes up with just Reply and Delete.
+            onPressAndHold: menuTarget.open(model.id, model.sender, "", model.isOutgoing)
 
             childrenWidth: notSupportedMessage.paintedWidth
 

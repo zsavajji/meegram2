@@ -354,8 +354,26 @@ void MessageModel::deleteMessage(qlonglong messageId, bool revoke) noexcept
     auto request = td::td_api::make_object<td::td_api::deleteMessages>();
 
     request->chat_id_ = m_chat->id();
-    request->message_ids_ = std::move(std::vector<int64_t>(messageId));
+    // Was vector<int64_t>(messageId) - the count constructor, which asked for a
+    // vector of messageId zeroed elements. Message ids run into the billions.
+    request->message_ids_ = {messageId};
     request->revoke_ = revoke;
+
+    m_client->send(std::move(request));
+}
+
+void MessageModel::editMessage(qlonglong messageId, const QString &text) noexcept
+{
+    auto request = td::td_api::make_object<td::td_api::editMessageText>();
+
+    auto inputMessageContent = td::td_api::make_object<td::td_api::inputMessageText>();
+
+    inputMessageContent->text_ = td::td_api::make_object<td::td_api::formattedText>();
+    inputMessageContent->text_->text_ = text.toStdString();
+
+    request->chat_id_ = m_chat->id();
+    request->message_id_ = messageId;
+    request->input_message_content_ = std::move(inputMessageContent);
 
     m_client->send(std::move(request));
 }
