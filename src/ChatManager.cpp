@@ -7,6 +7,7 @@
 #include "Utils.hpp"
 
 #include <QDateTime>
+#include <QDebug>
 
 #include <algorithm>
 #include <ranges>
@@ -364,13 +365,24 @@ QObject *ChatManager::messageModel() const noexcept
     return m_messageModel.get();
 }
 
-void ChatManager::openChat(qlonglong chatId) noexcept
+bool ChatManager::openChat(qlonglong chatId) noexcept
 {
-    m_client->send(td::td_api::make_object<td::td_api::openChat>(chatId));
-
     auto chat = m_storage->chat(chatId);
     if (!chat)
-        return;
+    {
+        // Returning false rather than failing silently. main.qml pushed ChatPage
+        // regardless of the outcome, so a miss here left a page whose chat, chatInfo
+        // and messageModel were all undefined - every binding on it threw, no
+        // MessageModel existed to request history, and the result looked like "the chat
+        // never loads its messages" with nothing in the log to say why.
+        qWarning() << "openChat: no chat in storage for id" << chatId;
+        return false;
+    }
+
+    // Only tell TDLib the chat is open once it is actually going to be shown. Sent
+    // first, a failed open left the server believing a chat was open that never was -
+    // which also suppresses its notifications.
+    m_client->send(td::td_api::make_object<td::td_api::openChat>(chatId));
 
     m_selectedChat = std::move(chat);
 
@@ -379,6 +391,8 @@ void ChatManager::openChat(qlonglong chatId) noexcept
 
     emit selectedChatChanged();
     emit activeChatChanged(chatId);
+
+    return true;
 }
 
 void ChatManager::closeChat(qlonglong chatId) noexcept

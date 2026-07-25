@@ -28,6 +28,11 @@ MessageModel::MessageModel(std::shared_ptr<Chat> chat, std::shared_ptr<Locale> l
 
     setRoleNames(roleNames());
 
+    m_historyRetryTimer.setInterval(400);
+    m_historyRetryTimer.setSingleShot(true);
+
+    connect(&m_historyRetryTimer, SIGNAL(timeout()), SLOT(reloadHistory()));
+
     loadMessages();
 }
 
@@ -44,10 +49,13 @@ bool MessageModel::canFetchMore(const QModelIndex &parent) const
     if (parent.isValid() || m_messages.empty() || m_loading)
         return false;
 
-    const auto lastMessageId = m_chat->lastMessage()->id();
-    const auto maxMessageId = std::ranges::max(m_messages);
+    // Third site that dereferenced lastMessage() unconditionally; a chat with no last
+    // message has nothing newer to fetch.
+    const auto *lastMessage = m_chat->lastMessage();
+    if (!lastMessage)
+        return false;
 
-    return lastMessageId != maxMessageId;
+    return lastMessage->id() != std::ranges::max(m_messages);
 }
 
 void MessageModel::fetchMore(const QModelIndex &parent)
@@ -242,6 +250,11 @@ void MessageModel::getChatHistory(qlonglong fromMessageId, int offset, int limit
     request->limit_ = limit;
     request->only_local_ = false;
 
+    // Logged on the way out as well as on the way back, so an empty log distinguishes
+    // "never asked" from "asked and got nothing". qWarning survives release builds;
+    // reading either needs the binary run directly, since invoker discards stderr.
+    qWarning() << "getChatHistory ->" << "chat" << m_chat->id() << "from" << fromMessageId << "offset" << offset << "limit" << limit;
+
     m_client->send(std::move(request), [this, fetchPrevious](auto &&response) {
         auto cleanupFlags = [this]() {
             if (m_loading)
@@ -275,10 +288,20 @@ void MessageModel::getChatHistory(qlonglong fromMessageId, int offset, int limit
         auto messagesResponse = td::td_api::move_object_as<td::td_api::messages>(response);
         if (!messagesResponse || messagesResponse->messages_.empty())
         {
-            qWarning() << "getChatHistory returned no messages for chat" << m_chat->id();
-            cleanupFlags();
+            // An empty answer does not mean the chat is empty. TDLib may return fewer
+            // messages than asked for - or none - while its own fetch is still in
+            // flight, and expects the request to be repeated; for a supergroup there is
+            // often nothing cached locally to answer from on the first call. Treating
+            // empty as final is what leaves a group on a spinner forever.
+            //
+            // Queued, and via the timer's own start slot: this runs on the TDLib worker
+            // thread, and a QTimer may only be started from the thread that owns it.
+            // m_loading stays set, so the view keeps showing it is still working.
+            QMetaObject::invokeMethod(&m_historyRetryTimer, "start", Qt::QueuedConnection);
             return;
         }
+
+        m_historyRetries = 0;
 
         std::vector<qlonglong> newMessageIds;
         for (auto &&message : messagesResponse->messages_)
@@ -624,6 +647,33 @@ void MessageModel::handleDeleteMessages(qlonglong chatId, std::vector<int64_t> &
     std::erase_if(m_messageMap, [&idsToDelete](const auto &pair) { return idsToDelete.contains(pair.first); });
 
     endRemoveRows();
+}
+
+void MessageModel::reloadHistory() noexcept
+{
+    if (m_historyRetries >= MaxHistoryRetries)
+    {
+        qWarning() << "getChatHistory: gave up after" << m_historyRetries << "empty replies for chat" << m_chat->id();
+
+        if (m_loading)
+        {
+            m_loading = false;
+            emit loadingChanged();
+        }
+
+        if (m_backFetching)
+        {
+            m_backFetching = false;
+            emit backFetchingChanged();
+        }
+
+        emit countChanged();
+        return;
+    }
+
+    ++m_historyRetries;
+
+    loadMessages();
 }
 
 void MessageModel::loadMessages() noexcept

@@ -10,6 +10,9 @@ hero:
       text: Build it
       link: /building
     - theme: alt
+      text: What it does
+      link: /features
+    - theme: alt
       text: How it works
       link: /architecture
     - theme: alt
@@ -17,6 +20,10 @@ hero:
       link: https://github.com/qtinsider/meegram2
 
 features:
+  - title: Features
+    details: Every feature that exists, what each one actually does on the device, and an honest list of what is not implemented.
+    link: /features
+    linkText: See the list
   - title: Architecture
     details: How the TDLib update stream fans out to four subscribers, what StorageManager caches, and why AppManager is the only door into the object graph from QML.
     link: /architecture

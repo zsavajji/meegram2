@@ -85,6 +85,99 @@ Confirm with `grep cxx_compiler build-app/CMakeCache.txt`.
 `dh_shlibdeps` is commented out in `debian/rules`, so the package declares no
 dependencies. Neither affects a hand-installed `.deb`.
 
+## Traps this codebase has already fallen into
+
+Each of these cost a build cycle. They are recorded because the symptom pointed
+somewhere other than the cause.
+
+### Only pinned chats appear
+
+Two separate causes, a session apart.
+
+`Chat::setPositions` treats an **empty** position vector as "unchanged", not "remove
+from every list" — `updateChatLastMessage` sends an empty vector when positions did not
+change, so clearing there dropped every chat that received a message. Pinned ones
+survived because `updateChatPosition` re-asserted them.
+
+Later, membership was tightened to require `order != 0`, on TDLib's documentation that
+`0` means "not in this list". In practice only pinned chats arrive with a real order, so
+that hid everything else. **Membership is presence of a position, nothing more.**
+
+### Chats stop loading after the first page
+
+`rowCount()` returns `m_count`, a reveal cursor — not `m_chats.size()`. The only thing
+that grew it was `fetchMore()`, and **QML1's `ListView` never calls `fetchMore`**: that
+is a Qt Widgets view API. So whatever had arrived by the first 500 ms sort was all that
+was ever shown, which looked like "only pinned chats" and was flaky in exactly the way a
+race is. The model now reveals everything it holds; paging is driven from
+`onAtYEndChanged`.
+
+### Opening a chat freezes the app
+
+Re-positioning from `onContentHeightChanged` does not converge. Positioning builds
+delegates whose real heights differ from `ListView`'s estimate for rows it has not built,
+which moves `contentHeight`, which repositions, and with a `cacheBuffer` rebuilding rows
+either side it never settles. Use a **bounded** retry.
+
+### Groups never load messages
+
+`loadMessages()` anchors on `lastReadInboxMessageId` with a **negative** offset to also
+pull in newer messages. A chat never opened has unread messages but that pointer is still
+`0`, and `from_message_id = 0` means "from the newest" — asking for messages newer than
+the newest is rejected. Private chats you have replied in always have a real anchor,
+which is why only groups broke.
+
+### The download completes and nothing updates
+
+Two `File` objects for one file id. `updateFile` only mutates the one in
+`StorageManager`'s map, so a `File` built separately from an embedded `td_api::file`
+never learns the download finished. This hit avatars first, and would have hit photos and
+stickers identically. See
+[One File object per file id](/architecture#one-file-object-per-file-id).
+
+### A local path is not a finished file
+
+TDLib fills in `local.path` when a download **starts**. Testing `localPath !== ""`
+points at a half-written file — a broken image in QML, a red square in a notification.
+Test `isDownloadingCompleted`.
+
+### QML `variant` initialised to null
+
+`property variant x: null` reads back as `undefined`, so `x === null` is never true. The
+photo picker was never constructed and `pageStack.push()` was handed `undefined`, which
+does nothing and reports nothing. Use a typed `property QtObject`, or a falsy check.
+
+### `QList` has no initializer-list constructor
+
+That arrived in Qt 4.8; Harmattan is 4.7.4. `QVariantList` has to be built with
+`operator<<`. `std::vector` is unaffected.
+
+### Delete silently allocated gigabytes
+
+`std::vector<int64_t>(messageId)` is the **count** constructor — a vector of `messageId`
+zeroed elements, and message ids run into the billions. Wanted `{messageId}`.
+
+### Nothing appears in the log at all
+
+`qWarning` writes to **stderr**, and the `.desktop` launches through `invoker`, which
+discards it — so `grep` over `/var/log/syslog` finds nothing no matter how much the app
+is logging. Run the binary directly instead of tapping the icon:
+
+```sh
+ssh user@<n9-ip>
+export DISPLAY=:0
+/opt/meegram/bin/meegram 2>&1 | tee /home/user/meegram.log
+```
+
+An empty log then means the code path genuinely did not run, which is information. An
+empty syslog means nothing at all.
+
+### `qDebug` vanishes in release
+
+Non-debug builds define `QT_NO_DEBUG_OUTPUT`, so a failing TDLib request logged with
+`qDebug` leaves no trace at all. Use `qWarning` for anything you would want on device;
+it survives.
+
 ## Known rough edges
 
 **Qt4 not found** — `Found unsuitable Qt version "" from NOTFOUND`.

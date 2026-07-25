@@ -192,6 +192,7 @@ Cross-builds and installs into the sysroot:
 | zlib | 1.3.2 | version + SHA256 |
 | OpenSSL | 3.5.7 | version + SHA256 |
 | rlottie | master | **commit SHA** (`RLOTTIE_COMMIT`) |
+| libwebp | v1.4.0 | release tag (`LIBWEBP_TAG`) |
 | TDLib | 1.8.66 | **commit SHA** (`TDLIB_COMMIT`) |
 
 TDLib tags almost nothing — its git tags stop at `v1.8.0` while it reports versions
@@ -209,12 +210,24 @@ so render threads cost memory and buy nothing. `CMAKE_POSITION_INDEPENDENT_CODE`
 on because `meegram` links `-pie`, and a non-PIC static archive will not link into a
 PIE executable on ARM.
 
+libwebp is there for **static stickers**. Qt 4.7 has no WebP image handler and the
+device ships none, so without it every static sticker falls back to showing its emoji.
+It is built **decoder-only** — `WEBP_BUILD_CWEBP`, `DWEBP`, `GIF2WEBP`, `IMG2WEBP`,
+`VWEBP`, `WEBPINFO`, `WEBPMUX` and `EXTRAS` all off — because the CLI tools want
+libpng, libjpeg and giflib, none of which are in the sysroot. Static and PIC for the
+same reasons as rlottie.
+
+Unlike rlottie it needs no `-DARCH=arm` equivalent: libwebp compiles its NEON paths
+from the compiler's own `__ARM_NEON__`, which this toolchain defines by default
+(`--with-fpu=neon`). It is the only dependency pinned to a **release tag** rather than
+a commit, because libwebp actually tags releases.
+
 ### What a re-run does
 
 | Stage | Re-run |
 |---|---|
 | zlib, OpenSSL | **Skipped** if `build/*/.built-version` matches the version in the script |
-| rlottie, TDLib | **Skipped** if `build/*/.built-commit` matches the pinned commit, target and LTO setting. The stamp is only written after `install` succeeds, so a failed run always rebuilds. |
+| rlottie, libwebp, TDLib | **Skipped** if `build/*/.built-commit` matches the pinned commit or tag, target and LTO setting. The stamp is only written after `install` succeeds, so a failed run always rebuilds. |
 
 Stamps mean bumping a version or commit still triggers a rebuild rather than
 silently linking against a stale library. `FORCE_REBUILD=1` forces all of them.
@@ -262,7 +275,7 @@ cmake --build build-app -- VERBOSE=1 | grep -o '\-O[0-9s]' | sort -u    # expect
 
 ::: danger Do not build the app into `build/`
 `tools/setup-dependencies.sh` owns that directory — `build/crypto`, `build/zlib`,
-`build/tdlib`, `build/generate` and `build/rlottie` all live there, along with the
+`build/tdlib`, `build/generate`, `build/rlottie` and `build/libwebp` all live there, along with the
 stamps that let re-runs skip completed work. Pointing CMake at `build/` and then
 clearing the cache with `rm -rf build` destroys every dependency build tree.
 Installed artefacts in the sysroot survive, but the trees and stamps do not.
@@ -331,7 +344,7 @@ copies with plain `cp`, so the unversioned `.so` files are full duplicates.
 ### Verify before touching the device
 
 ```bash
-dpkg-deb -c meegram_0.1.7_armel.deb | grep opt/meegram
+dpkg-deb -c meegram_0.2.0_armel.deb | grep opt/meegram
 arm-none-linux-gnueabi-readelf -d build-app/debian/meegram/opt/meegram/bin/meegram | grep RPATH
 ```
 
@@ -342,8 +355,8 @@ is simply refused by the device.
 ### Install
 
 ```bash
-scp meegram_0.1.7_armel.deb user@<n9>:/tmp/
-ssh user@<n9> 'dpkg -i /tmp/meegram_0.1.7_armel.deb'
+scp meegram_0.2.0_armel.deb user@<n9>:/tmp/
+ssh user@<n9> 'dpkg -i /tmp/meegram_0.2.0_armel.deb'
 ```
 
 Run it over SSH the first time rather than from the launcher — `invoker` swallows

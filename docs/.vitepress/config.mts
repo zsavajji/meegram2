@@ -13,11 +13,12 @@ export default defineConfig({
 
   themeConfig: {
     nav: [
+      { text: 'Features', link: '/features' },
       { text: 'Architecture', link: '/architecture' },
       { text: 'Building', link: '/building' },
       { text: 'Troubleshooting', link: '/troubleshooting' },
       {
-        text: 'v0.1.7',
+        text: 'v0.2.0',
         items: [
           { text: 'Changelog', link: 'https://github.com/qtinsider/meegram2/blob/main/debian/changelog' },
           { text: 'Issues', link: 'https://github.com/qtinsider/meegram2/issues' },
@@ -29,6 +30,20 @@ export default defineConfig({
       {
         text: 'Overview',
         items: [{ text: 'What MeeGram is', link: '/' }],
+      },
+      {
+        text: 'Features',
+        collapsed: false,
+        items: [
+          { text: 'At a glance', link: '/features#at-a-glance' },
+          { text: 'Chat list', link: '/features#chat-list' },
+          { text: 'Messages', link: '/features#messages' },
+          { text: 'Media', link: '/features#media' },
+          { text: 'Presence', link: '/features#presence' },
+          { text: 'Notifications', link: '/features#notifications' },
+          { text: 'Not implemented', link: '/features#not-implemented' },
+          { text: 'Performance work', link: '/features#performance-work' },
+        ],
       },
       {
         text: 'Architecture',

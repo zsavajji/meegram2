@@ -101,7 +101,9 @@ public:
     QObject *chatInfoFormatter() const noexcept;
     QObject *messageModel() const noexcept;
 
-    Q_INVOKABLE void openChat(qlonglong chatId) noexcept;
+    // False when the chat is not in StorageManager, in which case nothing was selected
+    // and the caller must not push a page that would bind to nothing.
+    Q_INVOKABLE bool openChat(qlonglong chatId) noexcept;
     Q_INVOKABLE void closeChat(qlonglong chatId) noexcept;
 
 signals:

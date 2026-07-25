@@ -211,10 +211,29 @@ Image decoding and `LottieAnimation` rasterisation both happen on the GUI thread
 | `PluralRules` | Per-language plural forms |
 | `Settings` | `QSettings` wrapper |
 | `Emoji` | 3,773-entry static table backing emoji substitution |
-| `ChatPhotoProvider` | `image://chatPhoto/` — decodes avatars at the requested size, with a cache |
+| `NotificationManager` | Harmattan banners over D-Bus; owns the tap-to-open service and object paths |
+| `ChatPhotoProvider` | `image://chatPhoto/` — decodes avatars at the requested size, crops and masks them, with a cache |
+| `StickerProvider` | `image://sticker/` — decodes WebP stickers via libwebp, scaled during decode |
 | `LottieAnimation` | rlottie renderer; auth pages only, never in a list |
 | `QrCodeItem` | QR rendering for login-by-QR |
 | `ScopeTimer` | Opt-in profiling (`-DMEEGRAM_PROFILE=ON`) |
+
+### One File object per file id
+
+`StorageManager::registerFile()` publishes a `File` as the canonical instance for its
+id and **returns whichever instance is canonical** — which may not be the one passed in.
+Anything that builds its own `File` from an embedded `td_api::file` has to adopt the
+result: `Chat` for its photo, `MessagePhoto` and `MessageSticker` via
+`MessageModel::linkContentFile`.
+
+This is not decoration. `updateFile` only ever mutates the instance in the map, so a
+second `File` for the same id never learns the download finished — which is exactly why
+avatars sat on the placeholder forever. First registrant wins, so the same photo
+appearing twice in a chat cannot orphan one of them.
+
+`linkContentFile` is invoked **queued** from the `getChatHistory` callback, because that
+callback runs on the TDLib worker thread and the map is also mutated from the main
+thread on every `updateFile`.
 
 ### Value objects notify coarsely
 

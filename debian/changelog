@@ -1,10 +1,31 @@
+meegram (0.2.0) unstable; urgency=low
+
+  * Message actions on long press: reply, copy, edit, delete.
+  * Chat actions on long press: pin, mark as read/unread, mute, delete or leave.
+  * System notifications with the chat avatar; tapping one opens that chat, and
+    starts the app over D-Bus activation if it was closed.
+  * Photo messages render, and can be sent from the gallery with a caption.
+  * Stickers: animated ones through rlottie, static ones through libwebp.
+  * Read receipts are reported, so other clients and the sender see messages read.
+  * Typing and recording indicators in the chat header.
+  * Chat avatars now update when their download finishes, and are masked and
+    cropped once in C++ rather than per row in QML.
+  * Emoji assets resized to the size they are drawn at: 19.6 MB down to 7.8 MB.
+  * Chat list shows every chat, not only pinned ones, and pages on demand.
+  * Chats open on the newest message or the unread marker, and follow new messages
+    unless you have scrolled up.
+  * Fixed message deletion, which asked for a vector of several billion elements.
+  * Fixed groups never loading history when they had never been opened.
+
+ -- Chukwudi Nwutobo <nwutobo@outlook.com>  Sat, 25 Jul 2026 12:00:00 +0100
+
 meegram (0.1.7) unstable; urgency=low
 
   * Bug fixes.
 
  -- Chukwudi Nwutobo <nwutobo@outlook.com>  Fri, 03 Jan 2025 23:30:05 +0100
 
- meegram (0.1.6) unstable; urgency=medium
+meegram (0.1.6) unstable; urgency=medium
 
   * Migrated from TdLib JSON to TdLib C++ interface for better performance.
   * Added QR code authentication and improved error handling.

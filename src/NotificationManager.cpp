@@ -149,19 +149,23 @@ void NotificationManager::handleChatUpdate(qlonglong chatId) noexcept
             body.prepend(sender + QLatin1String(": "));
     }
 
-    // The avatar. TDLib fills localPath in as soon as a download starts, so the file
-    // is only safe to hand over once it reports complete - pointing the notification
-    // manager at a half written file is what drew as a broken red square.
+    // The avatar. Two things had to be right at once, and getting one of them wrong
+    // hid the whole banner rather than just the picture:
     //
-    // Passed as a plain path: MNotification takes an image id or a filesystem path
-    // here, not a URL, so the file:// prefix this used to add could not resolve.
+    // - It must be a file:// URL. A bare path is refused outright, and the refusal
+    //   takes the notification with it - which looked like "no notification from a
+    //   user, but one from a group", because the group had no avatar downloaded yet and
+    //   so sent no image at all.
+    // - TDLib fills localPath in as soon as a download *starts*, so the file is only
+    //   safe to hand over once it reports complete. Pointing the notification manager
+    //   at a half written file is what drew the broken red square.
     QString imagePath;
 
     if (auto *photo = chat->photo())
     {
         if (photo->isDownloadingCompleted())
         {
-            imagePath = photo->localPath();
+            imagePath = QLatin1String("file://") + photo->localPath();
         }
         else if (photo->canBeDownloaded() && !photo->isDownloadingActive())
         {
@@ -207,7 +211,17 @@ void NotificationManager::publish(qlonglong chatId, const QString &summary, cons
     }
 
     // Group 0: this client does not use notification groups.
-    const auto reply = callNotificationManager("addNotification", notificationArguments(userId, 0u, summary, body, action, imagePath));
+    auto reply = callNotificationManager("addNotification", notificationArguments(userId, 0u, summary, body, action, imagePath));
+
+    // The avatar is decoration and must never be able to cost you the banner. Whether
+    // this field wants a bare path or a URI is not something the platform documents
+    // usefully, so if the call is refused while carrying one, drop it and post again.
+    if (reply.type() == QDBusMessage::ErrorMessage && !imagePath.isEmpty())
+    {
+        qWarning() << "addNotification refused with an image:" << reply.errorName() << reply.errorMessage() << "- retrying without" << imagePath;
+
+        reply = callNotificationManager("addNotification", notificationArguments(userId, 0u, summary, body, action, QString()));
+    }
 
     if (reply.type() == QDBusMessage::ErrorMessage)
     {

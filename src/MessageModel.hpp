@@ -3,6 +3,7 @@
 #include <td/telegram/td_api.h>
 
 #include <QAbstractListModel>
+#include <QTimer>
 
 #include <memory>
 #include <unordered_map>
@@ -95,6 +96,10 @@ private slots:
     // idempotent, so re-linking an already canonical file costs a hash lookup.
     void linkLoadedContentFiles() noexcept;
 
+    // Re-asks for history after TDLib answered with nothing. Bounded, so a genuinely
+    // empty chat stops asking.
+    void reloadHistory() noexcept;
+
 private:
     void handleNewMessage(td::td_api::object_ptr<td::td_api::message> &&message) noexcept;
     void handleMessageContent(qlonglong chatId, qlonglong messageId, td::td_api::object_ptr<td::td_api::MessageContent> &&newContent) noexcept;
@@ -128,6 +133,13 @@ private:
 
     bool m_loading{true};
     bool m_backFetching{true};
+
+    // TDLib can answer getChatHistory with nothing while its own fetch is still in
+    // flight, so an empty reply is retried rather than believed.
+    QTimer m_historyRetryTimer;
+    int m_historyRetries{0};
+
+    static constexpr int MaxHistoryRetries = 3;
 
     std::vector<qlonglong> m_messages;
     std::unordered_map<qlonglong, std::unique_ptr<Message>> m_messageMap;
