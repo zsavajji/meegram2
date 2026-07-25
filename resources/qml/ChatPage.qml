@@ -230,7 +230,10 @@ Page {
             // directly would cancel the follow on the very message it should track.
             property bool followLast: true
 
-            onMovementEnded: followLast = listView.atYEnd
+            onMovementEnded: {
+                followLast = listView.atYEnd
+                markVisibleAsRead()
+            }
 
             section.property: "section"
             section.criteria: ViewSection.FullString
@@ -238,13 +241,16 @@ Page {
 
             ScrollDecorator { flickableItem: listView }
 
-            // Positioning once is not enough. The delegates are RichText and variable
-            // height, so contentHeight keeps growing as they are created and whatever
-            // offset was computed first is stale by the time layout settles - which is
-            // why a chat opened at an arbitrary point. Re-assert until the user or a
-            // new message takes over.
-            property bool pinToInitial: true
-
+            // Positioning once is not enough: the delegates are RichText and variable
+            // height, so ListView's estimate for rows it has not built yet is wrong and
+            // contentHeight keeps moving underneath the offset just computed.
+            //
+            // Driving this from onContentHeightChanged hangs the app. Repositioning
+            // builds delegates whose real heights differ from the estimate, which
+            // changes contentHeight, which repositions again - and with a cacheBuffer
+            // destroying and rebuilding rows either side it never converges. So it is a
+            // bounded retry instead: a handful of passes and then it stops, whatever
+            // the layout is doing.
             function goToInitialPosition() {
                 var index = messageModel.lastMessageIndex()
 
@@ -258,16 +264,52 @@ Page {
                     listView.positionViewAtEnd()
             }
 
-            onContentHeightChanged: {
-                if (pinToInitial)
-                    goToInitialPosition()
+            Timer {
+                id: settleTimer
+
+                property int ticks: 0
+
+                interval: 60
+                repeat: true
+
+                onTriggered: {
+                    listView.goToInitialPosition()
+
+                    if (++ticks >= 5)
+                        stop()
+                }
             }
 
-            onMovementStarted: pinToInitial = false
+            function beginSettle() {
+                settleTimer.ticks = 0
+                settleTimer.restart()
+            }
+
+            onMovementStarted: settleTimer.stop()
+
+            // Telling the server what has actually been seen. Without this the other
+            // side never saw a message go read until it was replied to.
+            function markVisibleAsRead() {
+                if (listView.count === 0)
+                    return
+
+                // The row at the bottom edge of the viewport. Section headers are not
+                // delegates, so indexAt can land on nothing - at the end of the list
+                // the last row is the right answer anyway.
+                var index = listView.indexAt(16, listView.contentY + listView.height - 4)
+
+                if (index < 0 && listView.atYEnd)
+                    index = listView.count - 1
+
+                if (index >= 0)
+                    messageModel.viewMessagesUpTo(index)
+            }
 
             onCountChanged: {
                 if (!messageModel.loading && loading) {
                     goToInitialPosition()
+                    beginSettle()
+                    markVisibleAsRead()
                     loading = false
                 }
             }
@@ -600,10 +642,14 @@ Page {
         onMessageAppended: {
             // A live message ends the opening sequence, whether or not the user has
             // touched the list yet - otherwise the two would fight over contentY.
-            listView.pinToInitial = false
+            settleTimer.stop()
 
-            if (listView.followLast)
+            if (listView.followLast) {
                 listView.positionViewAtEnd()
+                // Arrived while you are looking at the bottom of the chat, so it has
+                // been read the moment it lands.
+                listView.markVisibleAsRead()
+            }
         }
     }
 

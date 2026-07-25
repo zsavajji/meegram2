@@ -201,6 +201,23 @@ void StorageManager::handleResult(td::td_api::Object *object)
             }
             break;
         }
+        case td::td_api::updateChatAction::ID: {
+            auto update = static_cast<td::td_api::updateChatAction *>(object);
+
+            // Only the sender id is kept: turning it into a name needs a Locale, which
+            // lives with the formatter that displays this.
+            qlonglong senderId = 0;
+
+            if (update->sender_id_ && update->sender_id_->get_id() == td::td_api::messageSenderUser::ID)
+            {
+                senderId = static_cast<const td::td_api::messageSenderUser *>(update->sender_id_.get())->user_id_;
+            }
+
+            const auto cancelled = update->action_ && update->action_->get_id() == td::td_api::chatActionCancel::ID;
+
+            emit chatActionUpdated(update->chat_id_, senderId, cancelled ? 0 : update->action_->get_id());
+            break;
+        }
         case td::td_api::updateChatPosition::ID: {
             auto update = static_cast<td::td_api::updateChatPosition *>(object);
             if (auto it = m_chats.find(update->chat_id_); it != m_chats.end())

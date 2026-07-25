@@ -53,6 +53,10 @@ signals:
 
     void chatOnlineMemberCountUpdated(qlonglong chatId, int onlineMemberCount);
 
+    // Somebody started or stopped doing something in a chat - typing, recording,
+    // uploading. actionType is the td_api id of the action, or 0 for "stopped".
+    void chatActionUpdated(qlonglong chatId, qlonglong senderId, int actionType);
+
 public slots:
     qlonglong myId() const noexcept;
 

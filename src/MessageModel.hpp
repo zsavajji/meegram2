@@ -58,7 +58,10 @@ public:
     bool backFetching() const noexcept;
 
     Q_INVOKABLE void getChatHistory(qlonglong fromMessageId, int offset, int limit, bool fetchPrevious = false) noexcept;
-    Q_INVOKABLE void viewMessages(const QStringList &messageIds) noexcept;
+    // Reports the newest message on screen as read. Nothing ever called the old
+    // QStringList version, which is why the other side only saw a message go read
+    // when it was replied to - a reply marks the chat read as a side effect.
+    Q_INVOKABLE void viewMessagesUpTo(int index) noexcept;
     Q_INVOKABLE void deleteMessage(qlonglong messageId, bool revoke = false) noexcept;
 
     Q_INVOKABLE void sendMessage(const QString &message, qlonglong replyToMessageId = 0) noexcept;

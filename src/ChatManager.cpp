@@ -16,8 +16,84 @@ ChatInfoFormatter::ChatInfoFormatter(std::shared_ptr<Chat> chat, std::shared_ptr
     , m_locale(std::move(locale))
     , m_storageManager(std::move(storage))
 {
+    m_actionTimer.setInterval(6000);
+    m_actionTimer.setSingleShot(true);
+
+    connect(&m_actionTimer, SIGNAL(timeout()), SLOT(clearChatAction()));
+    connect(m_storageManager.get(), SIGNAL(chatActionUpdated(qlonglong, qlonglong, int)), SLOT(handleChatAction(qlonglong, qlonglong, int)));
+
     initializeMembers();
     updateStatus();
+}
+
+void ChatInfoFormatter::handleChatAction(qlonglong chatId, qlonglong senderId, int actionType) noexcept
+{
+    if (!m_chat || m_chat->id() != chatId)
+        return;
+
+    // Our own typing echoes back; showing it in our own header would be odd.
+    if (senderId != 0 && senderId == m_storageManager->myId())
+        return;
+
+    if (actionType == 0)
+    {
+        clearChatAction();
+        return;
+    }
+
+    QString what;
+
+    switch (actionType)
+    {
+        case td::td_api::chatActionRecordingVoiceNote::ID:
+        case td::td_api::chatActionRecordingVideo::ID:
+        case td::td_api::chatActionRecordingVideoNote::ID:
+            what = tr("RecordingAudio");
+            break;
+        case td::td_api::chatActionUploadingPhoto::ID:
+            what = tr("SendingPhoto");
+            break;
+        case td::td_api::chatActionUploadingVideo::ID:
+        case td::td_api::chatActionUploadingVideoNote::ID:
+            what = tr("SendingVideoStatus");
+            break;
+        case td::td_api::chatActionUploadingDocument::ID:
+        case td::td_api::chatActionUploadingVoiceNote::ID:
+            what = tr("SendingFile");
+            break;
+        default:
+            what = tr("Typing");
+            break;
+    }
+
+    // In a group it matters who; in a one to one chat the header already says.
+    if (m_chat->type() != Chat::Private && m_chat->type() != Chat::Secret && senderId != 0)
+    {
+        if (const auto user = m_storageManager->user(senderId))
+        {
+            what = Utils::getUserShortName(user) + QLatin1String(": ") + what;
+        }
+    }
+
+    // Restarted on every repeat, so a continuing action keeps the label alive.
+    m_actionTimer.start();
+
+    if (m_action != what)
+    {
+        m_action = what;
+        emit statusChanged();
+    }
+}
+
+void ChatInfoFormatter::clearChatAction() noexcept
+{
+    m_actionTimer.stop();
+
+    if (!m_action.isEmpty())
+    {
+        m_action.clear();
+        emit statusChanged();
+    }
 }
 
 QString ChatInfoFormatter::title() const noexcept
@@ -27,7 +103,9 @@ QString ChatInfoFormatter::title() const noexcept
 
 QString ChatInfoFormatter::status() const noexcept
 {
-    return m_status;
+    // A live action wins over "last seen recently" or the member count, and falls back
+    // to it the moment the action expires.
+    return m_action.isEmpty() ? m_status : m_action;
 }
 
 void ChatInfoFormatter::handleBasicGroupUpdate(qlonglong groupId) noexcept

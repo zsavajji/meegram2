@@ -362,23 +362,23 @@ void MessageModel::fetchMoreBack() noexcept
     emit backFetchingChanged();
 }
 
-void MessageModel::viewMessages(const QStringList &messageIds) noexcept
+void MessageModel::viewMessagesUpTo(int index) noexcept
 {
-    std::vector<int64_t> result;
-    result.reserve(messageIds.size());
+    if (index < 0 || index >= static_cast<int>(m_messages.size()))
+        return;
 
-    std::ranges::for_each(messageIds, [&](const auto &messageId) {
-        bool ok = false;
-        if (auto id = messageId.toLongLong(&ok); ok)
-        {
-            result.emplace_back(id);
-        }
-    });
+    const auto messageId = m_messages.at(index);
+
+    // Inbox read state is a single "last read" pointer, so reporting the newest
+    // message on screen marks everything before it read as well. The comparison also
+    // keeps this from re-sending on every scroll once the chat is fully read.
+    if (messageId <= m_chat->lastReadInboxMessageId())
+        return;
 
     auto request = td::td_api::make_object<td::td_api::viewMessages>();
 
     request->chat_id_ = m_chat->id();
-    request->message_ids_ = std::move(result);
+    request->message_ids_ = {messageId};
     request->force_read_ = true;
 
     m_client->send(std::move(request));
@@ -594,7 +594,12 @@ void MessageModel::handleDeleteMessages(qlonglong chatId, std::vector<int64_t> &
 void MessageModel::loadMessages() noexcept
 {
     const auto unread = m_chat->unreadCount() > 0;
-    const auto fromMessageId = unread ? m_chat->lastReadInboxMessageId() : m_chat->lastMessage()->id();
+
+    // A chat can have no last message - freshly created, or its history cleared - and
+    // this dereferenced it unconditionally. from_message_id 0 means "from the newest",
+    // which is what is wanted anyway.
+    const auto *lastMessage = m_chat->lastMessage();
+    const auto fromMessageId = unread ? m_chat->lastReadInboxMessageId() : (lastMessage ? lastMessage->id() : 0);
 
     const auto offset = unread ? -1 - MessageSliceLimit : 0;
     const auto limit = unread ? 2 * MessageSliceLimit : MessageSliceLimit;
@@ -643,7 +648,9 @@ void MessageModel::insertMessages(std::vector<qlonglong> &&newIds, bool prepend)
 int MessageModel::lastMessageIndex() const noexcept
 {
     const auto unread = m_chat->unreadCount() > 0;
-    const auto fromMessageId = unread ? m_chat->lastReadInboxMessageId() : m_chat->lastMessage()->id();
+
+    const auto *lastMessage = m_chat->lastMessage();
+    const auto fromMessageId = unread ? m_chat->lastReadInboxMessageId() : (lastMessage ? lastMessage->id() : 0);
 
     return std::distance(m_messages.begin(), std::ranges::find(m_messages, fromMessageId));
 }

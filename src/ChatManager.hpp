@@ -5,6 +5,7 @@
 #include "MessageModel.hpp"
 
 #include <QObject>
+#include <QTimer>
 
 #include <memory>
 #include <vector>
@@ -38,6 +39,9 @@ private slots:
     void handleUserUpdate(qlonglong userId) noexcept;
     void handleChatOnlineMemberCount(qlonglong chatId, int onlineMemberCount) noexcept;
 
+    void handleChatAction(qlonglong chatId, qlonglong senderId, int actionType) noexcept;
+    void clearChatAction() noexcept;
+
 private:
     void initializeMembers() noexcept;
     void updateStatus() noexcept;
@@ -51,6 +55,13 @@ private:
     int m_onlineMemberCount{};
 
     QString m_title, m_status;
+
+    // What somebody is currently doing in this chat, shown in place of the status.
+    // TDLib repeats the action every few seconds while it continues and sends a cancel
+    // when it stops - but a client that missed the cancel would show "typing" forever,
+    // so it also expires on its own.
+    QString m_action;
+    QTimer m_actionTimer;
 
     std::shared_ptr<Chat> m_chat;
     std::shared_ptr<Locale> m_locale;
