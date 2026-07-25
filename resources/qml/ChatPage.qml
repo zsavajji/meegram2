@@ -215,6 +215,17 @@ Page {
             delegate: MessageDelegate {}
             model: messageModel
 
+            // The bubble graphic is drawn taller than its delegate - MessageBubble
+            // gives the BorderImage an 8px top margin and +2 height on incoming
+            // messages - so the newest one sat hard against the composer and got
+            // clipped. A footer rather than anchors.bottomMargin: this only costs
+            // space at the end of the list, instead of a permanent band of page
+            // background between the list and the input bar.
+            footer: Item {
+                width: listView.width
+                height: 15
+            }
+
             highlightFollowsCurrentItem: true
 
             // Stay pinned to the newest message, unless the user has deliberately
@@ -231,14 +242,36 @@ Page {
 
             ScrollDecorator { flickableItem: listView }
 
+            // Positioning once is not enough. The delegates are RichText and variable
+            // height, so contentHeight keeps growing as they are created and whatever
+            // offset was computed first is stale by the time layout settles - which is
+            // why a chat opened at an arbitrary point. Re-assert until the user or a
+            // new message takes over.
+            property bool pinToInitial: true
+
+            function goToInitialPosition() {
+                var index = messageModel.lastMessageIndex()
+
+                // lastMessageIndex() is a find(), so it returns one-past-the-end when
+                // the last read message is not in the loaded slice. Passing that to
+                // positionViewAtIndex does nothing at all, leaving the view wherever
+                // it happened to be.
+                if (chat.unreadCount > 0 && index >= 0 && index < listView.count)
+                    listView.positionViewAtIndex(index, ListView.Center)
+                else
+                    listView.positionViewAtEnd()
+            }
+
+            onContentHeightChanged: {
+                if (pinToInitial)
+                    goToInitialPosition()
+            }
+
+            onMovementStarted: pinToInitial = false
+
             onCountChanged: {
                 if (!messageModel.loading && loading) {
-                    if (chat.unreadCount > 0) {
-                        listView.positionViewAtIndex(messageModel.lastMessageIndex(), ListView.Center)
-                    } else {
-                        listView.positionViewAtEnd()
-                    }
-
+                    goToInitialPosition()
                     loading = false
                 }
             }
@@ -525,10 +558,13 @@ Page {
     // Kept and reused rather than destroyed after each pick: tearing a page down
     // while the pop transition is still running is how QML1 crashes, and one picker
     // per chat page is bounded anyway.
-    property variant photoPicker: null
+    // QtObject, not variant: a variant initialised to null reads back as undefined,
+    // so the "=== null" this used to test was never true - the page was never built
+    // and pageStack.push() got handed undefined.
+    property QtObject photoPicker: null
 
     function openPhotoPicker() {
-        if (photoPicker === null) {
+        if (!photoPicker) {
             var component = Qt.createComponent("PhotoPickerPage.qml");
 
             if (component.status !== Component.Ready) {
@@ -566,6 +602,10 @@ Page {
         // Not onCountChanged: that also fires when a page of older messages is
         // prepended, which would yank the view to the bottom mid-scrollback.
         onMessageAppended: {
+            // A live message ends the opening sequence, whether or not the user has
+            // touched the list yet - otherwise the two would fight over contentY.
+            listView.pinToInitial = false
+
             if (listView.followLast)
                 listView.positionViewAtEnd()
         }

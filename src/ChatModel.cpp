@@ -201,14 +201,15 @@ void ChatModel::scheduleSort()
 
 bool ChatModel::isInList(Chat *chat) const
 {
-    const auto *position = getChatPosition(chat);
-
-    return position && position->order() != 0;
+    // Presence only. An earlier version also required order != 0, on the reading that
+    // TDLib uses 0 for "not in this list" - but non-pinned chats reach the model with
+    // order 0 and only pinned ones carry a real order, so that hid almost everything.
+    return getChatPosition(chat) != nullptr;
 }
 
 bool ChatModel::insertChatIfInList(qlonglong chatId)
 {
-    if (m_rowById.contains(chatId))
+    if (m_rowById.contains(chatId) || m_removedChatIds.contains(chatId))
         return false;
 
     const auto chat = m_storageManager->chat(chatId);
@@ -521,10 +522,43 @@ void ChatModel::deleteChat(qlonglong chatId)
         request->revoke_ = false;
 
         send(std::move(request));
+        removeChatRow(chatId);
         return;
     }
 
     send(td::td_api::make_object<td::td_api::leaveChat>(chatId));
+    removeChatRow(chatId);
+}
+
+void ChatModel::removeChatRow(qlonglong chatId)
+{
+    const auto it = m_rowById.constFind(chatId);
+    if (it == m_rowById.constEnd())
+        return;
+
+    const auto row = it.value();
+    if (row >= static_cast<int>(m_chats.size()))
+        return;
+
+    // Rows past m_count are not part of the model as far as the view is concerned -
+    // rowCount() is m_count - so only those need signalling.
+    const auto visible = row < m_count;
+
+    if (visible)
+        beginRemoveRows(QModelIndex(), row, row);
+
+    m_chats.erase(m_chats.begin() + row);
+    m_removedChatIds.insert(chatId);
+    m_formatted.remove(chatId);
+
+    rebuildRowIndex();
+
+    if (visible)
+    {
+        --m_count;
+        endRemoveRows();
+        emit countChanged();
+    }
 }
 
 void ChatModel::markChatAsRead(qlonglong chatId)

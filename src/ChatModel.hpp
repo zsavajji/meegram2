@@ -5,6 +5,7 @@
 
 #include <QAbstractListModel>
 #include <QHash>
+#include <QSet>
 #include <QTimer>
 
 #include <atomic>
@@ -103,10 +104,14 @@ private:
     // Every action below needs the same null check on the client, so they share this.
     void send(td::td_api::object_ptr<td::td_api::Function> request);
 
-    // setPositions merges per list and never drops an entry, so a chat that has left
-    // this list still has a position for it - with order 0. Membership is the pair,
-    // not the position alone.
+    // Whether the chat is in this model's list at all. Shared by populate, the
+    // incremental insert and the sort, so they cannot disagree about it.
     bool isInList(Chat *chat) const;
+
+    // Drops a row on request. Deliberately not inferred from chat positions: the only
+    // signal TDLib gives for "left the list" is an order of 0, which non-pinned chats
+    // also carry while loading, so acting on it emptied the list.
+    void removeChatRow(qlonglong chatId);
 
     // Adds a chat that has appeared in this list but is not in the model yet.
     // Returns true if it was inserted.
@@ -147,6 +152,15 @@ private:
     // chatId -> row in m_chats. Replaces a linear scan that called weak_ptr::lock()
     // (an atomic CAS) on every element to resolve one update.
     QHash<qlonglong, int> m_rowById;
+
+    // Chats removed through deleteChat. Their stored position still names this list
+    // and TDLib keeps sending updates for them, so without this the next update puts
+    // the row straight back.
+    //
+    // ponytail: never emptied, so a private chat you deleted stays hidden for the
+    // session even if the other side writes again. Bounded by how many chats one
+    // person deletes in one sitting; drop the id on a fresh position if that bites.
+    QSet<qlonglong> m_removedChatIds;
 
     // Keyed by chatId, so reordering the list does not invalidate it.
     mutable QHash<qlonglong, FormattedRow> m_formatted;

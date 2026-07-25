@@ -53,6 +53,10 @@ private:
     void publish(qlonglong chatId, const QString &summary, const QString &body, const QString &imagePath) noexcept;
     void withdraw(qlonglong chatId) noexcept;
 
+    // Fetches a chat avatar that has not been downloaded yet, so a later notification
+    // for the same chat can show it.
+    void requestPhotoDownload(int fileId) noexcept;
+
     // Registers com.meegram on the session bus, once. Returns false if the name was
     // taken, which turns tap-to-open into a no-op but leaves the banners working.
     bool registerService() noexcept;

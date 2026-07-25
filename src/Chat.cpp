@@ -165,6 +165,11 @@ void Chat::setPositions(std::vector<td::td_api::object_ptr<td::td_api::chatPosit
 
         std::erase_if(m_positions, [&](const auto &value) { return *value->list() == *newPosition->list(); });
 
+        // Every position is kept, including order 0. TDLib documents order 0 as "not
+        // in the list", but in practice only pinned chats arrive here with a real
+        // order - treating 0 as absent hid every non-pinned chat. Chats that leave a
+        // list are removed explicitly by whoever asked for it; see
+        // ChatModel::removeChatRow.
         m_positions.emplace_back(std::move(newPosition));
     }
 

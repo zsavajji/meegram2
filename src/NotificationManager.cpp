@@ -149,12 +149,30 @@ void NotificationManager::handleChatUpdate(qlonglong chatId) noexcept
             body.prepend(sender + QLatin1String(": "));
     }
 
-    // The avatar, if it has been downloaded. The field is an imageURI, not a path.
-    const auto *photo = chat->photo();
-    const auto photoPath = photo ? photo->localPath() : QString();
-    const auto imageUri = photoPath.isEmpty() ? QString() : QLatin1String("file://") + photoPath;
+    // The avatar. TDLib fills localPath in as soon as a download starts, so the file
+    // is only safe to hand over once it reports complete - pointing the notification
+    // manager at a half written file is what drew as a broken red square.
+    //
+    // Passed as a plain path: MNotification takes an image id or a filesystem path
+    // here, not a URL, so the file:// prefix this used to add could not resolve.
+    QString imagePath;
 
-    publish(chatId, Utils::getChatTitle(chat, m_storageManager), body, imageUri);
+    if (auto *photo = chat->photo())
+    {
+        if (photo->isDownloadingCompleted())
+        {
+            imagePath = photo->localPath();
+        }
+        else if (photo->canBeDownloaded() && !photo->isDownloadingActive())
+        {
+            // Nothing to show this time. The chat list only fetches avatars for rows
+            // it has actually drawn, and a notification can arrive for a chat that was
+            // never scrolled to - so ask now, and the next one will have it.
+            requestPhotoDownload(photo->id());
+        }
+    }
+
+    publish(chatId, Utils::getChatTitle(chat, m_storageManager), body, imagePath);
 }
 
 void NotificationManager::publish(qlonglong chatId, const QString &summary, const QString &body, const QString &imagePath) noexcept
@@ -215,6 +233,14 @@ void NotificationManager::activate()
     withdraw(chatId);
 
     emit chatRequested(chatId);
+}
+
+void NotificationManager::requestPhotoDownload(int fileId) noexcept
+{
+    if (auto client = m_storageManager->client())
+    {
+        client->send(td::td_api::make_object<td::td_api::downloadFile>(fileId, 1, 0, 0, false));
+    }
 }
 
 bool NotificationManager::registerService() noexcept
