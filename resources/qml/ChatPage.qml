@@ -217,6 +217,14 @@ Page {
 
             highlightFollowsCurrentItem: true
 
+            // Stay pinned to the newest message, unless the user has deliberately
+            // scrolled up to read back. Updated on user-driven movement only:
+            // atYEnd goes false the moment a row is appended, so binding to it
+            // directly would cancel the follow on the very message it should track.
+            property bool followLast: true
+
+            onMovementEnded: followLast = listView.atYEnd
+
             section.property: "section"
             section.criteria: ViewSection.FullString
             section.delegate: sectionDateDelegate
@@ -410,10 +418,15 @@ Page {
                         // Whitespace-only counts as empty: TDLib rejects such a
                         // message, so there is nothing to gain by sending it.
                         if (textArea.text.trim() !== "") {
-                            if (composeState.editId !== 0)
+                            if (composeState.editId !== 0) {
                                 messageModel.editMessage(composeState.editId, textArea.text)
-                            else
+                            } else {
                                 messageModel.sendMessage(textArea.text, composeState.replyId)
+                                // Your own message is always worth jumping to, even
+                                // from halfway up the history. It arrives back as an
+                                // update, so the follow flag is what carries this.
+                                listView.followLast = true
+                            }
 
                             textArea.text = ""
                             composeState.clear()
@@ -489,6 +502,13 @@ Page {
 
         onFetchedPosition: {
             listView.positionViewAtIndex(numItems, ListView.Beginning);
+        }
+
+        // Not onCountChanged: that also fires when a page of older messages is
+        // prepended, which would yank the view to the bottom mid-scrollback.
+        onMessageAppended: {
+            if (listView.followLast)
+                listView.positionViewAtEnd()
         }
     }
 

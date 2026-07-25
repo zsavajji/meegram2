@@ -485,6 +485,13 @@ void MessageModel::handleNewMessage(td::td_api::object_ptr<td::td_api::message> 
     endInsertRows();
 
     emit countChanged();
+
+    // Messages sort by id and a new one always has the highest, so this is the last
+    // row - but say so explicitly rather than leave the view to assume it.
+    if (pos == static_cast<int>(m_messages.size()) - 1)
+    {
+        emit messageAppended();
+    }
 }
 
 void MessageModel::handleMessageContent(qlonglong chatId, qlonglong messageId, td::td_api::object_ptr<td::td_api::MessageContent> &&newContent) noexcept

@@ -76,6 +76,10 @@ signals:
 
     void fetchedPosition(int numItems);
 
+    // A single new message landed at the end - sent or received. Distinct from
+    // countChanged, which also fires when a page of history is prepended.
+    void messageAppended();
+
 public slots:
     void refresh() noexcept;
 
