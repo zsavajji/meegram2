@@ -69,6 +69,7 @@ set(SRC_FILES
     src/MessageContent.cpp
     src/MessageModel.cpp
     src/MessageService.cpp
+    src/NotificationManager.cpp
     src/PluralRules.cpp
     src/QrCodeItem.cpp
     src/Settings.cpp
@@ -101,6 +102,7 @@ set(HEADER_FILES
     src/MessageContent.hpp
     src/MessageModel.hpp
     src/MessageService.hpp
+    src/NotificationManager.hpp
     src/PluralRules.hpp
     src/QrCodeItem.hpp
     src/ScopeTimer.hpp
@@ -208,6 +210,9 @@ if (BUILD_HARMATTAN)
 
     install(FILES resources/meegram_harmattan.desktop DESTINATION /usr/share/applications)
     install(FILES resources/meegram80.png DESTINATION /usr/share/icons/hicolor/80x80/apps)
+
+    # Lets D-Bus start the app when a notification is tapped after it has been closed.
+    install(FILES resources/com.meegram.service DESTINATION /usr/share/dbus-1/services)
     install(FILES resources/meegram-splash.png DESTINATION /opt/meegram/share)
 
     install(TARGETS meegram DESTINATION /opt/meegram/bin)

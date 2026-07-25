@@ -422,6 +422,11 @@ void AppManager::handleAuthorizationState(const td::td_api::AuthorizationState &
 
     m_chatManager = std::make_shared<ChatManager>(m_storageManager, m_locale);
 
+    m_notificationManager = std::make_unique<NotificationManager>(m_storageManager, m_locale);
+
+    connect(m_chatManager.get(), SIGNAL(activeChatChanged(qlonglong)), m_notificationManager.get(), SLOT(setActiveChat(qlonglong)));
+    connect(m_notificationManager.get(), SIGNAL(chatRequested(qlonglong)), SIGNAL(chatRequested(qlonglong)));
+
     emit chatManagerChanged();
 }
 

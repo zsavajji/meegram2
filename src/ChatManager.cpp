@@ -300,6 +300,7 @@ void ChatManager::openChat(qlonglong chatId) noexcept
     m_infoFormatter = std::make_unique<ChatInfoFormatter>(m_selectedChat, m_locale, m_storage);
 
     emit selectedChatChanged();
+    emit activeChatChanged(chatId);
 }
 
 void ChatManager::closeChat(qlonglong chatId) noexcept
@@ -309,6 +310,8 @@ void ChatManager::closeChat(qlonglong chatId) noexcept
     m_infoFormatter = nullptr;
     m_messageModel = nullptr;
     m_selectedChat = nullptr;
+
+    emit activeChatChanged(0);
 }
 
 void ChatManager::onChatFoldersUpdated() noexcept

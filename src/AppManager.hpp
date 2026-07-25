@@ -1,6 +1,9 @@
 #pragma once
 
 #include "LanguagePackInfoModel.hpp"
+// Included rather than forward declared: unique_ptr needs the complete type wherever
+// AppManager's implicit destructor is instantiated.
+#include "NotificationManager.hpp"
 
 #include <td/telegram/td_api.h>
 
@@ -64,6 +67,9 @@ signals:
 
     void appInitialized();
 
+    // Forwarded from NotificationManager: a system notification was tapped.
+    void chatRequested(qlonglong chatId);
+
 public slots:
     void close() noexcept;
     void setOption(const QString &name, const QVariant &value);
@@ -97,6 +103,9 @@ private:
     std::shared_ptr<StorageManager> m_storageManager;
 
     std::unique_ptr<LanguagePackInfoModel> m_languagePackInfoModel;
+
+    // Not exposed to QML; it works off StorageManager and ChatManager signals alone.
+    std::unique_ptr<NotificationManager> m_notificationManager;
 
     std::array<bool, 2> m_initializationStatus{false, false};
 };

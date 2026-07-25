@@ -33,6 +33,17 @@ PageStackWindow {
         onInvertedThemeChanged: theme.inverted = settings.invertedTheme
     }
 
+    Connections {
+        target: appManager
+
+        // A system notification was tapped. Back out to the chat list first, so
+        // repeated taps do not stack chat pages on top of each other.
+        onChatRequested: {
+            pageStack.pop(null, true)
+            openChat(chatId)
+        }
+    }
+
     function showInfoBanner(message) {
         banner.text = message
         banner.show()

@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=com.meegram
+Exec=/usr/bin/invoker --type=e -s /opt/meegram/bin/meegram

@@ -96,6 +96,11 @@ public:
 signals:
     void selectedChatChanged();
 
+    // The chat the user is looking at, or 0 when none. Drives notification
+    // suppression; separate from selectedChatChanged because that one carries no id
+    // and does not fire on close.
+    void activeChatChanged(qlonglong chatId);
+
     void folderModelChanged();
 
     void mainModelChanged();
