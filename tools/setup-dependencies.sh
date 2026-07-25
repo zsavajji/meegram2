@@ -23,6 +23,11 @@ readonly TDLIB_COMMIT="${TDLIB_COMMIT:-022d60202e446ad1287b9fb68e687c8a0760788b}
 # like TDLib this is pinned by commit rather than by tag.
 readonly RLOTTIE_COMMIT="${RLOTTIE_COMMIT:-2cab35db755b0e39df40b679969495e90d39c578}"
 
+# libwebp, for static stickers. Qt 4.7 has no WebP handler and the device ships none,
+# so without this every static sticker falls back to its emoji. v1.4.0 is a release
+# tag, unlike rlottie, so pin to that.
+readonly LIBWEBP_TAG="${LIBWEBP_TAG:-v1.4.0}"
+
 # Parallel build jobs.
 #
 # TDLib used to build fully serial here: `cmake --build` defaults to one job with
@@ -284,6 +289,81 @@ build_zlib() {
 # CMakeLists.txt has find_package(rlottie REQUIRED) but nothing here used to build
 # it, so configuring the app failed on a fresh machine. rlottie renders the .tgs
 # sticker animations on the authentication pages (src/LottieAnimation.cpp).
+build_webp() {
+    local stamp="build/libwebp/.built-commit"
+    local want="$LIBWEBP_TAG:$ARGS"
+
+    if [ -z "${FORCE_REBUILD:-}" ] && [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$want" ]; then
+        warn "libwebp already built and installed for $ARGS, skipping. FORCE_REBUILD=1 to redo."
+        return
+    fi
+
+    if [ -d "libwebp" ]; then
+        warn "libwebp checkout already exists, skipping fetch. Remove libwebp/ to re-pin."
+    else
+        info "Fetching libwebp $LIBWEBP_TAG..."
+
+        git clone --quiet --depth=1 --branch "$LIBWEBP_TAG" https://chromium.googlesource.com/webm/libwebp libwebp
+    fi
+
+    rm -rf build/libwebp
+    mkdir -p build/libwebp
+
+    local webp_root
+    webp_root=$(realpath libwebp)
+
+    # Decoder only. Nothing here encodes WebP, and the CLI tools would drag in libpng,
+    # libjpeg and giflib - none of which are in the sysroot.
+    #
+    # POSITION_INDEPENDENT_CODE for the same reason as rlottie: meegram links -pie and
+    # a non-PIC static archive will not go into a PIE executable on ARM.
+    #
+    # SIMD is left on. The toolchain is built --with-fpu=neon so libwebp's NEON paths
+    # compile from the compiler's own __ARM_NEON__, with no equivalent of rlottie's
+    # -DARCH=arm needed.
+    local webp_options=(
+        -DCMAKE_BUILD_TYPE=MinSizeRel
+        -DCMAKE_INSTALL_PREFIX=/usr/local
+        -DBUILD_SHARED_LIBS=OFF
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+        -DWEBP_BUILD_ANIM_UTILS=OFF
+        -DWEBP_BUILD_CWEBP=OFF
+        -DWEBP_BUILD_DWEBP=OFF
+        -DWEBP_BUILD_GIF2WEBP=OFF
+        -DWEBP_BUILD_IMG2WEBP=OFF
+        -DWEBP_BUILD_VWEBP=OFF
+        -DWEBP_BUILD_WEBPINFO=OFF
+        -DWEBP_BUILD_WEBPMUX=OFF
+        -DWEBP_BUILD_EXTRAS=OFF
+    )
+
+    if [[ "$ARGS" == "harmattan" ]]; then
+        info "Configuring libwebp for Harmattan..."
+        write_toolchain_file "$webp_root/toolchain.cmake"
+
+        cmake -B build/libwebp -S "$webp_root" \
+            -DCMAKE_TOOLCHAIN_FILE="$webp_root/toolchain.cmake" \
+            "${webp_options[@]}"
+    else
+        info "Configuring libwebp..."
+        cmake -B build/libwebp -S "$webp_root" "${webp_options[@]}"
+    fi
+
+    info "Building libwebp..."
+    cmake --build build/libwebp --parallel "$JOBS"
+
+    if [[ "$ARGS" == "harmattan" ]]; then
+        info "Installing libwebp to Harmattan SDK..."
+        DESTDIR="$SDK_PATH/Madde/sysroots/harmattan_sysroot_10.2011.34-1_slim" cmake --install build/libwebp
+    else
+        cmake --install build/libwebp
+    fi
+
+    echo "$want" > "$stamp"
+
+    success "libwebp built and installed successfully."
+}
+
 build_rlottie() {
     local stamp="build/rlottie/.built-commit"
     local want="$RLOTTIE_COMMIT:$ARGS"
@@ -542,6 +622,7 @@ main() {
     build_zlib
     build_openssl
     build_rlottie
+    build_webp
     build_tdlib
 }
 

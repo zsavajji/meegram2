@@ -166,10 +166,12 @@ Item {
                 // sizes them well under a photo.
                 property int maxSize: 180
 
-                // rlottie is already linked for the onboarding animations, so tgs is
-                // the one format this device can actually render.
-                property bool animated: model.content.format === "tgs" && model.content.file
-                                        && model.content.file.isDownloadingCompleted
+                property bool downloaded: model.content.file && model.content.file.isDownloadingCompleted
+
+                // tgs goes through rlottie, webp through StickerProvider and libwebp.
+                // webm has no decoder here and falls through to the emoji.
+                property bool animated: downloaded && model.content.format === "tgs"
+                property bool still: downloaded && model.content.format === "webp"
 
                 anchors {
                     left: parent.left
@@ -186,12 +188,22 @@ Item {
                     sourceComponent: stickerFrame.animated ? animatedStickerComponent : undefined
                 }
 
-                // ponytail: webp and webm stickers fall back to their emoji, because
-                // this device has no WebP handler and no VP9 decoder worth having.
-                // Add an Image branch above if libwebp ever gets linked.
+                Image {
+                    anchors.fill: parent
+                    visible: stickerFrame.still
+                    asynchronous: true
+                    // The provider decodes to sourceSize, so nothing is left to scale.
+                    smooth: false
+                    sourceSize.width: width
+                    sourceSize.height: height
+                    source: stickerFrame.still ? "image://sticker/" + model.content.file.localPath : ""
+                }
+
+                // ponytail: webm stickers fall back to their emoji - VP9 on an SGX530
+                // is not worth a decoder. Also covers a sticker still downloading.
                 Label {
                     anchors.centerIn: parent
-                    visible: !stickerFrame.animated
+                    visible: !stickerFrame.animated && !stickerFrame.still
                     width: parent.width
                     text: utils.replaceEmoji(model.content.emoji) + " " + qsTr("AttachSticker")
                     textFormat: Text.RichText
@@ -202,10 +214,10 @@ Item {
                 }
             }
 
-            // Only fetch what can be drawn - downloading a webp to show an emoji next
-            // to it would be pure cost.
+            // Only fetch what can be drawn. webm has no decoder here, so downloading
+            // one to show an emoji beside it would be pure cost.
             Component.onCompleted: {
-                if (model.content.format !== "tgs")
+                if (model.content.format !== "tgs" && model.content.format !== "webp")
                     return
 
                 var file = model.content.file

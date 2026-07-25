@@ -21,6 +21,8 @@ set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/sanitizers-cmake/cmake" ${CMAKE
 
 find_package(Td REQUIRED)
 find_package(rlottie REQUIRED)
+# Static stickers. Qt 4.7 has no WebP handler; see src/StickerProvider.cpp.
+find_package(WebP REQUIRED)
 find_package(Qt4 4.7.4 COMPONENTS QtCore QtDBus QtGui QtOpenGL QtSvg QtXml QtDeclarative REQUIRED)
 find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
@@ -73,6 +75,7 @@ set(SRC_FILES
     src/PluralRules.cpp
     src/QrCodeItem.cpp
     src/Settings.cpp
+    src/StickerProvider.cpp
     src/StorageManager.cpp
     src/SupergroupFullInfo.cpp
     src/Supergroup.cpp
@@ -106,6 +109,7 @@ set(HEADER_FILES
     src/PluralRules.hpp
     src/QrCodeItem.hpp
     src/ScopeTimer.hpp
+    src/StickerProvider.hpp
     src/Settings.hpp
     src/StorageManager.hpp
     src/Supergroup.hpp
@@ -156,6 +160,7 @@ target_link_libraries(meegram PRIVATE
     Lib::QRCode
     Td::TdStatic
     rlottie::rlottie
+    WebP::webpdecoder
     Qt4::QtCore
     Qt4::QtDBus
     Qt4::QtDeclarative

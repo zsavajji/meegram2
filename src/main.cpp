@@ -27,6 +27,7 @@
 #include "MessageService.hpp"
 #include "QrCodeItem.hpp"
 #include "Settings.hpp"
+#include "StickerProvider.hpp"
 #include "StorageManager.hpp"
 #include "Utils.hpp"
 
@@ -127,6 +128,8 @@ Q_DECL_EXPORT int main(int argc, char *argv[])
     viewer.rootContext()->setContextProperty("AppVersion", AppVersion);
 
     viewer.engine()->addImageProvider("chatPhoto", new ChatPhotoProvider);
+    // Static stickers only; Qt 4.7 cannot decode WebP on its own.
+    viewer.engine()->addImageProvider("sticker", new StickerProvider);
 
     QObject::connect(viewer.engine(), SIGNAL(quit()), &viewer, SLOT(close()));
 
