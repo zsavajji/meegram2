@@ -1,5 +1,7 @@
 import QtQuick 1.1
 import com.nokia.meego 1.1
+// LottieAnimation, for animated stickers.
+import MyComponent 1.0
 
 Item {
     height: loader.y + loader.height
@@ -132,6 +134,89 @@ Item {
     }
 
     Component {
+        id: animatedStickerComponent
+
+        LottieAnimation {
+            anchors.fill: parent
+            source: "file://" + model.content.file.localPath
+            // Telegram plays a sticker once on arrival rather than looping forever,
+            // which also spares the CPU here.
+            loop: 1
+
+            onStatusChanged: {
+                if (status === LottieAnimation.Ready)
+                    play()
+            }
+        }
+    }
+
+    Component {
+        id: stickerMessageComponent
+
+        MessageBubble {
+            // Nothing to copy or edit on a sticker, so the menu is Reply and Delete.
+            onPressAndHold: menuTarget.open(model.id, model.sender, "", model.isOutgoing)
+
+            childrenWidth: stickerFrame.width
+
+            content: Item {
+                id: stickerFrame
+
+                // 512px stickers drawn at 512px would swallow the screen; Telegram
+                // sizes them well under a photo.
+                property int maxSize: 180
+
+                // rlottie is already linked for the onboarding animations, so tgs is
+                // the one format this device can actually render.
+                property bool animated: model.content.format === "tgs" && model.content.file
+                                        && model.content.file.isDownloadingCompleted
+
+                anchors {
+                    left: parent.left
+                    leftMargin: model.isOutgoing ? 80 : 20
+                }
+
+                width: Math.min(model.content.width > 0 ? model.content.width : maxSize, maxSize)
+                height: model.content.width > 0 && model.content.height > 0
+                            ? width * model.content.height / model.content.width
+                            : width
+
+                Loader {
+                    anchors.fill: parent
+                    sourceComponent: stickerFrame.animated ? animatedStickerComponent : undefined
+                }
+
+                // ponytail: webp and webm stickers fall back to their emoji, because
+                // this device has no WebP handler and no VP9 decoder worth having.
+                // Add an Image branch above if libwebp ever gets linked.
+                Label {
+                    anchors.centerIn: parent
+                    visible: !stickerFrame.animated
+                    width: parent.width
+                    text: utils.replaceEmoji(model.content.emoji) + " " + qsTr("AttachSticker")
+                    textFormat: Text.RichText
+                    color: model.isOutgoing ? "white" : "black"
+                    font.pixelSize: 23
+                    wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                    horizontalAlignment: Text.AlignHCenter
+                }
+            }
+
+            // Only fetch what can be drawn - downloading a webp to show an emoji next
+            // to it would be pure cost.
+            Component.onCompleted: {
+                if (model.content.format !== "tgs")
+                    return
+
+                var file = model.content.file
+
+                if (file && file.canBeDownloaded && !file.isDownloadingActive && !file.isDownloadingCompleted)
+                    appManager.downloadFile(file.id, 1, 0, 0, false)
+            }
+        }
+    }
+
+    Component {
         id: notSupportedMessageComponent
 
         MessageBubble {
@@ -168,6 +253,8 @@ Item {
                 return textMessageComponent;
             case "messagePhoto":
                 return photoMessageComponent;
+            case "messageSticker":
+                return stickerMessageComponent;
             default:
                 return notSupportedMessageComponent;
             }

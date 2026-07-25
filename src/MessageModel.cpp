@@ -260,6 +260,14 @@ void MessageModel::getChatHistory(qlonglong fromMessageId, int offset, int limit
 
         if (response->get_id() != td::td_api::messages::ID)
         {
+            // qWarning, not qDebug: release builds define QT_NO_DEBUG_OUTPUT, so a
+            // rejected request left no trace at all and the chat just span forever.
+            if (response->get_id() == td::td_api::error::ID)
+            {
+                const auto *error = static_cast<const td::td_api::error *>(response.get());
+                qWarning() << "getChatHistory failed:" << error->code_ << QString::fromStdString(error->message_);
+            }
+
             cleanupFlags();
             return;
         }
@@ -267,7 +275,7 @@ void MessageModel::getChatHistory(qlonglong fromMessageId, int offset, int limit
         auto messagesResponse = td::td_api::move_object_as<td::td_api::messages>(response);
         if (!messagesResponse || messagesResponse->messages_.empty())
         {
-            qDebug() << "No messages received or response is null, cleaning up flags";
+            qWarning() << "getChatHistory returned no messages for chat" << m_chat->id();
             cleanupFlags();
             return;
         }
@@ -280,7 +288,6 @@ void MessageModel::getChatHistory(qlonglong fromMessageId, int offset, int limit
             {
                 newMessageIds.emplace_back(messageId);
                 m_messageMap[messageId] = std::make_unique<Message>(std::move(message));
-                linkContentFile(m_messageMap[messageId].get());
             }
         }
 
@@ -288,6 +295,12 @@ void MessageModel::getChatHistory(qlonglong fromMessageId, int offset, int limit
         {
             insertMessages(std::move(newMessageIds), fetchPrevious);
         }
+
+        // Not called inline: this whole callback runs on the TDLib worker thread, and
+        // linkContentFile reaches into StorageManager's file map, which the main thread
+        // mutates on every updateFile. Two threads doing try_emplace on one
+        // unordered_map can leave a reader walking a broken bucket chain forever.
+        QMetaObject::invokeMethod(this, "linkLoadedContentFiles", Qt::QueuedConnection);
 
         cleanupFlags();
     });
@@ -397,16 +410,34 @@ void MessageModel::deleteMessage(qlonglong messageId, bool revoke) noexcept
     m_client->send(std::move(request));
 }
 
+void MessageModel::linkLoadedContentFiles() noexcept
+{
+    for (const auto &[messageId, message] : m_messageMap)
+    {
+        linkContentFile(message.get());
+    }
+}
+
 void MessageModel::linkContentFile(Message *message) noexcept
 {
-    if (!message || message->contentType() != td::td_api::messagePhoto::ID)
+    if (!message || !message->content())
         return;
 
-    auto *photo = static_cast<MessagePhoto *>(message->content());
-    if (!photo)
-        return;
-
-    photo->adoptFile(m_storage->registerFile(photo->photoFile()));
+    switch (message->contentType())
+    {
+        case td::td_api::messagePhoto::ID: {
+            auto *photo = static_cast<MessagePhoto *>(message->content());
+            photo->adoptFile(m_storage->registerFile(photo->photoFile()));
+            break;
+        }
+        case td::td_api::messageSticker::ID: {
+            auto *sticker = static_cast<MessageSticker *>(message->content());
+            sticker->adoptFile(m_storage->registerFile(sticker->stickerFile()));
+            break;
+        }
+        default:
+            break;
+    }
 }
 
 void MessageModel::editMessage(qlonglong messageId, const QString &text) noexcept
@@ -593,7 +624,13 @@ void MessageModel::handleDeleteMessages(qlonglong chatId, std::vector<int64_t> &
 
 void MessageModel::loadMessages() noexcept
 {
-    const auto unread = m_chat->unreadCount() > 0;
+    // The unread branch below anchors on the last read message and uses a negative
+    // offset to also pull in some newer ones. That needs a real anchor: a chat never
+    // opened before has unread messages but lastReadInboxMessageId still 0, and
+    // "messages newer than the newest" is a combination TDLib rejects - so the reply
+    // is an error, not messages, and the chat stayed empty. Groups are where this
+    // shows up, being the chats with unread history that has never been read.
+    const auto unread = m_chat->unreadCount() > 0 && m_chat->lastReadInboxMessageId() != 0;
 
     // A chat can have no last message - freshly created, or its history cleared - and
     // this dereferenced it unconditionally. from_message_id 0 means "from the newest",

@@ -91,6 +91,10 @@ private slots:
     void handleChatItem() noexcept;
     void handleResult(td::td_api::Object *object) noexcept;
 
+    // Runs linkContentFile over everything loaded, on the main thread. registerFile is
+    // idempotent, so re-linking an already canonical file costs a hash lookup.
+    void linkLoadedContentFiles() noexcept;
+
 private:
     void handleNewMessage(td::td_api::object_ptr<td::td_api::message> &&message) noexcept;
     void handleMessageContent(qlonglong chatId, qlonglong messageId, td::td_api::object_ptr<td::td_api::MessageContent> &&newContent) noexcept;

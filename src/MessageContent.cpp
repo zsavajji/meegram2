@@ -174,7 +174,67 @@ void MessagePhoto::adoptFile(std::shared_ptr<File> file) noexcept
 MessageSticker::MessageSticker(td::td_api::object_ptr<td::td_api::messageSticker> content, QObject *parent)
     : QObject(parent)
 {
-    m_emoji = QString::fromStdString(content->sticker_->emoji_);
+    if (!content->sticker_)
+        return;
+
+    auto &sticker = content->sticker_;
+
+    m_emoji = QString::fromStdString(sticker->emoji_);
+    m_width = sticker->width_;
+    m_height = sticker->height_;
+
+    if (sticker->format_)
+    {
+        switch (sticker->format_->get_id())
+        {
+            case td::td_api::stickerFormatTgs::ID:
+                m_format = QLatin1String("tgs");
+                break;
+            case td::td_api::stickerFormatWebp::ID:
+                m_format = QLatin1String("webp");
+                break;
+            case td::td_api::stickerFormatWebm::ID:
+                m_format = QLatin1String("webm");
+                break;
+            default:
+                break;
+        }
+    }
+
+    if (sticker->sticker_)
+    {
+        m_file = std::make_shared<File>(std::move(sticker->sticker_));
+    }
+}
+
+QString MessageSticker::format() const
+{
+    return m_format;
+}
+
+int MessageSticker::width() const
+{
+    return m_width;
+}
+
+int MessageSticker::height() const
+{
+    return m_height;
+}
+
+File *MessageSticker::file() const
+{
+    return m_file.get();
+}
+
+const std::shared_ptr<File> &MessageSticker::stickerFile() const noexcept
+{
+    return m_file;
+}
+
+void MessageSticker::adoptFile(std::shared_ptr<File> file) noexcept
+{
+    m_file = std::move(file);
 }
 
 QString MessageSticker::emoji() const

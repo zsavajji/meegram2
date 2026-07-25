@@ -132,13 +132,36 @@ class MessageSticker : public QObject, public MessageContent
     Q_OBJECT
     Q_PROPERTY(QString emoji READ emoji CONSTANT)
 
+    // "tgs", "webp" or "webm". The delegate picks how to draw from this: rlottie for
+    // tgs, a plain Image for webp, and the emoji for anything it cannot render.
+    Q_PROPERTY(QString format READ format CONSTANT)
+
+    Q_PROPERTY(int width READ width CONSTANT)
+    Q_PROPERTY(int height READ height CONSTANT)
+    Q_PROPERTY(File *file READ file CONSTANT)
+
 public:
     explicit MessageSticker(td::td_api::object_ptr<td::td_api::messageSticker> content, QObject *parent = nullptr);
 
     QString emoji() const;
+    QString format() const;
+
+    int width() const;
+    int height() const;
+    File *file() const;
+
+    // Same canonical-instance dance as MessagePhoto; see the note there.
+    const std::shared_ptr<File> &stickerFile() const noexcept;
+    void adoptFile(std::shared_ptr<File> file) noexcept;
 
 private:
     QString m_emoji;
+    QString m_format;
+
+    int m_width{0};
+    int m_height{0};
+
+    std::shared_ptr<File> m_file;
 };
 
 class MessageVideo : public QObject, public MessageContent
