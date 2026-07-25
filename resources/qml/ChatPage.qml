@@ -274,6 +274,10 @@ Page {
 
                 onTriggered: {
                     listView.goToInitialPosition()
+                    // Also the only reliable point to report what has been read: on
+                    // countChanged the delegates do not exist yet, so indexAt fails,
+                    // and onMovementEnded needs the user to actually drag.
+                    listView.markVisibleAsRead()
 
                     if (++ticks >= 5)
                         stop()
@@ -298,7 +302,10 @@ Page {
                 // the last row is the right answer anyway.
                 var index = listView.indexAt(16, listView.contentY + listView.height - 4)
 
-                if (index < 0 && listView.atYEnd)
+                // indexAt misses on a section header, and returns -1 outright before
+                // the delegates exist. Showing the end of the list - including a chat
+                // too short to scroll - means the newest message has been seen.
+                if (index < 0 && (listView.atYEnd || listView.contentHeight <= listView.height))
                     index = listView.count - 1
 
                 if (index >= 0)

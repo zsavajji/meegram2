@@ -392,6 +392,10 @@ void MessageModel::viewMessagesUpTo(int index) noexcept
 
     request->chat_id_ = m_chat->id();
     request->message_ids_ = {messageId};
+    // Left null this meant "guess from the chat's open state", and the guess depends on
+    // openChat having been processed before the view is reported. Saying it outright is
+    // what makes the read reach other clients.
+    request->source_ = td::td_api::make_object<td::td_api::messageSourceChatHistory>();
     request->force_read_ = true;
 
     m_client->send(std::move(request));
