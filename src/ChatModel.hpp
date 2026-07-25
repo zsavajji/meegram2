@@ -42,15 +42,16 @@ public:
 
     int rowCount(const QModelIndex &parent = QModelIndex()) const override;
 
-    bool canFetchMore(const QModelIndex &parent = QModelIndex()) const override;
-    void fetchMore(const QModelIndex &parent = QModelIndex()) override;
-
     QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
 
     QHash<int, QByteArray> roleNames() const;
 
     int count() const;
     bool loading() const;
+
+    // The view's "I have reached the bottom" signal. QML1's ListView does not use
+    // canFetchMore/fetchMore, so demand has to come from QML explicitly.
+    Q_INVOKABLE void loadMore();
 
     Q_INVOKABLE void toggleChatIsPinned(qlonglong chatId, bool isPinned);
 
@@ -100,6 +101,9 @@ private:
 
     void rebuildRowIndex();
     void scheduleSort();
+
+    // Makes every chat the model holds visible to the view.
+    void revealAll();
 
     // Every action below needs the same null check on the client, so they share this.
     void send(td::td_api::object_ptr<td::td_api::Function> request);

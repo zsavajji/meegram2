@@ -20,6 +20,13 @@ Item {
         delegate: ChatItem {}
         model: root.model
         snapMode: ListView.SnapToItem
+
+        // The model shows everything it has, so reaching the bottom is the signal to
+        // pull the next page from TDLib. QML1's ListView has no fetchMore of its own.
+        onAtYEndChanged: {
+            if (atYEnd)
+                root.model.loadMore()
+        }
     }
 
     // The chat the action menu is acting on. One menu for the whole list - declaring

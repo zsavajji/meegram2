@@ -112,42 +112,38 @@ Page {
                     spacing: 12
                     layoutDirection: Qt.RightToLeft
 
-                    MaskedItem {
-                        id: maskedItem
+                    // ChatPhotoProvider returns the avatar already cropped and masked,
+                    // so the MaskedItem and its mask Image that used to wrap this are
+                    // gone.
+                    Image {
+                        id: profilePhotoImage
+
                         anchors.verticalCenter: parent.verticalCenter
                         height: 50
                         width: 50
+                        sourceSize.width: width
+                        sourceSize.height: height
+                        asynchronous: true
+                        // PreserveAspectCrop is for the theme placeholder; the
+                        // provider's output already matches sourceSize exactly.
+                        fillMode: Image.PreserveAspectCrop
+                        source: chat.photo && chat.photo.isDownloadingCompleted ?
+                                    "image://chatPhoto/" + chat.photo.localPath :
+                                    "image://theme/icon-l-content-avatar-placeholder"
 
-                        mask: Image {
-                            sourceSize.width: maskedItem.width
-                            sourceSize.height: maskedItem.height
-                            source: "qrc:/images/avatar-image-mask.png"
-                        }
-
-                        Image {
-                            id: profilePhotoImage
-                            anchors.fill: parent
-                            sourceSize.width: maskedItem.width
-                            sourceSize.height: maskedItem.height
-                            asynchronous: true
-                            smooth: true
-                            fillMode: Image.PreserveAspectCrop
-                            source: chat.photo && chat.photo.isDownloadingCompleted ?
-                                        "image://chatPhoto/" + chat.photo.localPath :
-                                        "image://theme/icon-l-content-avatar-placeholder"
-
-                            // The chat list delegate normally starts this, but a chat
-                            // opened from a notification was never scrolled past.
-                            Component.onCompleted: {
-                                if (chat.photo && chat.photo.canBeDownloaded
-                                        && !chat.photo.isDownloadingActive
-                                        && !chat.photo.isDownloadingCompleted)
-                                    appManager.downloadFile(chat.photo.id, 1, 0, 0, false)
-                            }
-                        }
-
+                        // Swallows taps on the avatar so they do not fall through to
+                        // whatever is behind the header.
                         MouseArea {
                             anchors.fill: parent
+                        }
+
+                        // The chat list delegate normally starts this, but a chat
+                        // opened from a notification was never scrolled past.
+                        Component.onCompleted: {
+                            if (chat.photo && chat.photo.canBeDownloaded
+                                    && !chat.photo.isDownloadingActive
+                                    && !chat.photo.isDownloadingCompleted)
+                                appManager.downloadFile(chat.photo.id, 1, 0, 0, false)
                         }
                     }
 

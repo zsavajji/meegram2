@@ -3,7 +3,9 @@
 #include "ScopeTimer.hpp"
 
 #include <QCache>
+#include <QHash>
 #include <QImageReader>
+#include <QPainter>
 
 namespace {
 
@@ -21,6 +23,49 @@ QCache<QString, QImage> &avatarCache()
 {
     static QCache<QString, QImage> cache(MaxCachedAvatars);
     return cache;
+}
+
+// The round avatar cutout, scaled to whatever size is being asked for. Two sizes are
+// in play - the chat list row and the chat header - so a tiny map is enough.
+QImage avatarMask(const QSize &size)
+{
+    static QHash<qint64, QImage> masks;
+
+    const auto key = (static_cast<qint64>(size.width()) << 32) | static_cast<quint32>(size.height());
+
+    if (const auto it = masks.constFind(key); it != masks.constEnd())
+        return it.value();
+
+    QImage mask(QLatin1String(":/images/avatar-image-mask.png"));
+
+    if (!mask.isNull() && mask.size() != size)
+        mask = mask.scaled(size, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+
+    masks.insert(key, mask);
+
+    return mask;
+}
+
+// Was a MaskedItem per delegate in QML, so the cutout was applied live on every
+// visible row. The shape is the same for every avatar, so it belongs here: composited
+// once per image and kept in the cache below, instead of once per row.
+//
+// The mask defines its shape in the alpha channel, which is exactly what
+// DestinationIn consumes.
+QImage applyAvatarMask(QImage image)
+{
+    const auto mask = avatarMask(image.size());
+    if (mask.isNull())
+        return image;
+
+    image = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+
+    QPainter painter(&image);
+    painter.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+    painter.drawImage(0, 0, mask);
+    painter.end();
+
+    return image;
 }
 
 }  // namespace
@@ -44,14 +89,19 @@ QImage ChatPhotoProvider::requestImage(const QString &id, QSize *size, const QSi
         return QImage();
 
     const QSize sourceSize = reader.size();
+    const auto wantsSize = requestedSize.isValid() && !requestedSize.isEmpty() && sourceSize.isValid() && !sourceSize.isEmpty();
 
     // Decode straight to the requested size rather than decoding at full resolution
     // and letting QML scale afterwards. requestedSize was previously ignored
     // outright, so a large avatar was fully decoded only to be drawn at 64x64.
-    if (requestedSize.isValid() && !requestedSize.isEmpty() && sourceSize.isValid() && !sourceSize.isEmpty())
+    //
+    // Expanding, not KeepAspectRatio: the delegate used fillMode PreserveAspectCrop,
+    // and that crop has to happen before the mask or a non-square avatar gets a
+    // clipped circle.
+    if (wantsSize)
     {
         QSize target = sourceSize;
-        target.scale(requestedSize, Qt::KeepAspectRatio);
+        target.scale(requestedSize, Qt::KeepAspectRatioByExpanding);
 
         if (!target.isEmpty() && target != sourceSize)
         {
@@ -59,9 +109,18 @@ QImage ChatPhotoProvider::requestImage(const QString &id, QSize *size, const QSi
         }
     }
 
-    const QImage image = reader.read();
+    QImage image = reader.read();
     if (image.isNull())
         return QImage();
+
+    if (wantsSize && image.size() != requestedSize)
+    {
+        const QPoint topLeft((image.width() - requestedSize.width()) / 2, (image.height() - requestedSize.height()) / 2);
+
+        image = image.copy(QRect(topLeft, requestedSize));
+    }
+
+    image = applyAvatarMask(image);
 
     if (size)
         *size = image.size();

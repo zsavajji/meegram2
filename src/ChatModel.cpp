@@ -49,44 +49,6 @@ int ChatModel::rowCount(const QModelIndex &parent) const
     return m_count;
 }
 
-bool ChatModel::canFetchMore(const QModelIndex &parent) const
-{
-    if (parent.isValid())
-        return false;
-
-    return m_count < static_cast<int>(m_chats.size());
-}
-
-void ChatModel::fetchMore(const QModelIndex &parent)
-{
-    if (parent.isValid())
-        return;
-
-    int remainingItems = static_cast<int>(m_chats.size()) - m_count;
-
-    const auto itemsToFetch = std::min(ChatSliceLimit, remainingItems);
-
-    if (itemsToFetch <= 0)
-        return;
-
-    int startIndex = m_count;
-    int endIndex = m_count + itemsToFetch - 1;
-
-    beginInsertRows(QModelIndex(), startIndex, endIndex);
-    m_count += itemsToFetch;
-    endInsertRows();
-
-    emit countChanged();
-
-    // The view has now consumed everything TDLib has handed us, so pull the next
-    // page. This is what replaces the old "load the entire chat list at startup"
-    // loop: chats are requested as the user actually reaches them.
-    if (m_count >= static_cast<int>(m_chats.size()))
-    {
-        requestMoreChats();
-    }
-}
-
 const ChatModel::FormattedRow &ChatModel::formattedRow(const std::shared_ptr<Chat> &chat) const
 {
     auto &entry = m_formatted[chat->id()];
@@ -335,8 +297,9 @@ void ChatModel::populate()
 
     emit countChanged();
 
-    // sortChats() reveals the first page itself once the order is settled, so there
-    // is deliberately no fetchMore() call here - doing both would hand out two pages.
+    // sortChats() ends in revealAll(), so the rows become visible once the order is
+    // settled. On a cold cache this seeds nothing and the reveal happens instead when
+    // the first chats arrive through the update slots.
     if (!m_chats.empty())
     {
         sortChats();
@@ -431,13 +394,36 @@ void ChatModel::sortChats()
         emit layoutChanged();
     }
 
-    // On a cold start populate() sees an empty cache, so the first chats to arrive
-    // land beyond the visible range. Reveal them here or the list stays blank until
-    // the user scrolls.
-    if (m_count == 0 && !m_chats.empty())
-    {
-        fetchMore();
-    }
+    revealAll();
+}
+
+void ChatModel::revealAll()
+{
+    const auto total = static_cast<int>(m_chats.size());
+
+    if (m_count >= total)
+        return;
+
+    // Everything the model holds becomes visible. The old code revealed one page and
+    // relied on the view calling fetchMore() for the rest - but that is a Qt Widgets
+    // view API which QML1's ListView never calls, so nothing ever grew m_count again
+    // and the list froze at whatever had arrived by the first sort. Pinned chats sort
+    // first, so that is exactly what stayed on screen.
+    //
+    // Showing them all costs nothing: a ListView only builds delegates for the rows
+    // in view plus its cacheBuffer, however large rowCount is. Paging in more chats
+    // from TDLib is now driven by loadMore(), which the view calls when the user
+    // actually reaches the bottom.
+    beginInsertRows(QModelIndex(), m_count, total - 1);
+    m_count = total;
+    endInsertRows();
+
+    emit countChanged();
+}
+
+void ChatModel::loadMore()
+{
+    requestMoreChats();
 }
 
 void ChatModel::handleChatItem(qlonglong chatId)

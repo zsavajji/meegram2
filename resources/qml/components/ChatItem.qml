@@ -1,6 +1,5 @@
 import QtQuick 1.1
 import com.nokia.meego 1.1
-import com.nokia.extras 1.1
 
 Item {
     id: root
@@ -22,42 +21,40 @@ Item {
         visible: mouseArea.pressed
     }
 
-    MaskedItem {
-        id: maskedItem
+    // Was a MaskedItem wrapping this Image, plus a second Image holding the mask - so
+    // every row carried three items and ran the cutout live. ChatPhotoProvider now
+    // returns the avatar already cropped and masked, cached, so a plain Image does.
+    Image {
+        id: profilePhotoImage
+
         anchors.left: parent.left
         anchors.leftMargin: 12
         anchors.verticalCenter: parent.verticalCenter
         width: 64
         height: 64
-        mask: Image {
-            sourceSize.width: maskedItem.width
-            sourceSize.height: maskedItem.height
-            source: "qrc:/images/avatar-image-mask.png"
-        }
-        Image {
-            id: profilePhotoImage
-            anchors.fill: parent
-            // sourceSize is what makes the provider decode at 64x64 instead of at the
-            // avatar's full resolution. asynchronous keeps that decode off the frame.
-            sourceSize.width: maskedItem.width
-            sourceSize.height: maskedItem.height
-            asynchronous: true
-            smooth: true
-            fillMode: Image.PreserveAspectCrop
-            // isDownloadingCompleted, not localPath: TDLib fills in the local path as
-            // soon as the download starts, so testing the path alone points the
-            // provider at a half written file.
-            source: model.photo && model.photo.isDownloadingCompleted ?
-                        "image://chatPhoto/" + model.photo.localPath :
-                        "image://theme/icon-l-content-avatar-placeholder"
-        }
+
+        // sourceSize is what makes the provider decode at 64x64 instead of at the
+        // avatar's full resolution. asynchronous keeps that decode off the frame.
+        sourceSize.width: width
+        sourceSize.height: height
+        asynchronous: true
+        // The provider crops to sourceSize, so there is nothing left to scale and
+        // nothing for smooth to interpolate. PreserveAspectCrop is still here for the
+        // theme placeholder, which does not come through the provider.
+        fillMode: Image.PreserveAspectCrop
+        // isDownloadingCompleted, not localPath: TDLib fills in the local path as
+        // soon as the download starts, so testing the path alone points the
+        // provider at a half written file.
+        source: model.photo && model.photo.isDownloadingCompleted ?
+                    "image://chatPhoto/" + model.photo.localPath :
+                    "image://theme/icon-l-content-avatar-placeholder"
     }
 
     Item {
         id: row1
-        width: parent.width - maskedItem.width - 44
+        width: parent.width - profilePhotoImage.width - 44
         height: 45
-        anchors.left: maskedItem.right
+        anchors.left: profilePhotoImage.right
         anchors.leftMargin: 16
         anchors.rightMargin: 16
 
@@ -87,7 +84,7 @@ Item {
 
     Item {
         height: 30
-        width: parent.width - maskedItem.width - 44
+        width: parent.width - profilePhotoImage.width - 44
         anchors.left: row1.left
         anchors.top: row1.bottom
 
