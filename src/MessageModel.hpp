@@ -91,6 +91,11 @@ private:
 
     void loadMessages() noexcept;
 
+    // Swaps any File the content built for itself for StorageManager's canonical one,
+    // so the download reaches the object the delegate is bound to. Must run before
+    // the message becomes visible to the view.
+    void linkContentFile(Message *message) noexcept;
+
     // Reply previews. Both return an empty string when the message is not a reply,
     // which is what the delegate tests to decide whether to show a quote block.
     QString replyToSender(const Message *message) const noexcept;

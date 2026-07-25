@@ -29,6 +29,12 @@ public:
     [[nodiscard]] std::shared_ptr<BasicGroup> basicGroup(qlonglong groupId) const noexcept;
     [[nodiscard]] std::shared_ptr<Chat> chat(qlonglong chatId) const noexcept;
     [[nodiscard]] std::shared_ptr<File> file(int fileId) const noexcept;
+
+    // Publishes a File as the one instance for its id, and returns whichever instance
+    // is canonical - which may not be the one passed in. updateFile only ever mutates
+    // the mapped object, so anything that builds its own File from an embedded
+    // td_api::file has to adopt the result or it will never see the download finish.
+    std::shared_ptr<File> registerFile(std::shared_ptr<File> file) noexcept;
     [[nodiscard]] std::shared_ptr<Supergroup> supergroup(qlonglong groupId) const noexcept;
     [[nodiscard]] std::shared_ptr<SupergroupFullInfo> supergroupFullInfo(qlonglong groupId) const noexcept;
     [[nodiscard]] std::shared_ptr<User> user(qlonglong userId) const noexcept;
@@ -63,11 +69,6 @@ private slots:
     void handleResult(td::td_api::Object *object);
 
 private:
-    // Chat builds its own File from the photo info it is handed, and updateFile only
-    // ever reached the copy in m_files - so a chat photo that finished downloading
-    // never reached the object the delegate was bound to, and avatars stayed on the
-    // placeholder. Publishing the chat's instance as the canonical one for that id
-    // makes the download update the object QML is watching.
     void registerChatPhoto(const std::shared_ptr<Chat> &chat) noexcept;
 
     QVariantMap m_options;

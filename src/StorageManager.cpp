@@ -47,13 +47,24 @@ std::shared_ptr<Chat> StorageManager::chat(qlonglong chatId) const noexcept
     return nullptr;
 }
 
+std::shared_ptr<File> StorageManager::registerFile(std::shared_ptr<File> file) noexcept
+{
+    if (!file)
+        return {};
+
+    // First registrant wins. An instance already in the map is one some other holder
+    // may be bound to, and it is never staler: updateFile carries a full td_api::file
+    // and is sent for every state change.
+    const auto [it, inserted] = m_files.try_emplace(file->id(), std::move(file));
+
+    return it->second;
+}
+
 void StorageManager::registerChatPhoto(const std::shared_ptr<Chat> &chat) noexcept
 {
-    // The photo info TDLib just handed over carries the file's current state, so it
-    // is never staler than an entry already sitting in the map.
     if (const auto &file = chat->photoFile())
     {
-        m_files[file->id()] = file;
+        chat->adoptPhotoFile(registerFile(file));
     }
 }
 

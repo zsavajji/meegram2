@@ -2,6 +2,45 @@
 
 #include "Utils.hpp"
 
+namespace {
+
+// The N9 screen is 854x480 and a bubble is narrower still, so the 1280px original
+// costs bandwidth and decode time for detail that is never drawn. Telegram ships
+// several sizes per photo; take the smallest one that still covers the screen.
+constexpr int PreferredPhotoWidth = 480;
+
+// While nothing seen so far is big enough, keep taking the bigger one; once something
+// is, only take a smaller one that is still big enough. Sizes arrive in no guaranteed
+// order, so this has to hold either way round.
+constexpr bool isBetterPhotoWidth(int candidate, int current, int preferred)
+{
+    return current < preferred ? candidate > current : candidate >= preferred && candidate < current;
+}
+
+static_assert(isBetterPhotoWidth(320, 90, 480));     // nothing covers it yet - grow
+static_assert(isBetterPhotoWidth(800, 320, 480));    // still short - grow
+static_assert(!isBetterPhotoWidth(1280, 800, 480));  // 800 already covers it - keep
+static_assert(isBetterPhotoWidth(800, 1280, 480));   // covers it and is smaller - take
+static_assert(!isBetterPhotoWidth(320, 800, 480));   // smaller, but too small
+
+td::td_api::photoSize *pickPhotoSize(std::vector<td::td_api::object_ptr<td::td_api::photoSize>> &sizes)
+{
+    td::td_api::photoSize *best = nullptr;
+
+    for (auto &size : sizes)
+    {
+        if (!size)
+            continue;
+
+        if (!best || isBetterPhotoWidth(size->width_, best->width_, PreferredPhotoWidth))
+            best = size.get();
+    }
+
+    return best;
+}
+
+}  // namespace
+
 MessageText::MessageText(td::td_api::object_ptr<td::td_api::messageText> content, QObject *parent)
     : QObject(parent)
 {
@@ -90,11 +129,46 @@ MessagePhoto::MessagePhoto(td::td_api::object_ptr<td::td_api::messagePhoto> cont
     : QObject(parent)
 {
     m_caption = QString::fromStdString(content->caption_->text_);
+
+    if (!content->photo_)
+        return;
+
+    if (auto *size = pickPhotoSize(content->photo_->sizes_); size && size->photo_)
+    {
+        m_width = size->width_;
+        m_height = size->height_;
+        m_file = std::make_shared<File>(std::move(size->photo_));
+    }
 }
 
 QString MessagePhoto::caption() const
 {
     return m_caption;
+}
+
+File *MessagePhoto::file() const
+{
+    return m_file.get();
+}
+
+int MessagePhoto::width() const
+{
+    return m_width;
+}
+
+int MessagePhoto::height() const
+{
+    return m_height;
+}
+
+const std::shared_ptr<File> &MessagePhoto::photoFile() const noexcept
+{
+    return m_file;
+}
+
+void MessagePhoto::adoptFile(std::shared_ptr<File> file) noexcept
+{
+    m_file = std::move(file);
 }
 
 MessageSticker::MessageSticker(td::td_api::object_ptr<td::td_api::messageSticker> content, QObject *parent)

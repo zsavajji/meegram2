@@ -43,6 +43,7 @@ public:
 
     // For StorageManager, so the chat's photo and its file map hold one object.
     const std::shared_ptr<File> &photoFile() const noexcept;
+    void adoptPhotoFile(std::shared_ptr<File> file) noexcept;
     Message *lastMessage() const noexcept;
     bool isMarkedAsUnread() const noexcept;
     int unreadCount() const noexcept;

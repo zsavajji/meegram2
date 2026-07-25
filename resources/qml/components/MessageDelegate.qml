@@ -46,6 +46,92 @@ Item {
     }
 
     Component {
+        id: photoMessageComponent
+
+        MessageBubble {
+            onPressAndHold: menuTarget.open(model.id, model.sender, model.content.caption, model.isOutgoing)
+
+            childrenWidth: photoColumn.width
+
+            content: Column {
+                id: photoColumn
+
+                property int maxWidth: isPortrait ? 380 : 754
+
+                // The bubble measures its content by children[0], so the image and its
+                // caption have to be one item. Never upscale past the source width.
+                width: Math.min(model.content.width > 0 ? model.content.width : maxWidth, maxWidth)
+                spacing: 6
+
+                anchors {
+                    left: parent.left
+                    leftMargin: model.isOutgoing ? 80 : 20
+                }
+
+                Item {
+                    id: photoFrame
+
+                    width: parent.width
+                    // Reserve the final geometry from the metadata, so the bubble does
+                    // not resize under the user when the download lands.
+                    height: model.content.width > 0 ? width * model.content.height / model.content.width : width
+
+                    Rectangle {
+                        anchors.fill: parent
+                        // #AARRGGBB - a light scrim that reads on both bubble colours.
+                        color: "#30000000"
+                        visible: !photoImage.ready
+                    }
+
+                    BusyIndicator {
+                        anchors.centerIn: parent
+                        running: visible
+                        visible: !photoImage.ready
+                    }
+
+                    Image {
+                        id: photoImage
+
+                        property bool ready: model.content.file && model.content.file.isDownloadingCompleted
+
+                        anchors.fill: parent
+                        // Decode at display size. The N9 has no memory to spare for a
+                        // full resolution pixmap it would only scale down.
+                        sourceSize.width: width
+                        asynchronous: true
+                        smooth: true
+                        fillMode: Image.PreserveAspectFit
+                        source: ready ? "file://" + model.content.file.localPath : ""
+                    }
+                }
+
+                Label {
+                    width: parent.width
+                    visible: text !== ""
+                    text: utils.replaceEmoji(model.content.caption)
+                    textFormat: Text.RichText
+                    color: model.isOutgoing ? "white" : "black"
+                    wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                    font.pixelSize: 23
+                    horizontalAlignment: model.isOutgoing ? Text.AlignRight : Text.AlignLeft
+                    onLinkActivated: Qt.openUrlExternally(link)
+                }
+            }
+
+            // ponytail: downloads on sight. A delegate only exists for rows in view
+            // plus the cache buffer, so this is "what you scrolled to" rather than
+            // "the whole history" - but it still ignores whether the connection is
+            // metered. Wire to Telegram's auto-download settings if that bites.
+            Component.onCompleted: {
+                var file = model.content.file;
+
+                if (file && file.canBeDownloaded && !file.isDownloadingActive && !file.isDownloadingCompleted)
+                    appManager.downloadFile(file.id, 1, 0, 0, false);
+            }
+        }
+    }
+
+    Component {
         id: notSupportedMessageComponent
 
         MessageBubble {
@@ -80,6 +166,8 @@ Item {
             switch (contentType) {
             case "messageText":
                 return textMessageComponent;
+            case "messagePhoto":
+                return photoMessageComponent;
             default:
                 return notSupportedMessageComponent;
             }

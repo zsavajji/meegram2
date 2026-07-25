@@ -61,6 +61,11 @@ const std::shared_ptr<File> &Chat::photoFile() const noexcept
     return m_file;
 }
 
+void Chat::adoptPhotoFile(std::shared_ptr<File> file) noexcept
+{
+    m_file = std::move(file);
+}
+
 Message *Chat::lastMessage() const noexcept
 {
     return m_lastMessage.get();

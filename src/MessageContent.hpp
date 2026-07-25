@@ -1,9 +1,13 @@
 #pragma once
 
+#include "File.hpp"
+
 #include <td/telegram/td_api.h>
 
 #include <QDebug>
 #include <QMetaType>
+
+#include <memory>
 
 class MessageContent
 {
@@ -93,13 +97,34 @@ class MessagePhoto : public QObject, public MessageContent
     Q_OBJECT
     Q_PROPERTY(QString caption READ caption CONSTANT)
 
+    // The photo itself. Was discarded outright, so a photo message had nothing to
+    // render even once a delegate existed for it.
+    Q_PROPERTY(File *file READ file CONSTANT)
+    Q_PROPERTY(int width READ width CONSTANT)
+    Q_PROPERTY(int height READ height CONSTANT)
+
 public:
     explicit MessagePhoto(td::td_api::object_ptr<td::td_api::messagePhoto> content, QObject *parent = nullptr);
 
     QString caption() const;
 
+    File *file() const;
+    int width() const;
+    int height() const;
+
+    // Two objects for one file id is the bug that kept avatars on the placeholder:
+    // updateFile only ever reaches the instance StorageManager has. These let it hand
+    // back the canonical one before the message is shown.
+    const std::shared_ptr<File> &photoFile() const noexcept;
+    void adoptFile(std::shared_ptr<File> file) noexcept;
+
 private:
     QString m_caption;
+
+    int m_width{0};
+    int m_height{0};
+
+    std::shared_ptr<File> m_file;
 };
 
 class MessageSticker : public QObject, public MessageContent

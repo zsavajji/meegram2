@@ -279,6 +279,7 @@ void MessageModel::getChatHistory(qlonglong fromMessageId, int offset, int limit
             {
                 newMessageIds.emplace_back(messageId);
                 m_messageMap[messageId] = std::make_unique<Message>(std::move(message));
+                linkContentFile(m_messageMap[messageId].get());
             }
         }
 
@@ -362,14 +363,44 @@ void MessageModel::deleteMessage(qlonglong messageId, bool revoke) noexcept
     m_client->send(std::move(request));
 }
 
+void MessageModel::linkContentFile(Message *message) noexcept
+{
+    if (!message || message->contentType() != td::td_api::messagePhoto::ID)
+        return;
+
+    auto *photo = static_cast<MessagePhoto *>(message->content());
+    if (!photo)
+        return;
+
+    photo->adoptFile(m_storage->registerFile(photo->photoFile()));
+}
+
 void MessageModel::editMessage(qlonglong messageId, const QString &text) noexcept
 {
+    auto formatted = td::td_api::make_object<td::td_api::formattedText>();
+    formatted->text_ = text.toStdString();
+
+    const auto it = m_messageMap.find(messageId);
+
+    // A photo's text is its caption, and TDLib rejects editMessageText for anything
+    // that is not a text message - so the menu's Edit entry would have looked like it
+    // worked and done nothing.
+    if (it != m_messageMap.end() && it->second->contentType() != td::td_api::messageText::ID)
+    {
+        auto request = td::td_api::make_object<td::td_api::editMessageCaption>();
+
+        request->chat_id_ = m_chat->id();
+        request->message_id_ = messageId;
+        request->caption_ = std::move(formatted);
+
+        m_client->send(std::move(request));
+        return;
+    }
+
     auto request = td::td_api::make_object<td::td_api::editMessageText>();
 
     auto inputMessageContent = td::td_api::make_object<td::td_api::inputMessageText>();
-
-    inputMessageContent->text_ = td::td_api::make_object<td::td_api::formattedText>();
-    inputMessageContent->text_->text_ = text.toStdString();
+    inputMessageContent->text_ = std::move(formatted);
 
     request->chat_id_ = m_chat->id();
     request->message_id_ = messageId;
@@ -449,6 +480,7 @@ void MessageModel::handleNewMessage(td::td_api::object_ptr<td::td_api::message> 
 
     m_messages.insert(it, messageId);
     m_messageMap[messageId] = std::make_unique<Message>(std::move(message));
+    linkContentFile(m_messageMap[messageId].get());
 
     endInsertRows();
 
@@ -463,6 +495,8 @@ void MessageModel::handleMessageContent(qlonglong chatId, qlonglong messageId, t
     if (auto it = m_messageMap.find(messageId); it != m_messageMap.end())
     {
         it->second->setContent(std::move(newContent));
+        // setContent builds a fresh content object, so its File needs linking again.
+        linkContentFile(it->second.get());
 
         itemChanged(std::distance(m_messages.begin(), std::ranges::find(m_messages, messageId)));
     }
