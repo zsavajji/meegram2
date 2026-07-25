@@ -9,6 +9,7 @@
 
 #include <QDateTime>
 #include <QDebug>
+#include <QImageReader>
 #include <QLocale>
 
 #include <algorithm>
@@ -292,14 +293,9 @@ void MessageModel::getChatHistory(qlonglong fromMessageId, int offset, int limit
     });
 }
 
-void MessageModel::sendMessage(const QString &message, qlonglong replyToMessageId) noexcept
+void MessageModel::send(td::td_api::object_ptr<td::td_api::InputMessageContent> content, qlonglong replyToMessageId) noexcept
 {
     auto request = td::td_api::make_object<td::td_api::sendMessage>();
-
-    auto inputMessageContent = td::td_api::make_object<td::td_api::inputMessageText>();
-
-    inputMessageContent->text_ = td::td_api::make_object<td::td_api::formattedText>();
-    inputMessageContent->text_->text_ = message.toStdString();
 
     request->chat_id_ = m_chat->id();
 
@@ -311,9 +307,42 @@ void MessageModel::sendMessage(const QString &message, qlonglong replyToMessageI
         request->reply_to_ = td::td_api::make_object<td::td_api::inputMessageReplyToMessage>(replyToMessageId, nullptr, 0, "");
     }
 
-    request->input_message_content_ = std::move(inputMessageContent);
+    request->input_message_content_ = std::move(content);
 
     m_client->send(std::move(request));
+}
+
+void MessageModel::sendMessage(const QString &message, qlonglong replyToMessageId) noexcept
+{
+    auto content = td::td_api::make_object<td::td_api::inputMessageText>();
+
+    content->text_ = td::td_api::make_object<td::td_api::formattedText>();
+    content->text_->text_ = message.toStdString();
+
+    send(std::move(content), replyToMessageId);
+}
+
+void MessageModel::sendPhoto(const QString &filePath, const QString &caption, qlonglong replyToMessageId) noexcept
+{
+    auto content = td::td_api::make_object<td::td_api::inputMessagePhoto>();
+
+    content->photo_ = td::td_api::make_object<td::td_api::inputFileLocal>(filePath.toStdString());
+
+    // Read from the header rather than decoded: QImageReader::size() only parses far
+    // enough to find the dimensions, which matters for a 8MP shot on this hardware.
+    // Zero is acceptable to TDLib; it just means the recipient sees no placeholder
+    // geometry until the photo arrives.
+    const QImageReader reader(filePath);
+    if (const auto size = reader.size(); size.isValid())
+    {
+        content->width_ = size.width();
+        content->height_ = size.height();
+    }
+
+    content->caption_ = td::td_api::make_object<td::td_api::formattedText>();
+    content->caption_->text_ = caption.toStdString();
+
+    send(std::move(content), replyToMessageId);
 }
 
 void MessageModel::fetchMoreBack() noexcept

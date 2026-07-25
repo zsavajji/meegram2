@@ -14,6 +14,7 @@
 #include <QClipboard>
 #include <QStringBuilder>
 #include <QTextStream>
+#include <QUrl>
 
 #include <algorithm>
 #include <array>
@@ -320,6 +321,17 @@ QString Utils::replaceEmoji(const QString &text) noexcept
 void Utils::copyToClipboard(const QString &text) noexcept
 {
     QApplication::clipboard()->setText(text);
+}
+
+QString Utils::toLocalFile(const QString &url) noexcept
+{
+    const QUrl parsed(url);
+
+    // Already a plain path, which is what the gallery returns on some indexers.
+    if (parsed.scheme().isEmpty())
+        return url;
+
+    return parsed.toLocalFile();
 }
 
 QString Utils::getAudioTitle(MessageAudio *audio) noexcept

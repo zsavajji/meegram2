@@ -403,6 +403,28 @@ Page {
                     color: "#cccccc"
                 }
 
+                Label {
+                    id: attachButton
+
+                    anchors {
+                        left: parent.left
+                        leftMargin: 24
+                        verticalCenter: parent.verticalCenter
+                    }
+                    text: icons.attach
+                    font.family: icons.fontFamily
+                    font.pixelSize: 36
+                    color: attachArea.pressed ? "#0077A8" : "#505050"
+
+                    MouseArea {
+                        id: attachArea
+
+                        anchors.fill: parent
+                        anchors.margins: -12
+                        onClicked: root.openPhotoPicker()
+                    }
+                }
+
                 Button {
                     id: sendButton
                     anchors {
@@ -495,6 +517,43 @@ Page {
         // Deleting for everyone is only offered on your own messages. Incoming ones
         // are removed from this device only.
         onAccepted: messageModel.deleteMessage(menuTarget.messageId, menuTarget.isOutgoing)
+    }
+
+    // Built on demand: the page imports QtMobility.gallery, and if that module is
+    // absent the component fails to load rather than throwing at startup. Creating it
+    // here lets that failure be reported instead of the button doing nothing.
+    // Kept and reused rather than destroyed after each pick: tearing a page down
+    // while the pop transition is still running is how QML1 crashes, and one picker
+    // per chat page is bounded anyway.
+    property variant photoPicker: null
+
+    function openPhotoPicker() {
+        if (photoPicker === null) {
+            var component = Qt.createComponent("PhotoPickerPage.qml");
+
+            if (component.status !== Component.Ready) {
+                console.debug("Photo picker unavailable:", component.errorString());
+                appWindow.showInfoBanner(qsTr("NoPhotos"));
+                return;
+            }
+
+            photoPicker = component.createObject(root);
+            photoPicker.photoSelected.connect(sendPhoto);
+        }
+
+        pageStack.push(photoPicker);
+    }
+
+    function sendPhoto(path) {
+        // Whatever is in the composer rides along as the caption, which is how
+        // Telegram behaves and costs nothing here.
+        messageModel.sendPhoto(path, textArea.text, composeState.replyId);
+
+        textArea.text = "";
+        composeState.clear();
+        listView.followLast = true;
+
+        pageStack.pop();
     }
 
     Connections {

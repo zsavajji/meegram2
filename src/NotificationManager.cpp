@@ -72,6 +72,21 @@ QDBusMessage callNotificationManager(const char *method, const QVariantList &arg
     return QDBusConnection::sessionBus().call(message, QDBus::Block, CallTimeoutMs);
 }
 
+// addNotification and updateNotification take the same nine arguments; the second is
+// the group id for one and the notification id for the other.
+//
+// Built with operator<< rather than a braced list: Qt 4.7 predates QList's
+// initializer_list constructor, which only arrived in 4.8.
+QVariantList notificationArguments(uint userId, uint id, const QString &summary, const QString &body, const QString &action,
+                                   const QString &imageUri)
+{
+    QVariantList arguments;
+
+    arguments << userId << id << QString::fromLatin1(EventType) << summary << body << action << imageUri << 0u << QString();
+
+    return arguments;
+}
+
 }  // namespace
 
 NotificationManager::NotificationManager(std::shared_ptr<StorageManager> storage, std::shared_ptr<Locale> locale, QObject *parent)
@@ -160,8 +175,8 @@ void NotificationManager::publish(qlonglong chatId, const QString &summary, cons
     // Replace the chat's existing banner rather than stacking a second one.
     if (const auto it = m_published.constFind(chatId); it != m_published.constEnd())
     {
-        const auto reply = callNotificationManager(
-            "updateNotification", {userId, it.value(), QString::fromLatin1(EventType), summary, body, action, imagePath, 0u, QString()});
+        const auto reply =
+            callNotificationManager("updateNotification", notificationArguments(userId, it.value(), summary, body, action, imagePath));
 
         // updateNotification answers false, not an error, for an id it no longer
         // knows.
@@ -173,8 +188,8 @@ void NotificationManager::publish(qlonglong chatId, const QString &summary, cons
         m_published.remove(chatId);
     }
 
-    const auto reply = callNotificationManager(
-        "addNotification", {userId, 0u, QString::fromLatin1(EventType), summary, body, action, imagePath, 0u, QString()});
+    // Group 0: this client does not use notification groups.
+    const auto reply = callNotificationManager("addNotification", notificationArguments(userId, 0u, summary, body, action, imagePath));
 
     if (reply.type() == QDBusMessage::ErrorMessage)
     {
@@ -233,7 +248,10 @@ void NotificationManager::withdraw(qlonglong chatId) noexcept
         auto message =
             QDBusMessage::createMethodCall(NotificationService, NotificationPath, NotificationInterface, QLatin1String("removeNotification"));
 
-        message.setArguments({userId, it.value()});
+        QVariantList arguments;
+        arguments << userId << it.value();
+
+        message.setArguments(arguments);
 
         QDBusConnection::sessionBus().send(message);
     }

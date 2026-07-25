@@ -62,6 +62,7 @@ public:
     Q_INVOKABLE void deleteMessage(qlonglong messageId, bool revoke = false) noexcept;
 
     Q_INVOKABLE void sendMessage(const QString &message, qlonglong replyToMessageId = 0) noexcept;
+    Q_INVOKABLE void sendPhoto(const QString &filePath, const QString &caption = {}, qlonglong replyToMessageId = 0) noexcept;
     Q_INVOKABLE void editMessage(qlonglong messageId, const QString &text) noexcept;
 
     Q_INVOKABLE void fetchMoreBack() noexcept;
@@ -94,6 +95,9 @@ private:
     void handleDeleteMessages(qlonglong chatId, std::vector<int64_t> &&messageIds, bool isPermanent, bool fromCache) noexcept;
 
     void loadMessages() noexcept;
+
+    // Wraps any content in a sendMessage, so the reply plumbing lives in one place.
+    void send(td::td_api::object_ptr<td::td_api::InputMessageContent> content, qlonglong replyToMessageId) noexcept;
 
     // Swaps any File the content built for itself for StorageManager's canonical one,
     // so the download reaches the object the delegate is bound to. Must run before

@@ -32,6 +32,11 @@ public:
     // QML1 has no Clipboard element, so the "Copy" message action goes through here.
     Q_INVOKABLE static void copyToClipboard(const QString &text) noexcept;
 
+    // The gallery hands out file:// URLs and TDLib wants a filesystem path. Goes
+    // through QUrl rather than stripping the scheme, so percent-encoded characters
+    // in a filename survive.
+    Q_INVOKABLE static QString toLocalFile(const QString &url) noexcept;
+
     static QString getAudioTitle(MessageAudio *audio) noexcept;
     static QString getCallContent(MessageCall *call, bool isOutgoing) noexcept;
 

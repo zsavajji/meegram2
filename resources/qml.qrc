@@ -21,6 +21,7 @@
         <file>qml/MainPage.qml</file>
         <file>qml/main.qml</file>
         <file>qml/PasswordPage.qml</file>
+        <file>qml/PhotoPickerPage.qml</file>
         <file>qml/QrCodePage.qml</file>
         <file>qml/SettingsPage.qml</file>
         <file>qml/SignInPage.qml</file>

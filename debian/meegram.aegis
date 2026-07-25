@@ -3,6 +3,8 @@
         <credential name="Location" />
         <credential name="TrackerReadAccess" />
         <credential name="TrackerWriteAccess" />
+        <!-- Reading the gallery index for the photo picker. -->
+        <credential name="GRP::video" />
 
         <for path="/opt/meegram/bin/meegram" />
         <for path="applauncherd-launcher::/usr/bin/applauncherd.bin" id="" />
