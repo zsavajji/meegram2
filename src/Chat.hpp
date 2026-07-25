@@ -40,6 +40,9 @@ public:
     Type type() const noexcept;
     QString title() const noexcept;
     File *photo() const noexcept;
+
+    // For StorageManager, so the chat's photo and its file map hold one object.
+    const std::shared_ptr<File> &photoFile() const noexcept;
     Message *lastMessage() const noexcept;
     bool isMarkedAsUnread() const noexcept;
     int unreadCount() const noexcept;
@@ -85,7 +88,9 @@ private:
     int m_muteFor;
     qlonglong m_typeId;
 
-    std::unique_ptr<File> m_file;
+    // Shared, not owned: StorageManager registers this same instance in its file map
+    // so updateFile mutates the object the chat exposes. See registerChatPhoto().
+    std::shared_ptr<File> m_file;
     std::unique_ptr<Message> m_lastMessage;
 
     std::vector<std::unique_ptr<ChatPosition>> m_positions;

@@ -47,6 +47,16 @@ std::shared_ptr<Chat> StorageManager::chat(qlonglong chatId) const noexcept
     return nullptr;
 }
 
+void StorageManager::registerChatPhoto(const std::shared_ptr<Chat> &chat) noexcept
+{
+    // The photo info TDLib just handed over carries the file's current state, so it
+    // is never staler than an entry already sitting in the map.
+    if (const auto &file = chat->photoFile())
+    {
+        m_files[file->id()] = file;
+    }
+}
+
 std::shared_ptr<File> StorageManager::file(int fileId) const noexcept
 {
     if (auto it = m_files.find(fileId); it != m_files.end())
@@ -144,6 +154,7 @@ void StorageManager::handleResult(td::td_api::Object *object)
             auto update = static_cast<td::td_api::updateNewChat *>(object);
             auto chat = std::make_shared<Chat>(std::move(update->chat_));
             auto chatId = chat->id();
+            registerChatPhoto(chat);
             m_chats.emplace(chatId, std::move(chat));
             emit chatUpdated(chatId);
             break;
@@ -163,6 +174,7 @@ void StorageManager::handleResult(td::td_api::Object *object)
             if (auto it = m_chats.find(update->chat_id_); it != m_chats.end())
             {
                 it->second->setPhoto(std::move(update->photo_));
+                registerChatPhoto(it->second);
                 emit chatUpdated(update->chat_id_);
             }
             break;

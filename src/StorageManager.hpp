@@ -63,6 +63,13 @@ private slots:
     void handleResult(td::td_api::Object *object);
 
 private:
+    // Chat builds its own File from the photo info it is handed, and updateFile only
+    // ever reached the copy in m_files - so a chat photo that finished downloading
+    // never reached the object the delegate was bound to, and avatars stayed on the
+    // placeholder. Publishing the chat's instance as the canonical one for that id
+    // makes the download update the object QML is watching.
+    void registerChatPhoto(const std::shared_ptr<Chat> &chat) noexcept;
+
     QVariantMap m_options;
 
     // myId() is reached once per chat row via getChatTitle()->isMeChat(), and each

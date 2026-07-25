@@ -132,9 +132,18 @@ Page {
                             asynchronous: true
                             smooth: true
                             fillMode: Image.PreserveAspectCrop
-                            source: chat.photo && chat.photo.localPath !== "" ?
+                            source: chat.photo && chat.photo.isDownloadingCompleted ?
                                         "image://chatPhoto/" + chat.photo.localPath :
                                         "image://theme/icon-l-content-avatar-placeholder"
+
+                            // The chat list delegate normally starts this, but a chat
+                            // opened from a notification was never scrolled past.
+                            Component.onCompleted: {
+                                if (chat.photo && chat.photo.canBeDownloaded
+                                        && !chat.photo.isDownloadingActive
+                                        && !chat.photo.isDownloadingCompleted)
+                                    appManager.downloadFile(chat.photo.id, 1, 0, 0, false)
+                            }
                         }
 
                         MouseArea {

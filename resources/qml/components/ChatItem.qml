@@ -46,7 +46,10 @@ Item {
             asynchronous: true
             smooth: true
             fillMode: Image.PreserveAspectCrop
-            source: model.photo && model.photo.localPath !== "" ?
+            // isDownloadingCompleted, not localPath: TDLib fills in the local path as
+            // soon as the download starts, so testing the path alone points the
+            // provider at a half written file.
+            source: model.photo && model.photo.isDownloadingCompleted ?
                         "image://chatPhoto/" + model.photo.localPath :
                         "image://theme/icon-l-content-avatar-placeholder"
         }
