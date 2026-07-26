@@ -67,7 +67,12 @@ Item {
 
                 anchors {
                     left: parent.left
-                    leftMargin: model.isOutgoing ? 80 : 20
+                    // The text delegate gets outgoing right-alignment for free: it spans
+                    // the full width and sets AlignRight, so leftMargin 80 is arbitrary.
+                    // An image is only as wide as itself, so its offset has to be
+                    // computed or it sits on the left while the bubble sits on the right.
+                    // 20 puts the right edge exactly where the text delegate's lands.
+                    leftMargin: model.isOutgoing ? listView.width - width - 20 : 20
                 }
 
                 Item {
@@ -175,7 +180,10 @@ Item {
 
                 anchors {
                     left: parent.left
-                    leftMargin: model.isOutgoing ? 80 : 20
+                    // Same as the photo delegate: fixed-width content cannot lean on
+                    // AlignRight, so the outgoing offset is computed. A 180px sticker at
+                    // leftMargin 80 is what put it under the incoming bubbles.
+                    leftMargin: model.isOutgoing ? listView.width - width - 20 : 20
                 }
 
                 width: Math.min(model.content.width > 0 ? model.content.width : maxSize, maxSize)

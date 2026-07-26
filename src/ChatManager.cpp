@@ -375,9 +375,24 @@ bool ChatManager::openChat(qlonglong chatId) noexcept
         // and messageModel were all undefined - every binding on it threw, no
         // MessageModel existed to request history, and the result looked like "the chat
         // never loads its messages" with nothing in the log to say why.
-        qWarning() << "openChat: no chat in storage for id" << chatId;
+        //
+        // StorageManager only ever learns a chat from updateNewChat, so anything opened
+        // by id that TDLib has not pushed yet lands here - Saved Messages, which opens
+        // myId() directly, and a notification tapped before the chat list has loaded.
+        // Fetch it instead of giving up; getChat makes TDLib push updateNewChat.
+        const auto ids = m_storage->chatIds();
+        const auto groups = std::ranges::count_if(ids, [](auto id) { return id < 0; });
+
+        qWarning() << "openChat: no chat in storage for id" << chatId << "- storage holds" << ids.size() << "chats," << groups
+                   << "of them groups; fetching";
+
+        fetchChat(chatId);
         return false;
     }
+
+    // A fetch for this chat, if there was one, is done with.
+    if (m_fetchingChatId == chatId)
+        m_fetchingChatId = 0;
 
     // Only tell TDLib the chat is open once it is actually going to be shown. Sent
     // first, a failed open left the server believing a chat was open that never was -
@@ -393,6 +408,43 @@ bool ChatManager::openChat(qlonglong chatId) noexcept
     emit activeChatChanged(chatId);
 
     return true;
+}
+
+void ChatManager::fetchChat(qlonglong chatId) noexcept
+{
+    // One attempt per chat. The latch is only cleared by an open that succeeds or by an
+    // outright error, so a getChat that returns a chat StorageManager still does not hold
+    // fails once and stops, rather than looping openChat -> fetch -> openChat.
+    if (m_fetchingChatId == chatId)
+        return;
+
+    m_fetchingChatId = chatId;
+
+    m_client->send(td::td_api::make_object<td::td_api::getChat>(chatId), [this, chatId](auto &&response) {
+        const auto failed = response->get_id() == td::td_api::error::ID;
+
+        if (failed)
+        {
+            const auto *error = static_cast<const td::td_api::error *>(response.get());
+            qWarning() << "getChat failed for" << chatId << error->code_ << QString::fromStdString(error->message_);
+        }
+
+        // This runs on the TDLib worker thread. Hop to the main thread before touching
+        // anything or emitting.
+        //
+        // TDLib sends updateNewChat before the reply that needs it, and Client emits
+        // updates through a queued connection as well, so by the time this queued call
+        // is delivered StorageManager has already processed the update.
+        QMetaObject::invokeMethod(this, "handleChatFetched", Qt::QueuedConnection, Q_ARG(qlonglong, chatId), Q_ARG(bool, !failed));
+    });
+}
+
+void ChatManager::handleChatFetched(qlonglong chatId, bool ok) noexcept
+{
+    if (!ok)
+        m_fetchingChatId = 0;  // a network failure should not block a later attempt
+
+    emit chatAvailable(chatId, ok);
 }
 
 void ChatManager::closeChat(qlonglong chatId) noexcept
