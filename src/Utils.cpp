@@ -407,7 +407,7 @@ int Utils::emojiOnlySize(const QString &text) noexcept
         case 2:
             return EmojiSize24;
         case 3:
-            return EmojiSize16;
+            return EmojiSize24;
         default:
             return 0;  // no emoji at all, so nothing to enlarge
     }
