@@ -38,8 +38,16 @@ PageStackWindow {
 
         // A system notification was tapped. Back out to the chat list first, so
         // repeated taps do not stack chat pages on top of each other.
+        //
+        // Down to depth 2, not pop(null). The chat list is not the root page: MainPage
+        // is, and it is the startup spinner with ChatsPage pushed on top of it once,
+        // when appInitialized fires. pop(null) means "pop down to the first page", so it
+        // took ChatsPage with it and left the app on a spinner that never resolves
+        // again, with no way back short of restarting.
         onChatRequested: {
-            pageStack.pop(null, true)
+            while (pageStack.depth > 2)
+                pageStack.pop(undefined, true)
+
             openChat(chatId)
         }
     }

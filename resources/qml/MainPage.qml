@@ -95,5 +95,14 @@ Page {
         }
     }
 
+    // This page is the startup spinner, and ChatsPage is only ever pushed from
+    // onAppInitialized, which fires exactly once. Anything that pops the stack back down
+    // to here therefore strands the app on a spinner with no way out but a restart -
+    // which is what a tapped notification used to do. Put the chat list back instead.
+    onStatusChanged: {
+        if (status === PageStatus.Active && appManager.authorized && pageStack.depth === 1)
+            pageStack.push(Qt.createComponent("ChatsPage.qml"))
+    }
+
     Component.onCompleted: appManager.initialize()
 }
