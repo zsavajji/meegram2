@@ -1,4 +1,5 @@
 #include <QApplication>
+#include <QDebug>
 #include <QDeclarativeComponent>
 #include <QDeclarativeContext>
 #include <QDeclarativeEngine>
@@ -34,6 +35,18 @@
 Q_DECL_EXPORT int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
+
+    // Ids now cross the QML boundary as strings because a JS number that does not fit in
+    // int32 arrived with its low 16 bits wrong. That points at either QML1's argument
+    // marshalling or the double -> qlonglong conversion underneath it. This tells the two
+    // apart, and stays quiet when there is nothing to report. If it ever fires, the
+    // conversion itself is broken and nothing that routes a 64-bit value through a double
+    // can be trusted - which would be far wider than ids. volatile so it is not folded.
+    {
+        volatile double probe = -1001383801308.0;
+        if (const auto converted = static_cast<qlonglong>(probe); converted != Q_INT64_C(-1001383801308))
+            qWarning() << "double->qlonglong is broken in this build:" << converted;
+    }
 
     QCoreApplication::setApplicationName(AppName);
     QCoreApplication::setApplicationVersion(AppVersion);

@@ -133,11 +133,29 @@ MessagePhoto::MessagePhoto(td::td_api::object_ptr<td::td_api::messagePhoto> cont
     if (!content->photo_)
         return;
 
-    if (auto *size = pickPhotoSize(content->photo_->sizes_); size && size->photo_)
+    // Both sizes are identified before anything is moved out: taking a photo_ empties
+    // it, and the two picks can land on the same photoSize.
+    td::td_api::photoSize *largest = nullptr;
+    for (auto &size : content->photo_->sizes_)
     {
-        m_width = size->width_;
-        m_height = size->height_;
-        m_file = std::make_shared<File>(std::move(size->photo_));
+        if (size && (!largest || size->width_ > largest->width_))
+            largest = size.get();
+    }
+
+    auto *display = pickPhotoSize(content->photo_->sizes_);
+
+    // When the two are the same size there is one file, not two objects for one id -
+    // which is the bug that used to keep avatars on the placeholder.
+    const auto sameFile = display && largest && display == largest;
+
+    if (largest && largest->photo_)
+        m_originalFile = std::make_shared<File>(std::move(largest->photo_));
+
+    if (display && (display->photo_ || sameFile))
+    {
+        m_width = display->width_;
+        m_height = display->height_;
+        m_file = sameFile ? m_originalFile : std::make_shared<File>(std::move(display->photo_));
     }
 }
 
@@ -169,6 +187,21 @@ const std::shared_ptr<File> &MessagePhoto::photoFile() const noexcept
 void MessagePhoto::adoptFile(std::shared_ptr<File> file) noexcept
 {
     m_file = std::move(file);
+}
+
+File *MessagePhoto::originalFile() const
+{
+    return m_originalFile.get();
+}
+
+const std::shared_ptr<File> &MessagePhoto::originalPhotoFile() const noexcept
+{
+    return m_originalFile;
+}
+
+void MessagePhoto::adoptOriginalFile(std::shared_ptr<File> file) noexcept
+{
+    m_originalFile = std::move(file);
 }
 
 MessageSticker::MessageSticker(td::td_api::object_ptr<td::td_api::messageSticker> content, QObject *parent)

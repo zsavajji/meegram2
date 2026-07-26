@@ -103,6 +103,11 @@ class MessagePhoto : public QObject, public MessageContent
     Q_PROPERTY(int width READ width CONSTANT)
     Q_PROPERTY(int height READ height CONSTANT)
 
+    // The largest size Telegram has, as sent. file above is only the smallest size that
+    // covers the screen, which is the right thing to download for a bubble and the wrong
+    // thing to keep when saving. Often the same object - a small photo has one size.
+    Q_PROPERTY(File *originalFile READ originalFile CONSTANT)
+
 public:
     explicit MessagePhoto(td::td_api::object_ptr<td::td_api::messagePhoto> content, QObject *parent = nullptr);
 
@@ -112,11 +117,16 @@ public:
     int width() const;
     int height() const;
 
+    File *originalFile() const;
+
     // Two objects for one file id is the bug that kept avatars on the placeholder:
     // updateFile only ever reaches the instance StorageManager has. These let it hand
     // back the canonical one before the message is shown.
     const std::shared_ptr<File> &photoFile() const noexcept;
     void adoptFile(std::shared_ptr<File> file) noexcept;
+
+    const std::shared_ptr<File> &originalPhotoFile() const noexcept;
+    void adoptOriginalFile(std::shared_ptr<File> file) noexcept;
 
 private:
     QString m_caption;
@@ -125,6 +135,7 @@ private:
     int m_height{0};
 
     std::shared_ptr<File> m_file;
+    std::shared_ptr<File> m_originalFile;
 };
 
 class MessageSticker : public QObject, public MessageContent

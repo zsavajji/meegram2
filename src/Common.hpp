@@ -8,6 +8,24 @@
 #include <cstdint>
 #include <vector>
 
+// Telegram ids cross the QML boundary as decimal strings, never as qlonglong.
+//
+// QtScript keeps a number that fits in int32 as an immediate integer, so it marshals
+// through QVariant(int) and arrives intact - which is why private chats, whose id is a
+// small positive user id, always worked. Anything larger is boxed as a double and
+// converted with QVariant(double).toLongLong(), and on this build that conversion
+// corrupts the low 16 bits: QML sent chat id -1001383801308 and openChat received
+// -1001383814072, top 48 bits identical. Every supergroup id and every message id
+// (message ids are id << 20) is in the affected range.
+//
+// A JS number passed to a const QString & parameter is converted by QScriptValue::
+// toString(), which is exact, and toLongLong() parses it with integer arithmetic. No
+// floating point anywhere, so QML call sites need no change.
+inline qlonglong toId(const QString &value) noexcept
+{
+    return value.toLongLong();
+}
+
 constexpr auto AppName = "MeeGram";
 constexpr auto AppVersion = "0.2.0";
 

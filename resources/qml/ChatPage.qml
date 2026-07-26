@@ -55,19 +55,54 @@ Page {
         property string text: ""
         property bool isOutgoing: false
 
-        // Set only by content that has a saveable file on disk, so an empty string is
-        // what hides the Save entry.
-        property string filePath: ""
+        // The File to save, or null - which is what hides the Save entry. An object
+        // rather than a path because the original size is usually not downloaded: the
+        // bubble only ever needed the smaller one. QtObject, not variant: a variant
+        // initialised to null reads back as undefined.
+        property QtObject saveFile: null
 
-        function open(id, sender, text, outgoing, path) {
+        function open(id, sender, text, outgoing, file) {
             messageId = id;
             menuTarget.sender = sender;
             menuTarget.text = text;
             isOutgoing = outgoing;
-            // Callers that have no file omit the argument, and assigning undefined to a
-            // string property yields the literal "undefined".
-            filePath = path || "";
+            // Callers with nothing to save omit the argument entirely.
+            saveFile = file || null;
             messageMenu.open();
+        }
+    }
+
+    // Saving waits on the original size, which the bubble never needed and so has not
+    // downloaded. Null once the save has gone through or when none is pending.
+    property QtObject pendingSave: null
+
+    function saveOriginal(file) {
+        if (!file)
+            return;
+
+        if (file.isDownloadingCompleted) {
+            appWindow.showInfoBanner(utils.saveToGallery(file.localPath) ? qsTr("PhotoSavedHint") : qsTr("ErrorOccurred"));
+            return;
+        }
+
+        pendingSave = file;
+        appWindow.showInfoBanner(qsTr("Loading"));
+
+        if (file.canBeDownloaded && !file.isDownloadingActive)
+            appManager.downloadFile(file.id, 1, 0, 0, false);
+    }
+
+    Connections {
+        target: pendingSave
+
+        onFileChanged: {
+            // fileChanged also fires on progress, so completion has to be checked
+            // rather than assumed.
+            if (pendingSave && pendingSave.isDownloadingCompleted) {
+                var file = pendingSave;
+                pendingSave = null;
+                appWindow.showInfoBanner(utils.saveToGallery(file.localPath) ? qsTr("PhotoSavedHint") : qsTr("ErrorOccurred"));
+            }
         }
     }
 
@@ -586,11 +621,8 @@ Page {
 
             MenuItem {
                 text: qsTr("Save")
-                // Only shown for content with a finished download - there is nothing to
-                // copy out of a half-fetched file.
-                visible: menuTarget.filePath !== ""
-                onClicked: appWindow.showInfoBanner(utils.saveToGallery(menuTarget.filePath) ? qsTr("PhotoSavedHint")
-                                                                                            : qsTr("ErrorOccurred"))
+                visible: menuTarget.saveFile !== null
+                onClicked: root.saveOriginal(menuTarget.saveFile)
             }
 
             MenuItem {

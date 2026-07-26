@@ -383,8 +383,10 @@ QObject *ChatManager::messageModel() const noexcept
     return m_messageModel.get();
 }
 
-bool ChatManager::openChat(qlonglong chatId) noexcept
+bool ChatManager::openChat(const QString &rawChatId) noexcept
 {
+    const auto chatId = toId(rawChatId);
+
     auto chat = m_storage->chat(chatId);
     if (!chat)
     {
@@ -479,9 +481,9 @@ void ChatManager::handleChatFetched(qlonglong chatId, bool ok) noexcept
     emit chatAvailable(chatId, ok);
 }
 
-void ChatManager::closeChat(qlonglong chatId) noexcept
+void ChatManager::closeChat(const QString &rawChatId) noexcept
 {
-    m_client->send(td::td_api::make_object<td::td_api::closeChat>(chatId));
+    m_client->send(td::td_api::make_object<td::td_api::closeChat>(toId(rawChatId)));
 
     // This runs while ChatPage is being popped, so its bindings can still fire against
     // both of these. Destroying them here is what a segfault on leaving a chat looks

@@ -64,11 +64,11 @@ Item {
                     appWindow.openPhoto(model.content.file.localPath)
             }
 
-            // isDownloadingCompleted, not localPath: TDLib fills the path in when the
-            // download starts, so the path alone would offer Save on a partial file.
+            // originalFile, not file: file is the size picked to cover the screen, which
+            // is right for the bubble and wrong to keep. It is handed over undownloaded
+            // and saveOriginal fetches it on demand.
             onPressAndHold: menuTarget.open(model.id, model.sender, model.content.caption, model.isOutgoing,
-                                           model.content.file && model.content.file.isDownloadingCompleted
-                                               ? model.content.file.localPath : "")
+                                           model.content.originalFile)
 
             childrenWidth: photoColumn.width
 

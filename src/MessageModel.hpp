@@ -58,16 +58,16 @@ public:
     bool loading() const noexcept;
     bool backFetching() const noexcept;
 
-    Q_INVOKABLE void getChatHistory(qlonglong fromMessageId, int offset, int limit, bool fetchPrevious = false) noexcept;
+    Q_INVOKABLE void getChatHistory(const QString &fromMessageId, int offset, int limit, bool fetchPrevious = false) noexcept;
     // Reports the newest message on screen as read. Nothing ever called the old
     // QStringList version, which is why the other side only saw a message go read
     // when it was replied to - a reply marks the chat read as a side effect.
     Q_INVOKABLE void viewMessagesUpTo(int index) noexcept;
-    Q_INVOKABLE void deleteMessage(qlonglong messageId, bool revoke = false) noexcept;
+    Q_INVOKABLE void deleteMessage(const QString &messageId, bool revoke = false) noexcept;
 
-    Q_INVOKABLE void sendMessage(const QString &message, qlonglong replyToMessageId = 0) noexcept;
-    Q_INVOKABLE void sendPhoto(const QString &filePath, const QString &caption = {}, qlonglong replyToMessageId = 0) noexcept;
-    Q_INVOKABLE void editMessage(qlonglong messageId, const QString &text) noexcept;
+    Q_INVOKABLE void sendMessage(const QString &message, const QString &replyToMessageId = {}) noexcept;
+    Q_INVOKABLE void sendPhoto(const QString &filePath, const QString &caption = {}, const QString &replyToMessageId = {}) noexcept;
+    Q_INVOKABLE void editMessage(const QString &messageId, const QString &text) noexcept;
 
     Q_INVOKABLE void fetchMoreBack() noexcept;
 
@@ -110,6 +110,11 @@ private:
 
     // Wraps any content in a sendMessage, so the reply plumbing lives in one place.
     void send(td::td_api::object_ptr<td::td_api::InputMessageContent> content, qlonglong replyToMessageId) noexcept;
+
+    // The real request. getChatHistory is only the QML entry point, which exists to
+    // take the id as a string - see toId() in Common.hpp. Internal callers already
+    // hold a qlonglong and have no reason to round-trip it through one.
+    void requestHistory(qlonglong fromMessageId, int offset, int limit, bool fetchPrevious = false) noexcept;
 
     // Swaps any File the content built for itself for StorageManager's canonical one,
     // so the download reaches the object the delegate is bound to. Must run before

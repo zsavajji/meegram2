@@ -104,8 +104,8 @@ public:
     // False when the chat is not in StorageManager, in which case nothing was selected
     // and the caller must not push a page that would bind to nothing. A fetch is started
     // for it, so chatAvailable() follows either way.
-    Q_INVOKABLE bool openChat(qlonglong chatId) noexcept;
-    Q_INVOKABLE void closeChat(qlonglong chatId) noexcept;
+    Q_INVOKABLE bool openChat(const QString &chatId) noexcept;
+    Q_INVOKABLE void closeChat(const QString &chatId) noexcept;
 
 signals:
     void selectedChatChanged();

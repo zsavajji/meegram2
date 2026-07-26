@@ -480,8 +480,10 @@ void ChatModel::send(td::td_api::object_ptr<td::td_api::Function> request)
     }
 }
 
-void ChatModel::toggleChatIsPinned(qlonglong chatId, bool isPinned)
+void ChatModel::toggleChatIsPinned(const QString &rawChatId, bool isPinned)
 {
+    const auto chatId = toId(rawChatId);
+
     auto request = td::td_api::make_object<td::td_api::toggleChatIsPinned>();
     request->chat_list_ = Utils::toChatList(m_list);
     request->chat_id_ = chatId;
@@ -490,8 +492,10 @@ void ChatModel::toggleChatIsPinned(qlonglong chatId, bool isPinned)
     send(std::move(request));
 }
 
-void ChatModel::deleteChat(qlonglong chatId)
+void ChatModel::deleteChat(const QString &rawChatId)
 {
+    const auto chatId = toId(rawChatId);
+
     const auto chat = m_storageManager->chat(chatId);
     if (!chat)
         return;
@@ -547,8 +551,10 @@ void ChatModel::removeChatRow(qlonglong chatId)
     }
 }
 
-void ChatModel::markChatAsRead(qlonglong chatId)
+void ChatModel::markChatAsRead(const QString &rawChatId)
 {
+    const auto chatId = toId(rawChatId);
+
     const auto chat = m_storageManager->chat(chatId);
     if (!chat)
         return;
@@ -574,13 +580,17 @@ void ChatModel::markChatAsRead(qlonglong chatId)
     }
 }
 
-void ChatModel::markChatAsUnread(qlonglong chatId)
+void ChatModel::markChatAsUnread(const QString &rawChatId)
 {
+    const auto chatId = toId(rawChatId);
+
     send(td::td_api::make_object<td::td_api::toggleChatIsMarkedAsUnread>(chatId, true));
 }
 
-void ChatModel::setChatMuted(qlonglong chatId, bool muted)
+void ChatModel::setChatMuted(const QString &rawChatId, bool muted)
 {
+    const auto chatId = toId(rawChatId);
+
     auto settings = td::td_api::make_object<td::td_api::chatNotificationSettings>();
 
     // setChatNotificationSettings replaces the whole object, so every field left at

@@ -159,13 +159,20 @@ most of a zoomed photo cannot be reached. The clamp is against the fitted width,
 `pinch.maximumScale` bounds only one gesture and successive pinches would otherwise zoom
 without limit.
 
-**Saving** copies the downloaded file to `~/MyDocs/Pictures`, which is what puts it in the
-Gallery: that path is under Tracker's index, whereas
-`QDesktopServices::PicturesLocation` resolves to `$HOME/Pictures` on Harmattan and is
-not — the file would be written and never show up. The menu entry appears only once
-`isDownloadingCompleted` is true, since TDLib fills in the local path when a download
-*starts*. A file already present under that name is the same image saved earlier, so
-that counts as success rather than a copy failure.
+**Saving** writes the **original** size, not the one on screen. `MessagePhoto` keeps two
+files: the size picked to cover the screen, which is what the bubble downloads, and the
+largest size as sent, which is what Save wants. Both are registered with
+`StorageManager`, or the original's download would never reach the object Save is bound
+to; when a photo has only one size they are the same object, not two for one file id.
+The original is normally not downloaded yet, so Save fetches it and completes when
+`isDownloadingCompleted` flips — `fileChanged` also fires on progress, so completion is
+checked rather than assumed.
+
+The destination is `~/MyDocs/Pictures`, which is what puts it in the Gallery: that path
+is under Tracker's index, whereas `QDesktopServices::PicturesLocation` resolves to
+`$HOME/Pictures` on Harmattan and is not — the file would be written and never show up.
+A file already present under that name is the same image saved earlier, so that counts
+as success rather than a copy failure.
 
 ::: warning Downloads on sight
 A delegate only exists for rows in view plus the cache buffer, so this is "what you

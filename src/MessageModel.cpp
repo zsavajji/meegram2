@@ -65,7 +65,7 @@ void MessageModel::fetchMore(const QModelIndex &parent)
 
     m_loading = true;
 
-    getChatHistory(std::ranges::max(m_messages), -MessageSliceLimit, MessageSliceLimit);
+    requestHistory(std::ranges::max(m_messages), -MessageSliceLimit, MessageSliceLimit);
 
     emit loadingChanged();
 }
@@ -198,12 +198,25 @@ QString MessageModel::replyToText(const Message *message) const noexcept
     if (!reply->quote.isEmpty())
         return reply->quote;
 
-    if (!reply->content)
-        return {};
+    if (reply->content)
+    {
+        // isOutgoing is only used by call-content wording, which never appears in a
+        // reply preview; false is the neutral choice.
+        return Utils::getContent(reply->content.get(), reply->contentType, false, m_locale);
+    }
 
-    // isOutgoing is only used by call-content wording, which never appears in a
-    // reply preview; false is the neutral choice.
-    return Utils::getContent(reply->content.get(), reply->contentType, false, m_locale);
+    // messageReplyToMessage only carries content when the replied-to message came from
+    // another chat - for a reply within this chat it is null, which is why the quote
+    // block showed a sender and no text. Resolve it from the loaded messages, the same
+    // fallback replyToSender already makes.
+    //
+    // ponytail: only messages currently held by the model. Replying to something far
+    // enough back that it has not been loaded still shows nothing; getMessage plus a
+    // dataChanged when it lands is the upgrade.
+    if (const auto it = m_messageMap.find(reply->messageId); it != m_messageMap.end() && it->second)
+        return Utils::getContent(it->second.get(), m_storage, m_locale);
+
+    return {};
 }
 
 QHash<int, QByteArray> MessageModel::roleNames() const noexcept
@@ -241,7 +254,12 @@ bool MessageModel::loading() const noexcept
     return m_loading;
 }
 
-void MessageModel::getChatHistory(qlonglong fromMessageId, int offset, int limit, bool fetchPrevious) noexcept
+void MessageModel::getChatHistory(const QString &fromMessageId, int offset, int limit, bool fetchPrevious) noexcept
+{
+    requestHistory(toId(fromMessageId), offset, limit, fetchPrevious);
+}
+
+void MessageModel::requestHistory(qlonglong fromMessageId, int offset, int limit, bool fetchPrevious) noexcept
 {
     auto request = td::td_api::make_object<td::td_api::getChatHistory>();
     request->chat_id_ = m_chat->id();
@@ -348,17 +366,17 @@ void MessageModel::send(td::td_api::object_ptr<td::td_api::InputMessageContent> 
     m_client->send(std::move(request));
 }
 
-void MessageModel::sendMessage(const QString &message, qlonglong replyToMessageId) noexcept
+void MessageModel::sendMessage(const QString &message, const QString &replyToMessageId) noexcept
 {
     auto content = td::td_api::make_object<td::td_api::inputMessageText>();
 
     content->text_ = td::td_api::make_object<td::td_api::formattedText>();
     content->text_->text_ = message.toStdString();
 
-    send(std::move(content), replyToMessageId);
+    send(std::move(content), toId(replyToMessageId));
 }
 
-void MessageModel::sendPhoto(const QString &filePath, const QString &caption, qlonglong replyToMessageId) noexcept
+void MessageModel::sendPhoto(const QString &filePath, const QString &caption, const QString &replyToMessageId) noexcept
 {
     // The file and its dimensions live on a nested inputPhoto; only the caption sits
     // on inputMessagePhoto itself.
@@ -383,7 +401,7 @@ void MessageModel::sendPhoto(const QString &filePath, const QString &caption, ql
     content->caption_ = td::td_api::make_object<td::td_api::formattedText>();
     content->caption_->text_ = caption.toStdString();
 
-    send(std::move(content), replyToMessageId);
+    send(std::move(content), toId(replyToMessageId));
 }
 
 void MessageModel::fetchMoreBack() noexcept
@@ -393,7 +411,7 @@ void MessageModel::fetchMoreBack() noexcept
 
     m_backFetching = true;
 
-    getChatHistory(std::ranges::min(m_messages), 0, MessageSliceLimit, true);
+    requestHistory(std::ranges::min(m_messages), 0, MessageSliceLimit, true);
 
     emit backFetchingChanged();
 }
@@ -424,8 +442,10 @@ void MessageModel::viewMessagesUpTo(int index) noexcept
     m_client->send(std::move(request));
 }
 
-void MessageModel::deleteMessage(qlonglong messageId, bool revoke) noexcept
+void MessageModel::deleteMessage(const QString &rawMessageId, bool revoke) noexcept
 {
+    const auto messageId = toId(rawMessageId);
+
     auto request = td::td_api::make_object<td::td_api::deleteMessages>();
 
     request->chat_id_ = m_chat->id();
@@ -455,6 +475,10 @@ void MessageModel::linkContentFile(Message *message) noexcept
         case td::td_api::messagePhoto::ID: {
             auto *photo = static_cast<MessagePhoto *>(message->content());
             photo->adoptFile(m_storage->registerFile(photo->photoFile()));
+            // The original too, or its download would never reach the object Save is
+            // bound to. registerFile hands back whichever instance is canonical, so
+            // when both sizes are the same file this simply re-adopts the same one.
+            photo->adoptOriginalFile(m_storage->registerFile(photo->originalPhotoFile()));
             break;
         }
         case td::td_api::messageSticker::ID: {
@@ -467,8 +491,10 @@ void MessageModel::linkContentFile(Message *message) noexcept
     }
 }
 
-void MessageModel::editMessage(qlonglong messageId, const QString &text) noexcept
+void MessageModel::editMessage(const QString &rawMessageId, const QString &text) noexcept
 {
+    const auto messageId = toId(rawMessageId);
+
     auto formatted = td::td_api::make_object<td::td_api::formattedText>();
     formatted->text_ = text.toStdString();
 
@@ -698,7 +724,7 @@ void MessageModel::loadMessages() noexcept
     const auto offset = unread ? -1 - MessageSliceLimit : 0;
     const auto limit = unread ? 2 * MessageSliceLimit : MessageSliceLimit;
 
-    getChatHistory(fromMessageId, offset, limit);
+    requestHistory(fromMessageId, offset, limit);
 }
 
 void MessageModel::itemChanged(size_t index) noexcept

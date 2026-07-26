@@ -53,16 +53,16 @@ public:
     // canFetchMore/fetchMore, so demand has to come from QML explicitly.
     Q_INVOKABLE void loadMore();
 
-    Q_INVOKABLE void toggleChatIsPinned(qlonglong chatId, bool isPinned);
+    Q_INVOKABLE void toggleChatIsPinned(const QString &chatId, bool isPinned);
 
     // Leaves groups and channels, clears and unlists private and secret chats -
     // TDLib has no single request that covers both, and neither works on the other.
-    Q_INVOKABLE void deleteChat(qlonglong chatId);
+    Q_INVOKABLE void deleteChat(const QString &chatId);
 
-    Q_INVOKABLE void markChatAsRead(qlonglong chatId);
-    Q_INVOKABLE void markChatAsUnread(qlonglong chatId);
+    Q_INVOKABLE void markChatAsRead(const QString &chatId);
+    Q_INVOKABLE void markChatAsUnread(const QString &chatId);
 
-    Q_INVOKABLE void setChatMuted(qlonglong chatId, bool muted);
+    Q_INVOKABLE void setChatMuted(const QString &chatId, bool muted);
 
     Q_INVOKABLE ChatPosition *getChatPosition(Chat *chat) const;
 
