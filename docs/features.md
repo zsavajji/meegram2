@@ -100,6 +100,7 @@ Long press a bubble:
 | Reply | Fills the composer's reply banner |
 | Copy | `Utils::copyToClipboard` — QML1 has no `Clipboard` element |
 | Edit | `editMessageText` for text, `editMessageCaption` for a photo — TDLib rejects the former for anything that is not a text message |
+| Save | Photos only, once downloaded — copies to `~/MyDocs/Pictures` |
 | Delete | `deleteMessages`, with `revoke` for your own messages |
 
 Items hide rather than grey out, which is what Harmattan does. Edit is offered on your
@@ -150,6 +151,14 @@ The send is `inputMessagePhoto` wrapping an `inputPhoto` with an `inputFileLocal
 Dimensions come from `QImageReader::size()`, which parses only far enough to find them
 rather than decoding an 8 MP shot. Whatever is in the composer rides along as the
 caption.
+
+**Saving** copies the downloaded file to `~/MyDocs/Pictures`, which is what puts it in the
+Gallery: that path is under Tracker's index, whereas
+`QDesktopServices::PicturesLocation` resolves to `$HOME/Pictures` on Harmattan and is
+not — the file would be written and never show up. The menu entry appears only once
+`isDownloadingCompleted` is true, since TDLib fills in the local path when a download
+*starts*. A file already present under that name is the same image saved earlier, so
+that counts as success rather than a copy failure.
 
 ::: warning Downloads on sight
 A delegate only exists for rows in view plus the cache buffer, so this is "what you

@@ -44,6 +44,10 @@ public:
     // QML1 has no Clipboard element, so the "Copy" message action goes through here.
     Q_INVOKABLE static void copyToClipboard(const QString &text) noexcept;
 
+    // Copies a downloaded file into the user's own storage so it survives TDLib
+    // clearing its cache and shows up in the Gallery. False if it could not be written.
+    Q_INVOKABLE static bool saveToGallery(const QString &localPath) noexcept;
+
     // The gallery hands out file:// URLs and TDLib wants a filesystem path. Goes
     // through QUrl rather than stripping the scheme, so percent-encoded characters
     // in a filename survive.

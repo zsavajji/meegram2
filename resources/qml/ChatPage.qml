@@ -55,11 +55,18 @@ Page {
         property string text: ""
         property bool isOutgoing: false
 
-        function open(id, sender, text, outgoing) {
+        // Set only by content that has a saveable file on disk, so an empty string is
+        // what hides the Save entry.
+        property string filePath: ""
+
+        function open(id, sender, text, outgoing, path) {
             messageId = id;
             menuTarget.sender = sender;
             menuTarget.text = text;
             isOutgoing = outgoing;
+            // Callers that have no file omit the argument, and assigning undefined to a
+            // string property yields the literal "undefined".
+            filePath = path || "";
             messageMenu.open();
         }
     }
@@ -575,6 +582,15 @@ Page {
                 // swallowed. Gate properly via getMessageProperties if it bites.
                 visible: menuTarget.isOutgoing && menuTarget.text !== ""
                 onClicked: composeState.edit(menuTarget.messageId, menuTarget.text)
+            }
+
+            MenuItem {
+                text: qsTr("Save")
+                // Only shown for content with a finished download - there is nothing to
+                // copy out of a half-fetched file.
+                visible: menuTarget.filePath !== ""
+                onClicked: appWindow.showInfoBanner(utils.saveToGallery(menuTarget.filePath) ? qsTr("PhotoSavedHint")
+                                                                                            : qsTr("ErrorOccurred"))
             }
 
             MenuItem {

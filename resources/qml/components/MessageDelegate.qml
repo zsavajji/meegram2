@@ -56,7 +56,11 @@ Item {
         id: photoMessageComponent
 
         MessageBubble {
-            onPressAndHold: menuTarget.open(model.id, model.sender, model.content.caption, model.isOutgoing)
+            // isDownloadingCompleted, not localPath: TDLib fills the path in when the
+            // download starts, so the path alone would offer Save on a partial file.
+            onPressAndHold: menuTarget.open(model.id, model.sender, model.content.caption, model.isOutgoing,
+                                           model.content.file && model.content.file.isDownloadingCompleted
+                                               ? model.content.file.localPath : "")
 
             childrenWidth: photoColumn.width
 
