@@ -13,7 +13,6 @@
 #include <QDBusReply>
 #include <QDateTime>
 #include <QDebug>
-#include <QFileInfo>
 #include <QWidget>
 
 namespace {
@@ -136,24 +135,36 @@ void NotificationManager::handleChatUpdate(qlonglong chatId) noexcept
     if (!message || message->isOutgoing() || message->isService())
         return;
 
-    // Everything above is the noise filter - chatUpdated fires for a great many things
-    // that were never going to raise a banner. Past this point it is a real incoming
-    // message, so every reason to stay silent says so. "No banner" on its own has cost
-    // two builds of guessing at which of these closed.
-    const auto skip = [chatId](const char *why) { qWarning() << "notification: chat" << chatId << "skipped -" << why; };
+    // The steady-state exits are silent. chatUpdated fires for read state, positions,
+    // notification settings and mention counts, so most calls land on one of these and
+    // logging them buries the interesting lines - and every qWarning here is a syslog
+    // write on a device that has better things to do.
 
-    // Was tested before the storage lookup. Order does not matter, and grouping the
-    // logged decisions together is worth more than saving one hash lookup.
-    //
+    // Unread by message id rather than unreadCount: TDLib sends updateChatReadInbox
+    // after updateChatLastMessage, so the count is still the pre-arrival one here.
+    // Checked before the dedupe below, or a message read elsewhere after we had already
+    // notified would never get its banner taken down.
+    if (message->id() <= chat->lastReadInboxMessageId())
+    {
+        // Read here or on another device. Drop the banner this phone is still showing -
+        // worth a line only when there was actually one to drop.
+        if (m_published.contains(chatId))
+            qWarning() << "notification: chat" << chatId << "withdrawn - read elsewhere";
+
+        withdraw(chatId);
+        return;
+    }
+
+    if (m_notifiedMessageId.value(chatId) == message->id())
+        return;
+
     // Open is not enough on its own: this client is left running so notifications keep
     // arriving, so a chat can be "open" for days while the app sits in the switcher.
     // Only stay quiet when the chat is open *and* on screen.
     if (chatId == m_activeChatId && isForeground())
-    {
-        skip("the chat is open in the foreground");
         return;
-    }
 
+    // Past here, staying quiet is unusual enough to be worth explaining.
     if (chat->isMuted())
     {
         // muteFor is reported because Chat::isMuted() is muteFor > 0 and ignores
@@ -163,26 +174,9 @@ void NotificationManager::handleChatUpdate(qlonglong chatId) noexcept
         return;
     }
 
-    // Unread by message id rather than unreadCount: TDLib sends updateChatReadInbox
-    // after updateChatLastMessage, so the count is still the pre-arrival one here.
-    if (message->id() <= chat->lastReadInboxMessageId())
-    {
-        // Read on another device. Drop the banner this phone is still showing.
-        qWarning() << "notification: chat" << chatId << "skipped - already read, message" << message->id() << "<= lastReadInbox"
-                   << chat->lastReadInboxMessageId();
-        withdraw(chatId);
-        return;
-    }
-
     if (message->date().toTime_t() < m_startedAt)
     {
-        skip("older than app start");
-        return;
-    }
-
-    if (m_notifiedMessageId.value(chatId) == message->id())
-    {
-        skip("already notified for this message");
+        qWarning() << "notification: chat" << chatId << "skipped - older than app start";
         return;
     }
 
@@ -218,13 +212,6 @@ void NotificationManager::handleChatUpdate(qlonglong chatId) noexcept
         if (photo->isDownloadingCompleted())
         {
             imagePath = photo->localPath();
-
-            // If the square survives the change of form, the next suspect is whether the
-            // process that draws the banner can read the file at all - it is not this
-            // one, and TDLib keeps its files under a private directory.
-            const QFileInfo info(imagePath);
-            qWarning() << "notification: avatar" << imagePath << "exists" << info.exists() << "readable" << info.isReadable() << "size"
-                       << info.size();
         }
         else if (photo->canBeDownloaded() && !photo->isDownloadingActive())
         {

@@ -340,10 +340,18 @@ minimised app, so it stays visible; `isActiveWindow()` is what tracks attention.
 raised while minimised for the chat you have open is withdrawn by the "already read"
 branch as soon as you return and the messages are marked read.
 
-Every gate logs why it stayed quiet, because "no banner" on its own carries no
-information and cost two builds of guessing. `publish()` treats a returned notification id
-of `0` as a rejection as well as an outright D-Bus error, so a daemon that accepts the
-call and quietly declines to post it still triggers the retry-without-image.
+The **unusual** gates log why they stayed quiet — muted, older than app start, no
+notification user id — because "no banner" on its own carries no information and cost
+several builds of guessing. The steady-state ones are deliberately silent: `chatUpdated`
+fires for read state, positions, settings and mention counts, so most calls land on the
+dedupe or on "you are looking at this chat", and logging those buries everything else.
+
+Order matters in one place: the already-read check runs **before** the dedupe, or a
+message read elsewhere after a banner had already gone out would never have it taken down.
+
+`publish()` treats a returned notification id of `0` as a rejection as well as an outright
+D-Bus error, so a daemon that accepts the call and quietly declines to post it still
+triggers the retry-without-image.
 
 **The avatar** is a **plain absolute path**, not a `file://` URL — `MNotification::setImage()`
 takes "a path to an image file or an icon id", and a URL draws the broken-image red

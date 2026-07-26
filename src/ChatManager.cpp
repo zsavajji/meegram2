@@ -483,11 +483,22 @@ void ChatManager::handleChatFetched(qlonglong chatId, bool ok) noexcept
 
 void ChatManager::closeChat(const QString &rawChatId) noexcept
 {
-    m_client->send(td::td_api::make_object<td::td_api::closeChat>(toId(rawChatId)));
+    const auto chatId = toId(rawChatId);
 
-    // This runs while ChatPage is being popped, so its bindings can still fire against
-    // both of these. Destroying them here is what a segfault on leaving a chat looks
-    // like.
+    m_client->send(td::td_api::make_object<td::td_api::closeChat>(chatId));
+
+    // Only tear down the selection if this really is the chat that is selected. A page
+    // being destroyed can reach here after a *different* chat has been opened: tapping a
+    // notification pops the current ChatPage and opens the new chat in the same turn,
+    // and QML destroys the popped page afterwards. Without this, that destruction closed
+    // the chat that had just been opened, leaving the newly pushed page bound to a model
+    // already on its way out - and no selectedChatChanged to tell QML to re-read.
+    if (!m_selectedChat || m_selectedChat->id() != chatId)
+        return;
+
+    // This also runs while ChatPage is being popped, so its bindings can still fire
+    // against both of these. Destroying them here is what a segfault on leaving a chat
+    // looks like.
     disposeLater(m_infoFormatter);
     disposeLater(m_messageModel);
 

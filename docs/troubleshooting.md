@@ -186,6 +186,20 @@ in the destructor; `ChatModel` and `MessageModel` both do this now.
 This one stayed hidden until the [`qlonglong` fix](#qlonglong) made groups actually send
 history requests. A latent crash needs the code path to work before it can fire.
 
+### A popped page closes the chat that replaced it
+
+Tapping a notification runs `pageStack.pop(null, true)` and then `openChat(chatId)` in the
+same turn. QML destroys the popped page **afterwards**, by which point the new chat is
+already selected — and `ChatPage.chat` is a live binding to `chatManager.selectedChat`, so
+the dying page's `Component.onDestruction` read the *new* chat's id and closed it. That
+disposed the model the freshly pushed page was bound to, with no `selectedChatChanged` to
+make QML re-read: a dangling model and a page in a state nothing could have navigated to.
+
+Two fixes, either of which prevents it. `ChatPage` captures its chat id once in
+`Component.onCompleted` — a declared initialiser would be a binding and would do the same
+thing. And `closeChat` ignores a close for a chat that is not the selected one, which is
+the guard at the point every caller funnels through.
+
 ### Destroying an object QML is still bound to
 
 `ChatManager::openChat`/`closeChat` replaced `m_messageModel` and `m_infoFormatter` by

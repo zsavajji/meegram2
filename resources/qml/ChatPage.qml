@@ -10,6 +10,13 @@ Page {
     property variant chatInfo: chatManager.chatInfo
     property variant messageModel: chatManager.messageModel
 
+    // The chat this page was opened for, captured once. `chat` above is a live binding
+    // to the current selection, so a page that has been popped but not yet destroyed
+    // follows it onto whatever was opened next - and then closes the wrong chat on the
+    // way out. Assigned imperatively because a declared initialiser would be a binding
+    // and would do exactly that.
+    property variant openedChatId: 0
+
     // What the composer is currently doing: a plain send, a reply, or an edit.
     // Named distinctly rather than living on the page root, because MessageBubble
     // also uses id: root and would shadow it.
@@ -727,12 +734,14 @@ Page {
         }
     }
 
+    Component.onCompleted: openedChatId = chat ? chat.id : 0
+
     // Runs on app shutdown as well as on leaving the page, and by then appWindow's
     // properties can already be gone - chatManager reads back null and this threw.
     // Nothing needs closing at that point: the process is going away and TDLib drops an
     // open chat with the connection.
     Component.onDestruction: {
-        if (chatManager && chat)
-            chatManager.closeChat(chat.id)
+        if (chatManager && openedChatId)
+            chatManager.closeChat(openedChatId)
     }
 }
