@@ -8,6 +8,7 @@
 
 #include <QDateTime>
 #include <QDebug>
+#include <QStringList>
 
 #include <algorithm>
 #include <ranges>
@@ -380,11 +381,23 @@ bool ChatManager::openChat(qlonglong chatId) noexcept
         // by id that TDLib has not pushed yet lands here - Saved Messages, which opens
         // myId() directly, and a notification tapped before the chat list has loaded.
         // Fetch it instead of giving up; getChat makes TDLib push updateNewChat.
-        const auto ids = m_storage->chatIds();
-        const auto groups = std::ranges::count_if(ids, [](auto id) { return id < 0; });
+        // The whole set, not a count: the question is whether the requested id is one of
+        // these at all. If it is nowhere near any of them the value is wrong rather than
+        // missing, and if it sits a few thousand away from a real one the ids are being
+        // corrupted somewhere between the model row and here.
+        auto ids = m_storage->chatIds();
+        std::ranges::sort(ids);
 
-        qWarning() << "openChat: no chat in storage for id" << chatId << "- storage holds" << ids.size() << "chats," << groups
-                   << "of them groups; fetching";
+        QStringList groups;
+        for (const auto id : ids)
+        {
+            if (id < 0)
+                groups.append(QString::number(id));
+        }
+
+        qWarning() << "openChat: no chat in storage for id" << chatId << "- storage holds" << ids.size() << "chats," << groups.size()
+                   << "of them groups";
+        qWarning() << "openChat: stored group ids:" << groups.join(QLatin1String(" "));
 
         fetchChat(chatId);
         return false;
