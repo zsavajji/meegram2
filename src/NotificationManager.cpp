@@ -110,31 +110,59 @@ void NotificationManager::setActiveChat(qlonglong chatId) noexcept
 
 void NotificationManager::handleChatUpdate(qlonglong chatId) noexcept
 {
-    if (chatId == m_activeChatId)
-        return;
-
     const auto chat = m_storageManager->chat(chatId);
-    if (!chat || chat->isMuted())
+    if (!chat)
         return;
 
     auto *message = chat->lastMessage();
     if (!message || message->isOutgoing() || message->isService())
         return;
 
+    // Everything above is the noise filter - chatUpdated fires for a great many things
+    // that were never going to raise a banner. Past this point it is a real incoming
+    // message, so every reason to stay silent says so. "No banner" on its own has cost
+    // two builds of guessing at which of these closed.
+    const auto skip = [chatId](const char *why) { qWarning() << "notification: chat" << chatId << "skipped -" << why; };
+
+    // Was tested before the storage lookup. Order does not matter, and grouping the
+    // logged decisions together is worth more than saving one hash lookup.
+    if (chatId == m_activeChatId)
+    {
+        skip("the chat is open");
+        return;
+    }
+
+    if (chat->isMuted())
+    {
+        // muteFor is reported because Chat::isMuted() is muteFor > 0 and ignores
+        // use_default_mute_for_ - if that field is stale for this chat this is where it
+        // would show up.
+        qWarning() << "notification: chat" << chatId << "skipped - muted, muteFor" << chat->muteFor();
+        return;
+    }
+
     // Unread by message id rather than unreadCount: TDLib sends updateChatReadInbox
     // after updateChatLastMessage, so the count is still the pre-arrival one here.
     if (message->id() <= chat->lastReadInboxMessageId())
     {
         // Read on another device. Drop the banner this phone is still showing.
+        qWarning() << "notification: chat" << chatId << "skipped - already read, message" << message->id() << "<= lastReadInbox"
+                   << chat->lastReadInboxMessageId();
         withdraw(chatId);
         return;
     }
 
     if (message->date().toTime_t() < m_startedAt)
+    {
+        skip("older than app start");
         return;
+    }
 
     if (m_notifiedMessageId.value(chatId) == message->id())
+    {
+        skip("already notified for this message");
         return;
+    }
 
     m_notifiedMessageId.insert(chatId, message->id());
 
@@ -203,7 +231,13 @@ void NotificationManager::publish(qlonglong chatId, const QString &summary, cons
         // updateNotification answers false, not an error, for an id it no longer
         // knows.
         if (reply.type() != QDBusMessage::ErrorMessage && QDBusReply<bool>(reply).value())
+        {
+            // Logged because an update that reports success but refreshes a banner the
+            // user already swiped away is indistinguishable from no notification at all
+            // - and it would hit an ongoing conversation, not a first message.
+            qWarning() << "notification: updated existing banner" << it.value() << "for chat" << chatId;
             return;
+        }
 
         // The user dismissed it, or the daemon restarted. Fall through and post a new
         // one instead of silently dropping the message.
@@ -216,20 +250,34 @@ void NotificationManager::publish(qlonglong chatId, const QString &summary, cons
     // The avatar is decoration and must never be able to cost you the banner. Whether
     // this field wants a bare path or a URI is not something the platform documents
     // usefully, so if the call is refused while carrying one, drop it and post again.
-    if (reply.type() == QDBusMessage::ErrorMessage && !imagePath.isEmpty())
+    //
+    // A returned id of zero counts as refused too. An outright D-Bus error was the only
+    // thing being retried, which misses a daemon that accepts the call and quietly
+    // declines to post it - and "accepted, nothing appeared" is exactly the shape of
+    // this bug.
+    const auto rejected = [](const QDBusMessage &message) {
+        return message.type() == QDBusMessage::ErrorMessage || QDBusReply<uint>(message).value() == 0;
+    };
+
+    if (rejected(reply) && !imagePath.isEmpty())
     {
-        qWarning() << "addNotification refused with an image:" << reply.errorName() << reply.errorMessage() << "- retrying without" << imagePath;
+        qWarning() << "notification: addNotification rejected carrying an image -" << reply.errorName() << reply.errorMessage()
+                   << "- retrying without" << imagePath;
 
         reply = callNotificationManager("addNotification", notificationArguments(userId, 0u, summary, body, action, QString()));
     }
 
     if (reply.type() == QDBusMessage::ErrorMessage)
     {
-        qWarning() << "addNotification failed:" << reply.errorName() << reply.errorMessage();
+        qWarning() << "notification: addNotification failed:" << reply.errorName() << reply.errorMessage();
         return;
     }
 
-    m_published.insert(chatId, QDBusReply<uint>(reply).value());
+    const auto published = QDBusReply<uint>(reply).value();
+
+    qWarning() << "notification: posted for chat" << chatId << "id" << published << "image" << (imagePath.isEmpty() ? "none" : "yes");
+
+    m_published.insert(chatId, published);
 }
 
 void NotificationManager::activate()

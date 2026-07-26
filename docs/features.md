@@ -101,7 +101,8 @@ Long press a bubble:
 | Copy | `Utils::copyToClipboard` — QML1 has no `Clipboard` element |
 | Edit | `editMessageText` for text, `editMessageCaption` for a photo — TDLib rejects the former for anything that is not a text message |
 | Save | Photos only, once downloaded — copies to `~/MyDocs/Pictures` |
-| Delete | `deleteMessages`, with `revoke` for your own messages |
+| Delete | `deleteMessages` without `revoke` — this device only |
+| Delete for everyone | `deleteMessages` with `revoke`, offered on your own messages |
 
 Items hide rather than grey out, which is what Harmattan does. Edit is offered on your
 own messages only.

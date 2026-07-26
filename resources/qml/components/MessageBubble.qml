@@ -94,7 +94,18 @@ Item {
 
         anchors {
             left: parent.left
-            leftMargin: model.isOutgoing ? 80 : 20
+            // Same problem the sticker had: leftMargin 80 only looks right-aligned for
+            // content that spans the full width and sets AlignRight. The quote is a bar
+            // plus left-aligned labels, so it stayed on the incoming side while its
+            // bubble sat on the right. 11 is the bar and its margin; 20 puts the right
+            // edge where every other outgoing element's lands.
+            //
+            // Deliberately computed from paintedWidth rather than by sizing this Item to
+            // its content: the labels anchor to this Item's right edge, so making the
+            // width depend on them would be a binding loop. leftMargin feeds nothing.
+            leftMargin: model.isOutgoing
+                            ? parent.width - 31 - Math.max(replySender.paintedWidth, replyText.paintedWidth)
+                            : 20
             top: parent.top
             topMargin: root.stackTop
         }

@@ -627,7 +627,23 @@ Page {
 
             MenuItem {
                 text: qsTr("Delete")
-                onClicked: deleteDialog.open()
+                onClicked: {
+                    deleteDialog.revoke = false;
+                    deleteDialog.open();
+                }
+            }
+
+            MenuItem {
+                text: qsTr("DeleteForAll")
+                // ponytail: offered on your own messages. Telegram also allows revoking
+                // the other side's messages in a private chat for a while, and refuses
+                // past a time limit; getMessageProperties reports can_be_deleted_for_all_users
+                // properly if this turns out to be too narrow.
+                visible: menuTarget.isOutgoing
+                onClicked: {
+                    deleteDialog.revoke = true;
+                    deleteDialog.open();
+                }
             }
         }
     }
@@ -635,14 +651,17 @@ Page {
     QueryDialog {
         id: deleteDialog
 
-        titleText: qsTr("DeleteMessage")
+        // Which of the two menu entries opened this. Deleting for everyone used to be
+        // implied by the message being yours, so your own messages could only ever be
+        // deleted for both sides.
+        property bool revoke: false
+
+        titleText: revoke ? qsTr("DeleteForAll") : qsTr("DeleteMessage")
         message: qsTr("AreYouSureDeleteSingleMessage")
         acceptButtonText: qsTr("OK")
         rejectButtonText: qsTr("Cancel")
 
-        // Deleting for everyone is only offered on your own messages. Incoming ones
-        // are removed from this device only.
-        onAccepted: messageModel.deleteMessage(menuTarget.messageId, menuTarget.isOutgoing)
+        onAccepted: messageModel.deleteMessage(menuTarget.messageId, revoke)
     }
 
     // Built on demand: the page imports QtMobility.gallery, and if that module is
