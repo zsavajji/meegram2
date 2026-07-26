@@ -274,7 +274,12 @@ QString Utils::formatTime(int totalSeconds) noexcept
     return result;
 }
 
-QString Utils::replaceEmoji(const QString &text, int size) noexcept
+QString Utils::replaceEmoji(const QString &text) noexcept
+{
+    return replaceEmojiSized(text, EmojiSize24);
+}
+
+QString Utils::replaceEmojiSized(const QString &text, int size) noexcept
 {
     MEEGRAM_SCOPE("Utils::replaceEmoji");
 

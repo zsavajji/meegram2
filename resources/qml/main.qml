@@ -77,6 +77,11 @@ PageStackWindow {
     }
 
     function openChat(chatId) {
+        // Every caller routes through here - the chat list, Saved Messages, a tapped
+        // notification, the fetch retry. A failure with no "tap row" line before it did
+        // not come from the list.
+        utils.log("openChat requested for " + chatId)
+
         // Push only if there is something to show. This used to push regardless, so a
         // chat that could not be selected produced a page with chat, chatInfo and
         // messageModel all undefined - a spinner that never resolved. A refusal means a

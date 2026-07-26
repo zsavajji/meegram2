@@ -36,7 +36,7 @@ Item {
                 // does. 0 for everything else, which is the normal body size.
                 property int emojiSize: utils.emojiOnlySize(model.content.text)
 
-                text: utils.replaceEmoji(model.content.formattedText, emojiSize)
+                text: utils.replaceEmojiSized(model.content.formattedText, emojiSize)
                 textFormat: Text.RichText
                 color: model.isOutgoing ? "white" : "black"
                 width: isPortrait ? 380 : 754
