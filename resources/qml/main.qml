@@ -63,6 +63,19 @@ PageStackWindow {
         }
     }
 
+    // Lives here rather than on ChatPage so the delegate can reach it by a unique name -
+    // "root" inside MessageDelegate resolves to ChatPage's root and is easy to get wrong.
+    function openPhoto(path) {
+        var component = Qt.createComponent("PhotoViewPage.qml");
+
+        if (component.status !== Component.Ready) {
+            console.debug("Error loading component:", component.errorString());
+            return;
+        }
+
+        pageStack.push(component, { source: "file://" + path });
+    }
+
     function openChat(chatId) {
         // Push only if there is something to show. This used to push regardless, so a
         // chat that could not be selected produced a page with chat, chatInfo and

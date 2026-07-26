@@ -152,6 +152,13 @@ Dimensions come from `QImageReader::size()`, which parses only far enough to fin
 rather than decoding an 8 MP shot. Whatever is in the composer rides along as the
 caption.
 
+**Tapping** a photo opens `PhotoViewPage`, a black full-screen `Flickable` with pinch
+zoom. Zoom goes through `Flickable.resizeContent()` rather than scaling the `Image`:
+scaling leaves `contentWidth` untouched, so the pan limits stay at the unzoomed size and
+most of a zoomed photo cannot be reached. The clamp is against the fitted width, because
+`pinch.maximumScale` bounds only one gesture and successive pinches would otherwise zoom
+without limit.
+
 **Saving** copies the downloaded file to `~/MyDocs/Pictures`, which is what puts it in the
 Gallery: that path is under Tracker's index, whereas
 `QDesktopServices::PicturesLocation` resolves to `$HOME/Pictures` on Harmattan and is

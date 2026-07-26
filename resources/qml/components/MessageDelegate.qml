@@ -56,6 +56,14 @@ Item {
         id: photoMessageComponent
 
         MessageBubble {
+            // ponytail: opens the size that was downloaded for the bubble, which only
+            // has to cover 480px - so 4x zoom is soft. Keeping the largest photoSize's
+            // file in MessagePhoto and fetching it here is the upgrade.
+            onClicked: {
+                if (model.content.file && model.content.file.isDownloadingCompleted)
+                    appWindow.openPhoto(model.content.file.localPath)
+            }
+
             // isDownloadingCompleted, not localPath: TDLib fills the path in when the
             // download starts, so the path alone would offer Save on a partial file.
             onPressAndHold: menuTarget.open(model.id, model.sender, model.content.caption, model.isOutgoing,
