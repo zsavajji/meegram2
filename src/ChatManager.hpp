@@ -102,12 +102,17 @@ public:
     QObject *messageModel() const noexcept;
 
     // False when the chat is not in StorageManager, in which case nothing was selected
-    // and the caller must not push a page that would bind to nothing.
+    // and the caller must not push a page that would bind to nothing. A fetch is started
+    // for it, so chatAvailable() follows either way.
     Q_INVOKABLE bool openChat(qlonglong chatId) noexcept;
     Q_INVOKABLE void closeChat(qlonglong chatId) noexcept;
 
 signals:
     void selectedChatChanged();
+
+    // A chat that openChat() refused has finished being fetched. ok says whether it can
+    // be opened now; the caller retries openChat() or reports the failure.
+    void chatAvailable(qlonglong chatId, bool ok);
 
     // The chat the user is looking at, or 0 when none. Drives notification
     // suppression; separate from selectedChatChanged because that one carries no id
@@ -122,9 +127,15 @@ signals:
 
 private slots:
     void onChatFoldersUpdated() noexcept;
+    void handleChatFetched(qlonglong chatId, bool ok) noexcept;
 
 private:
     void updateFolderModels() noexcept;
+    void fetchChat(qlonglong chatId) noexcept;
+
+    // The one chat currently being fetched by fetchChat(), so a fetch that succeeds
+    // without making the chat openable cannot bounce between here and openChat().
+    qlonglong m_fetchingChatId{0};
 
     std::shared_ptr<Client> m_client;
     std::shared_ptr<Locale> m_locale;

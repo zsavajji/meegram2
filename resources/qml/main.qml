@@ -49,20 +49,32 @@ PageStackWindow {
         banner.show()
     }
 
+    Connections {
+        target: chatManager
+
+        // A chat opened by id is not always cached yet - Saved Messages opens myId()
+        // directly, and a notification can be tapped before the chat list has loaded.
+        // ChatManager fetches it and reports back here rather than failing the open.
+        onChatAvailable: {
+            if (ok)
+                openChat(chatId)
+            else
+                showInfoBanner(qsTr("ErrorOccurred"))
+        }
+    }
+
     function openChat(chatId) {
+        // Push only if there is something to show. This used to push regardless, so a
+        // chat that could not be selected produced a page with chat, chatInfo and
+        // messageModel all undefined - a spinner that never resolved. A refusal means a
+        // fetch is under way; onChatAvailable comes back with the outcome.
+        if (!chatManager.openChat(chatId))
+            return;
+
         var component = Qt.createComponent("ChatPage.qml");
 
         if (component.status !== Component.Ready) {
             console.debug("Error loading component:", component.errorString());
-            return;
-        }
-
-        // Push only if there is something to show. This used to push regardless, so a
-        // chat that could not be selected produced a page with chat, chatInfo and
-        // messageModel all undefined - a spinner that never resolved.
-        if (!chatManager.openChat(chatId)) {
-            console.debug("openChat refused for", chatId);
-            showInfoBanner(qsTr("ErrorOccurred"));
             return;
         }
 
