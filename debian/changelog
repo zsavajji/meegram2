@@ -17,7 +17,7 @@ meegram (0.2.0) unstable; urgency=low
   * Fixed message deletion, which asked for a vector of several billion elements.
   * Fixed groups never loading history when they had never been opened.
 
- -- Chukwudi Nwutobo <nwutobo@outlook.com>  Sat, 25 Jul 2026 12:00:00 +0100
+ -- Andrea Faggin <blackbird5308@gmail.com>  Sat, 25 Jul 2026 12:00:00 +0100
 
 meegram (0.1.7) unstable; urgency=low
 
