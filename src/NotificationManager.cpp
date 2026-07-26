@@ -13,6 +13,7 @@
 #include <QDBusReply>
 #include <QDateTime>
 #include <QDebug>
+#include <QFileInfo>
 #include <QWidget>
 
 namespace {
@@ -198,23 +199,32 @@ void NotificationManager::handleChatUpdate(qlonglong chatId) noexcept
             body.prepend(sender + QLatin1String(": "));
     }
 
-    // The avatar. Two things had to be right at once, and getting one of them wrong
-    // hid the whole banner rather than just the picture:
+    // The avatar. A plain absolute path, not a file:// URL - MNotification::setImage()
+    // takes "a path to an image file or an icon id", and a URL draws the broken-image
+    // red square.
     //
-    // - It must be a file:// URL. A bare path is refused outright, and the refusal
-    //   takes the notification with it - which looked like "no notification from a
-    //   user, but one from a group", because the group had no avatar downloaded yet and
-    //   so sent no image at all.
-    // - TDLib fills localPath in as soon as a download *starts*, so the file is only
-    //   safe to hand over once it reports complete. Pointing the notification manager
-    //   at a half written file is what drew the broken red square.
+    // This was changed to file:// once on the reading that a bare path was refused and
+    // took the whole banner with it. That was wrong: the missing banners were
+    // notificationUserId() latching an early failure, which suppressed every
+    // notification for the session no matter what was in this field. The two symptoms
+    // overlapped and the image got the blame.
+    //
+    // Still gated on isDownloadingCompleted(): TDLib fills localPath in as soon as a
+    // download *starts*, and a half-written file draws the same red square.
     QString imagePath;
 
     if (auto *photo = chat->photo())
     {
         if (photo->isDownloadingCompleted())
         {
-            imagePath = QLatin1String("file://") + photo->localPath();
+            imagePath = photo->localPath();
+
+            // If the square survives the change of form, the next suspect is whether the
+            // process that draws the banner can read the file at all - it is not this
+            // one, and TDLib keeps its files under a private directory.
+            const QFileInfo info(imagePath);
+            qWarning() << "notification: avatar" << imagePath << "exists" << info.exists() << "readable" << info.isReadable() << "size"
+                       << info.size();
         }
         else if (photo->canBeDownloaded() && !photo->isDownloadingActive())
         {
@@ -232,7 +242,13 @@ void NotificationManager::publish(qlonglong chatId, const QString &summary, cons
 {
     const auto userId = notificationUserId();
     if (userId == 0)
+    {
+        // The last silent early return on this path. Everything else says why it stayed
+        // quiet, and this one being mute is how "no notifications at all, no explanation"
+        // stayed possible.
+        qWarning() << "notification: chat" << chatId << "not posted - no notification user id";
         return;
+    }
 
     // Tap-to-open is best effort: without it the banner still shows, it just does
     // nothing when touched. registerObject returns false for a path that is already
@@ -373,17 +389,28 @@ uint NotificationManager::notificationUserId() noexcept
     if (m_userIdResolved)
         return m_userId;
 
-    m_userIdResolved = true;
-
     const auto reply = callNotificationManager("notificationUserId", {});
 
     if (reply.type() == QDBusMessage::ErrorMessage)
     {
-        qWarning() << "notifications disabled, notificationUserId failed:" << reply.errorName() << reply.errorMessage();
+        qWarning() << "notification: notificationUserId failed:" << reply.errorName() << reply.errorMessage();
         return 0;
     }
 
-    m_userId = QDBusReply<uint>(reply).value();
+    const auto userId = QDBusReply<uint>(reply).value();
+
+    if (userId == 0)
+    {
+        qWarning() << "notification: notificationUserId returned 0";
+        return 0;
+    }
+
+    // Latched only on success. This used to set m_userIdResolved before making the call,
+    // so a single early failure - the notification daemon not being up yet when the first
+    // message arrives, which at startup it may well not be - disabled notifications for
+    // the rest of the session with nothing said after the first line.
+    m_userIdResolved = true;
+    m_userId = userId;
 
     return m_userId;
 }

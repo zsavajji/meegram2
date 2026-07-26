@@ -119,13 +119,80 @@ delegates whose real heights differ from `ListView`'s estimate for rows it has n
 which moves `contentHeight`, which repositions, and with a `cacheBuffer` rebuilding rows
 either side it never settles. Use a **bounded** retry.
 
-### Groups never load messages
+### QML1 corrupts `qlonglong` method arguments {#qlonglong}
 
-`loadMessages()` anchors on `lastReadInboxMessageId` with a **negative** offset to also
-pull in newer messages. A chat never opened has unread messages but that pointer is still
-`0`, and `from_message_id = 0` means "from the newest" — asking for messages newer than
-the newest is rejected. Private chats you have replied in always have a real anchor,
-which is why only groups broke.
+**The most expensive bug in this codebase's history.** It presented as "groups never
+open", survived four wrong diagnoses, and was only found by logging the same id on both
+sides of the call.
+
+```
+QML: "tap row 6 id=-1001383801308 type=4 title=Retro & Chill"
+QML: "openChat requested for -1001383801308"
+openChat: no chat in storage for id -1001383814072
+```
+
+```
+sent ffffff16d8dfce24
+got  ffffff16d8df9c48    ← top 48 bits intact, low 16 mangled
+```
+
+QtScript keeps a number that fits in **int32** as an immediate integer, so it marshals
+through `QVariant(int)` and arrives exactly. Anything larger is boxed as a **double** and
+converted with `QVariant(double).toLongLong()` — and that conversion arrives wrong. Every
+supergroup chat id and **every message id** (message ids are `id << 20`) is in the
+affected range; a private chat's id is a small positive user id and is not. That is the
+whole "groups are broken, private chats are fine" pattern, and it silently corrupted
+delete, edit and reply targets for as long as they have existed.
+
+**Ids cross the QML boundary as decimal strings.** See `toId()` in `src/Common.hpp`. A JS
+number passed to a `const QString &` parameter is converted by `QScriptValue::toString()`,
+which is exact, and `toLongLong()` parses it with integer arithmetic — no float anywhere,
+and no QML call site has to change. `main.cpp` carries a silent startup probe that fires
+only if `double → qlonglong` is broken in the compiler output rather than only in QML's
+marshalling; that would be a far wider problem than ids.
+
+::: warning Never add a `qlonglong` parameter to a `Q_INVOKABLE` or public slot
+It will work for every small id you test with and corrupt every large one.
+:::
+
+Two earlier diagnoses of "groups never load messages" were wrong but are worth keeping,
+because both described real bugs that were fixed on the way:
+
+- `loadMessages()` anchored on `lastReadInboxMessageId` with a **negative** offset. A
+  chat never opened has unread messages but that pointer is still `0`, and
+  `from_message_id = 0` means "from the newest" — asking for messages newer than the
+  newest is rejected.
+- `ChatManager::openChat` returned early and **silently** when the chat was not in
+  `StorageManager`, while `main.qml` pushed `ChatPage` regardless. That left a page whose
+  `chat`, `chatInfo` and `messageModel` were all undefined, so no `MessageModel` existed
+  to request history — which is why grepping the log for `getChatHistory` found nothing
+  and looked like the request was being rejected.
+
+### `Q_INVOKABLE` with a default argument
+
+moc emits a **cloned** metamethod for each default argument, so one name exists at two
+arities and QML1 has to resolve between them. `replaceEmoji(text, size = 0)` was added
+while one-argument calls were still live all over `MessageBubble`, and chat loading began
+segfaulting. Use two names instead — `replaceEmoji` and `replaceEmojiSized`.
+
+### A worker-thread callback outliving its object
+
+`Client::send`'s completion handler runs on the **TDLib worker thread**, and capturing a
+raw `this` is a use-after-free waiting for the object to be destroyed first. Leaving a
+chat destroys `MessageModel` while a `getChatHistory` request is almost always still in
+flight — segfault on chat exit. Capture a `shared_ptr<atomic_bool>` alongside and clear it
+in the destructor; `ChatModel` and `MessageModel` both do this now.
+
+This one stayed hidden until the [`qlonglong` fix](#qlonglong) made groups actually send
+history requests. A latent crash needs the code path to work before it can fire.
+
+### Destroying an object QML is still bound to
+
+`ChatManager::openChat`/`closeChat` replaced `m_messageModel` and `m_infoFormatter` by
+assignment, which destroys the previous ones **synchronously** — while `ChatPage`'s
+`ListView` still had the old model, and with `closeChat` running *during* page teardown
+when bindings are still firing. Release and `deleteLater()` instead, the same way
+`updateFolderModels()` hands over its old models.
 
 ### The download completes and nothing updates
 
@@ -172,6 +239,25 @@ export DISPLAY=:0
 An empty log then means the code path genuinely did not run, which is information. An
 empty syslog means nothing at all.
 
+### `debian/` changes have no effect on the package
+
+`dpkg-buildpackage` runs with `WORKING_DIRECTORY ${CMAKE_BINARY_DIR}`, so it reads
+`build-app/debian/`, not the source tree's. That directory was copied once at configure
+time behind an `if(NOT EXISTS)` guard, so a build tree kept the `debian/` of its
+first-ever configure forever — editing `debian/changelog` did nothing and the package
+kept coming out with the old version number. The `package` target now copies it on every
+run. The same staleness applied to `debian/meegram.aegis`, so credential changes were
+never in a package either.
+
+### A null `MessageContent` crashes the preview
+
+`Utils::getContent(MessageContent *, …)` casts and dereferences in every switch branch
+and had no null guard, while `Message::content()` genuinely can be null —
+`MessageModel::data` already tested for it. Reachable from the chat list's last-message
+preview and from reply previews. Guarded once in the shared function rather than at each
+caller. `Utils::getChatTitle` had the same hole: `StorageManager::chat()` returns null for
+a chat it does not hold, which a reply forwarded from an unloaded chat reaches.
+
 ### `qDebug` vanishes in release
 
 Non-debug builds define `QT_NO_DEBUG_OUTPUT`, so a failing TDLib request logged with
@@ -214,9 +300,10 @@ Confirmed against real artefacts:
   field accesses in `src/` exist in TDLib 1.8.66. Several signatures did change
   underneath (`sendMessage` gained `topic_id:MessageTopic`, `inputMessageText`
   replaced `disable_web_page_preview` with `link_preview_options`), but only in
-  fields this code never sets. The one genuinely stale call site,
-  `inputMessageReplyToMessage` in `src/MessageModel.cpp`, is commented out and will
-  need rewriting for the current signature if reply support is revived.
+  fields this code never sets. `inputMessageReplyToMessage` was the one genuinely stale
+  call site; it has since been rewritten for the current signature and replies work.
+- **`qlonglong` marshalling** — the [id corruption](#qlonglong) was confirmed on device by
+  logging the same value on both sides of one call, not inferred.
 
 ::: info Not yet validated end to end
  there is no CI in this repository, and the pipeline

@@ -14,8 +14,8 @@ Read this alongside [Architecture](/architecture) for how the pieces connect, an
 | Area | Works | Not implemented |
 |---|---|---|
 | Chats | list, folders, archive, pin, mute, mark read/unread, delete/leave | drafts, search, chat creation |
-| Messages | text with entities, replies, edit, copy, delete, read receipts | forward, search, pinned messages, reactions |
-| Media | photo receive + send, animated and static stickers | video, voice, documents, location |
+| Messages | text with entities, big emoji, replies, edit, copy, delete for me / for everyone, read receipts | forward, search, pinned messages, reactions |
+| Media | photo receive + send, full-screen view with pinch zoom, save to gallery, animated and static stickers | video, voice, documents, location |
 | Presence | typing indicators, online status, connection state | sending your own typing action |
 | System | notifications with avatar, tap-to-open, D-Bus activation | background operation while closed |
 
@@ -74,9 +74,45 @@ entities — bold, italic, code, links, mentions, hashtags — into HTML. Emoji 
 **Replies** show a quote block above the message: accent bar, sender, one elided line of
 preview. `Message::ReplyInfo` is plain data rather than a `QObject`, because the strings
 QML needs require a `StorageManager` and a `Locale` to produce, so `MessageModel`
-formats them into roles. TDLib only fills the origin fields when the replied-to message
-came from elsewhere; for an ordinary same-chat reply the model falls back to looking the
-message up among those it has loaded.
+formats them into roles.
+
+`messageReplyToMessage` only carries `origin` **and `content`** when the replied-to
+message came from another chat. For an ordinary same-chat reply both are null, which is
+why the quote block used to show a sender and no text at all. Both `replyToSender` and
+`replyToText` fall back to looking the message up among those the model has loaded.
+
+That fallback has a ceiling: a reply to a message too far back to have been loaded still
+resolves to nothing. It fails cleanly rather than blankly — each line only takes space
+when it has content, and with both empty the quote block hides itself and the bubble
+reads as an ordinary message. `getMessage` plus a `dataChanged` when it lands is the
+upgrade.
+
+Positioning the quote for an **outgoing** message needs the same treatment stickers do —
+see [the bubble layout note](#outgoing-content-is-not-right-aligned-for-free).
+
+### Outgoing content is not right-aligned for free
+
+The bubble is sided correctly by itself, but what goes **inside** it is positioned with
+`anchors.left` plus a margin. The text delegate gets away with `leftMargin: 80` because it
+spans the full width and sets `horizontalAlignment: AlignRight` — the *Label* starts at 80
+but the glyphs land against its right edge. Nothing else does that:
+
+- a **sticker** is only as wide as itself, so it sat at x=80, over on the incoming side,
+  while its bubble hugged the right edge
+- a **photo** survived by accident: `min(content.width, 380)` is usually exactly 380 in
+  portrait, which happens to fill the span. A narrow portrait shot was misplaced too.
+- a **reply quote** is an accent bar plus left-aligned labels, so it had the sticker's bug
+
+Fixed-size content computes its offset instead, which reproduces the text convention
+exactly — 16px of bubble padding on the left, 10px on the right, in both orientations:
+
+```qml
+leftMargin: model.isOutgoing ? listView.width - width - 20 : 20
+```
+
+The quote block derives its offset from the labels' `paintedWidth` rather than sizing the
+block to its content, because those labels anchor to the block's right edge — making its
+width depend on them is a binding loop. `leftMargin` feeds nothing, so it is safe.
 
 **Scroll behaviour** has three owners that hand off explicitly, so they cannot fight
 over `contentY`:
@@ -241,6 +277,23 @@ downscaled every one on every draw.
 filter and probes only key lengths that exist, so text with no emoji costs one indexed
 pass and returns the original string.
 
+**A message that is nothing but one to three emoji** draws them large, the way Telegram
+does: 32px for one, 24px each for two, 16px each for three, which keeps the line about as
+wide either way. `Utils::emojiOnlySize` returns that size or `0`, and bails at the first
+non-emoji character — so ordinary text pays almost nothing for the check. The table entry
+holds both the pre-formatted 24px tag and a pointer into the static `Emoji::emojis()`
+array, so off-default sizes format on demand without a second table.
+
+`replaceEmojiSized` is a separate name rather than a default argument on `replaceEmoji`,
+for the reason in [troubleshooting](./troubleshooting#q-invokable-with-a-default-argument).
+
+**A single emoji is not a text message.** TDLib reports it as `messageAnimatedEmoji`,
+which is why one on its own used to render as "unsupported". `MessageAnimatedEmoji`
+exposes the same `text`/`formattedText` as `MessageText` so the same delegate renders it,
+and `editMessage` treats it as text — it has no caption for `editMessageCaption` to edit.
+The animated sticker it also carries is ignored: it is a tgs meant to play at sticker
+size, and running rlottie for a 32px glyph buys nothing.
+
 ---
 
 ## Presence
@@ -276,14 +329,39 @@ what a phone wants over one banner per message.
 `x-nokia.messaging.im`.
 
 **Suppression** is a chain of one-liners: not outgoing, not a service message, not
-muted, not the chat on screen, not already read, and **not older than app start** —
-without that last one, launching after a busy night raises one banner per chat.
+muted, not the chat on screen *and* in the foreground, not already read, and **not older
+than app start** — without that last one, launching after a busy night raises one banner
+per chat.
 
-**The avatar** is only handed over once `isDownloadingCompleted()` — TDLib fills in the
-local path when a download *starts*, and pointing the notification manager at a
-half-written file draws a broken red square. It is a plain path, not a `file://` URL:
-`MNotification` takes an image id or a filesystem path. When no avatar has been
-downloaded yet the notification asks for one, so the next one from that chat has it.
+"On screen" needs the foreground test because this client is left running so
+notifications keep arriving, which means a chat can be open for days while the app sits
+in the switcher. `isVisible()` is no use — Harmattan renders a live thumbnail of a
+minimised app, so it stays visible; `isActiveWindow()` is what tracks attention. A banner
+raised while minimised for the chat you have open is withdrawn by the "already read"
+branch as soon as you return and the messages are marked read.
+
+Every gate logs why it stayed quiet, because "no banner" on its own carries no
+information and cost two builds of guessing. `publish()` treats a returned notification id
+of `0` as a rejection as well as an outright D-Bus error, so a daemon that accepts the
+call and quietly declines to post it still triggers the retry-without-image.
+
+**The avatar** is a **plain absolute path**, not a `file://` URL — `MNotification::setImage()`
+takes "a path to an image file or an icon id", and a URL draws the broken-image red
+square. It is only handed over once `isDownloadingCompleted()`, because TDLib fills in the
+local path when a download *starts* and a half-written file draws the same square.
+
+::: warning Two symptoms that overlapped
+This field was switched to `file://` once, on the reading that a bare path was refused and
+took the whole banner with it. That was wrong. The missing banners were
+`notificationUserId()` latching an early failure — one miss at startup, before the
+notification daemon was up, disabled notifications for the whole session no matter what
+this field contained. The image got the blame for a bug it had nothing to do with, and the
+red square went unfixed for three builds as a result.
+:::
+
+When no avatar has been downloaded yet the notification asks for one, so the next one from
+that chat has it — and `publish()` retries without the image on any rejection, because
+decoration must never cost you the message.
 
 **Tapping** raises the app and opens that chat. The chat id travels in the **D-Bus
 object path** (`/chat/n1001234567890`) rather than as an argument, because the action
