@@ -540,6 +540,13 @@ QString Utils::getContent(Message *message, std::shared_ptr<StorageManager> stor
 
 QString Utils::getContent(MessageContent *content, int contentType, bool isOutgoing, std::shared_ptr<Locale> locale) noexcept
 {
+    // Every branch below casts and dereferences this. A Message whose content did not
+    // parse has none - MessageModel::data already tests for that before using it - and
+    // an empty preview is the right outcome, not a crash. One guard here rather than at
+    // each caller, since they all funnel through this.
+    if (!content)
+        return {};
+
     auto formatCaption = [&](const QString &text) noexcept -> QString { return text.isEmpty() ? text : QLatin1String(": ") + text; };
 
     switch (contentType)
@@ -759,6 +766,12 @@ QString Utils::getServiceContent(Message *message, std::shared_ptr<StorageManage
 
 QString Utils::getChatTitle(std::shared_ptr<Chat> chat, std::shared_ptr<StorageManager> storage, bool showSavedMessages) noexcept
 {
+    // isMeChat guards this, chat->title() below did not. StorageManager::chat() returns
+    // null for a chat it does not hold, which a reply forwarded from somewhere unloaded
+    // reaches through replyToSender. HiddenName is already what an untitled chat shows.
+    if (!chat)
+        return QObject::tr("HiddenName");
+
     if (isMeChat(chat, storage) && showSavedMessages)
     {
         return QObject::tr("SavedMessages");

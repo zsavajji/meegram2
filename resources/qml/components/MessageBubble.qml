@@ -85,7 +85,11 @@ Item {
         id: replyBlock
 
         visible: model.replyToText !== "" || model.replyToSender !== ""
-        height: visible ? (replySender.visible ? replySender.height : 0) + replyText.height : 0
+        // Each line only takes space when it has something in it. A reply to a message
+        // too far back to have been loaded resolves to no preview text, and without this
+        // the quote block kept a blank line under the sender. Both empty and the block
+        // hides itself, so the bubble reads as an ordinary message.
+        height: visible ? (replySender.visible ? replySender.height : 0) + (replyText.visible ? replyText.height : 0) : 0
         width: parent.width - 100
 
         anchors {
@@ -124,6 +128,7 @@ Item {
             y: replySender.visible ? replySender.height : 0
             anchors { left: replyBar.right; leftMargin: 8; right: parent.right }
             text: model.replyToText
+            visible: text !== ""
             color: model.isOutgoing ? "white" : "#505050"
             opacity: model.isOutgoing ? 0.75 : 1.0
             font.pixelSize: 18
