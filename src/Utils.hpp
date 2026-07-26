@@ -27,9 +27,14 @@ public:
 
     Q_INVOKABLE static QString formatTime(int totalSeconds) noexcept;
 
-    // size is the pixel size for the substituted images; 0 means the default body-text
-    // size, which is what every caller but the message delegate wants.
-    Q_INVOKABLE static QString replaceEmoji(const QString &text, int size = 0) noexcept;
+    Q_INVOKABLE static QString replaceEmoji(const QString &text) noexcept;
+
+    // A separate name rather than a default argument on replaceEmoji. A Q_INVOKABLE with
+    // a default argument makes moc emit a cloned metamethod, so the same name exists at
+    // two arities and QML1 has to resolve between them; if it picks the two-argument
+    // entry for a one-argument call, the second slot in the argument array was never
+    // filled in. size <= 0 means the default body-text size.
+    Q_INVOKABLE static QString replaceEmojiSized(const QString &text, int size) noexcept;
 
     // The image size a message consisting of nothing but one to three emoji should be
     // drawn at, or 0 for anything else - pass straight to replaceEmoji(). Takes the
@@ -43,6 +48,10 @@ public:
 
     // QML1 has no Clipboard element, so the "Copy" message action goes through here.
     Q_INVOKABLE static void copyToClipboard(const QString &text) noexcept;
+
+    // Copies a downloaded file into the user's own storage so it survives TDLib
+    // clearing its cache and shows up in the Gallery. False if it could not be written.
+    Q_INVOKABLE static bool saveToGallery(const QString &localPath) noexcept;
 
     // The gallery hands out file:// URLs and TDLib wants a filesystem path. Goes
     // through QUrl rather than stripping the scheme, so percent-encoded characters

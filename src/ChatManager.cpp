@@ -311,6 +311,23 @@ QString ChatInfoFormatter::formatOfflineStatus() const noexcept
     return tr("LastSeenDateFormatted").arg(tr("formatDateAtTime").arg(wasOnline.toString(tr("formatterYear"))).arg(wasOnline.toString(tr("formatterDay12H"))));
 }
 
+namespace {
+
+// Hands an owned QObject to the event loop instead of destroying it here. QML re-reads
+// messageModel and chatInfo only once selectedChatChanged has been delivered, and a
+// ChatPage being torn down keeps evaluating its bindings for a moment after closeChat -
+// so the previous objects have to outlive the call that replaces them. Destroying them
+// inline left the page's ListView holding a freed model. Same reason
+// updateFolderModels() releases its old models rather than deleting them.
+template <typename T>
+void disposeLater(std::unique_ptr<T> &owner) noexcept
+{
+    if (auto *released = owner.release())
+        released->deleteLater();
+}
+
+}  // namespace
+
 ChatManager::ChatManager(std::shared_ptr<StorageManager> storageManager, std::shared_ptr<Locale> locale)
     : m_client(storageManager->client())
     , m_locale(std::move(locale))
@@ -381,23 +398,21 @@ bool ChatManager::openChat(qlonglong chatId) noexcept
         // by id that TDLib has not pushed yet lands here - Saved Messages, which opens
         // myId() directly, and a notification tapped before the chat list has loaded.
         // Fetch it instead of giving up; getChat makes TDLib push updateNewChat.
-        // The whole set, not a count: the question is whether the requested id is one of
-        // these at all. If it is nowhere near any of them the value is wrong rather than
-        // missing, and if it sits a few thousand away from a real one the ids are being
-        // corrupted somewhere between the model row and here.
-        auto ids = m_storage->chatIds();
-        std::ranges::sort(ids);
+        // The nearest stored id rather than the whole list: dumping 150 of them produced
+        // a line long enough that the log transport dropped characters from it, which
+        // showed up as ids running together and as ids below TDLib's -1999999999999
+        // floor. One number says the same thing and survives the trip.
+        const auto ids = m_storage->chatIds();
 
-        QStringList groups;
+        qlonglong nearest = 0;
         for (const auto id : ids)
         {
-            if (id < 0)
-                groups.append(QString::number(id));
+            if (nearest == 0 || qAbs(id - chatId) < qAbs(nearest - chatId))
+                nearest = id;
         }
 
-        qWarning() << "openChat: no chat in storage for id" << chatId << "- storage holds" << ids.size() << "chats," << groups.size()
-                   << "of them groups";
-        qWarning() << "openChat: stored group ids:" << groups.join(QLatin1String(" "));
+        qWarning() << "openChat: no chat in storage for id" << chatId << "- storage holds" << ids.size()
+                   << "chats; nearest stored id is" << nearest << "off by" << (nearest - chatId);
 
         fetchChat(chatId);
         return false;
@@ -413,6 +428,10 @@ bool ChatManager::openChat(qlonglong chatId) noexcept
     m_client->send(td::td_api::make_object<td::td_api::openChat>(chatId));
 
     m_selectedChat = std::move(chat);
+
+    // Before the new ones are built, and not by letting the assignment destroy them.
+    disposeLater(m_messageModel);
+    disposeLater(m_infoFormatter);
 
     m_messageModel = std::make_unique<MessageModel>(m_selectedChat, m_locale, m_storage);
     m_infoFormatter = std::make_unique<ChatInfoFormatter>(m_selectedChat, m_locale, m_storage);
@@ -464,8 +483,12 @@ void ChatManager::closeChat(qlonglong chatId) noexcept
 {
     m_client->send(td::td_api::make_object<td::td_api::closeChat>(chatId));
 
-    m_infoFormatter = nullptr;
-    m_messageModel = nullptr;
+    // This runs while ChatPage is being popped, so its bindings can still fire against
+    // both of these. Destroying them here is what a segfault on leaving a chat looks
+    // like.
+    disposeLater(m_infoFormatter);
+    disposeLater(m_messageModel);
+
     m_selectedChat = nullptr;
 
     emit activeChatChanged(0);

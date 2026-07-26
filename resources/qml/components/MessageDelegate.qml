@@ -36,7 +36,7 @@ Item {
                 // does. 0 for everything else, which is the normal body size.
                 property int emojiSize: utils.emojiOnlySize(model.content.text)
 
-                text: utils.replaceEmoji(model.content.formattedText, emojiSize)
+                text: utils.replaceEmojiSized(model.content.formattedText, emojiSize)
                 textFormat: Text.RichText
                 color: model.isOutgoing ? "white" : "black"
                 width: isPortrait ? 380 : 754
@@ -56,7 +56,19 @@ Item {
         id: photoMessageComponent
 
         MessageBubble {
-            onPressAndHold: menuTarget.open(model.id, model.sender, model.content.caption, model.isOutgoing)
+            // ponytail: opens the size that was downloaded for the bubble, which only
+            // has to cover 480px - so 4x zoom is soft. Keeping the largest photoSize's
+            // file in MessagePhoto and fetching it here is the upgrade.
+            onClicked: {
+                if (model.content.file && model.content.file.isDownloadingCompleted)
+                    appWindow.openPhoto(model.content.file.localPath)
+            }
+
+            // isDownloadingCompleted, not localPath: TDLib fills the path in when the
+            // download starts, so the path alone would offer Save on a partial file.
+            onPressAndHold: menuTarget.open(model.id, model.sender, model.content.caption, model.isOutgoing,
+                                           model.content.file && model.content.file.isDownloadingCompleted
+                                               ? model.content.file.localPath : "")
 
             childrenWidth: photoColumn.width
 
