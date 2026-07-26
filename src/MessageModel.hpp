@@ -5,6 +5,7 @@
 #include <QAbstractListModel>
 #include <QTimer>
 
+#include <atomic>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
@@ -27,6 +28,7 @@ class MessageModel : public QAbstractListModel
 
 public:
     explicit MessageModel(std::shared_ptr<Chat> chat, std::shared_ptr<Locale> locale, std::shared_ptr<StorageManager> storage);
+    ~MessageModel() override;
 
     enum Role {
         IdRole = Qt::UserRole + 1,
@@ -133,6 +135,12 @@ private:
     std::shared_ptr<Client> m_client;
     std::shared_ptr<Locale> m_locale;
     std::shared_ptr<StorageManager> m_storage;
+
+    // Cleared by the destructor so the getChatHistory callback, which runs on the TDLib
+    // worker thread and captured a raw this, knows the model is gone. Leaving a chat
+    // while a history request was in flight was a use-after-free. Same guard and same
+    // reason as ChatModel's.
+    std::shared_ptr<std::atomic_bool> m_alive{std::make_shared<std::atomic_bool>(true)};
 
     std::shared_ptr<Chat> m_chat;
 

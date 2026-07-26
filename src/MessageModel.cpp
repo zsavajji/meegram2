@@ -36,6 +36,12 @@ MessageModel::MessageModel(std::shared_ptr<Chat> chat, std::shared_ptr<Locale> l
     loadMessages();
 }
 
+MessageModel::~MessageModel()
+{
+    // Tell any in-flight getChatHistory callback not to touch this object.
+    m_alive->store(false);
+}
+
 int MessageModel::rowCount(const QModelIndex &parent) const
 {
     if (parent.isValid())
@@ -273,7 +279,13 @@ void MessageModel::requestHistory(qlonglong fromMessageId, int offset, int limit
     // reading either needs the binary run directly, since invoker discards stderr.
     qWarning() << "getChatHistory ->" << "chat" << m_chat->id() << "from" << fromMessageId << "offset" << offset << "limit" << limit;
 
-    m_client->send(std::move(request), [this, fetchPrevious](auto &&response) {
+    m_client->send(std::move(request), [this, fetchPrevious, alive = m_alive](auto &&response) {
+        // Runs on the TDLib worker thread, and the model may already be gone: leaving a
+        // chat destroys it, and a history request is usually still outstanding when you
+        // do. Everything below touches members or emits, so bail before any of it.
+        if (!alive->load())
+            return;
+
         auto cleanupFlags = [this]() {
             if (m_loading)
             {

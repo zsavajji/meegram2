@@ -58,6 +58,23 @@ QString remoteAction(qlonglong chatId)
            QLatin1Char(' ') + QLatin1String(ActionMethod);
 }
 
+// Whether the user is actually looking at the app.
+//
+// isVisible() is no use here: Harmattan keeps a minimised application visible - the task
+// switcher renders a live thumbnail of it - and this client is expected to stay running
+// precisely so notifications keep arriving. Activation is the thing that tracks whether
+// the window has the user's attention.
+bool isForeground()
+{
+    for (auto *widget : QApplication::topLevelWidgets())
+    {
+        if (widget->isActiveWindow())
+            return true;
+    }
+
+    return false;
+}
+
 // Blocking, because addNotification returns the id needed to update or remove it
 // later. Short timeout so a wedged notification daemon cannot freeze the UI for the
 // 25 seconds QtDBus would otherwise wait.
@@ -126,9 +143,13 @@ void NotificationManager::handleChatUpdate(qlonglong chatId) noexcept
 
     // Was tested before the storage lookup. Order does not matter, and grouping the
     // logged decisions together is worth more than saving one hash lookup.
-    if (chatId == m_activeChatId)
+    //
+    // Open is not enough on its own: this client is left running so notifications keep
+    // arriving, so a chat can be "open" for days while the app sits in the switcher.
+    // Only stay quiet when the chat is open *and* on screen.
+    if (chatId == m_activeChatId && isForeground())
     {
-        skip("the chat is open");
+        skip("the chat is open in the foreground");
         return;
     }
 
