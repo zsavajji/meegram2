@@ -36,6 +36,11 @@ public:
     // plain text, not the formatted one, or the markup would count as non-emoji.
     Q_INVOKABLE static int emojiOnlySize(const QString &text) noexcept;
 
+    // console.debug goes through qDebug, which QT_NO_DEBUG_OUTPUT compiles out of a
+    // release build - so QML has no way to say anything that survives to the device log.
+    // This uses qWarning, which does.
+    Q_INVOKABLE static void log(const QString &message) noexcept;
+
     // QML1 has no Clipboard element, so the "Copy" message action goes through here.
     Q_INVOKABLE static void copyToClipboard(const QString &text) noexcept;
 

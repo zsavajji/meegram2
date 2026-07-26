@@ -405,6 +405,11 @@ int Utils::emojiOnlySize(const QString &text) noexcept
     }
 }
 
+void Utils::log(const QString &message) noexcept
+{
+    qWarning() << "QML:" << message;
+}
+
 void Utils::copyToClipboard(const QString &text) noexcept
 {
     QApplication::clipboard()->setText(text);

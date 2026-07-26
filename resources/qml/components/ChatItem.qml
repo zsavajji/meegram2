@@ -177,6 +177,11 @@ Item {
         anchors.fill: parent
 
         onClicked: {
+            // Diagnostic: what the row actually holds, before the hop into C++. If this
+            // id differs from the one openChat reports, the value is being mangled on
+            // the way across; if it matches and storage still does not have it, the row
+            // and the store disagree.
+            utils.log("tap row " + index + " id=" + model.id + " type=" + model.type + " title=" + model.title)
             appWindow.openChat(model.id)
         }
         // menuTarget lives in ChatListView.qml and resolves through the delegate's
