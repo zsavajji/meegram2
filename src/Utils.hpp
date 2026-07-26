@@ -27,7 +27,14 @@ public:
 
     Q_INVOKABLE static QString formatTime(int totalSeconds) noexcept;
 
-    Q_INVOKABLE static QString replaceEmoji(const QString &text) noexcept;
+    // size is the pixel size for the substituted images; 0 means the default body-text
+    // size, which is what every caller but the message delegate wants.
+    Q_INVOKABLE static QString replaceEmoji(const QString &text, int size = 0) noexcept;
+
+    // The image size a message consisting of nothing but one to three emoji should be
+    // drawn at, or 0 for anything else - pass straight to replaceEmoji(). Takes the
+    // plain text, not the formatted one, or the markup would count as non-emoji.
+    Q_INVOKABLE static int emojiOnlySize(const QString &text) noexcept;
 
     // QML1 has no Clipboard element, so the "Copy" message action goes through here.
     Q_INVOKABLE static void copyToClipboard(const QString &text) noexcept;

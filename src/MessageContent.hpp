@@ -230,12 +230,27 @@ public:
     explicit MessageContact(td::td_api::object_ptr<td::td_api::messageContact> content, QObject *parent = nullptr);
 };
 
+// TDLib turns a message that is a single emoji into this rather than messageText, so
+// it needs handling or an emoji on its own reads as an unsupported message. The
+// animated sticker it also carries is ignored: it is a tgs meant to play at sticker
+// size, and there is nothing to gain from running rlottie for a 32px glyph.
+//
+// text/formattedText deliberately mirror MessageText, so the same delegate renders
+// both and there is no second copy of the bubble to keep in step.
 class MessageAnimatedEmoji : public QObject, public MessageContent
 {
     Q_OBJECT
+    Q_PROPERTY(QString text READ text CONSTANT)
+    Q_PROPERTY(QString formattedText READ formattedText CONSTANT)
 
 public:
     explicit MessageAnimatedEmoji(td::td_api::object_ptr<td::td_api::messageAnimatedEmoji> content, QObject *parent = nullptr);
+
+    QString text() const;
+    QString formattedText() const;
+
+private:
+    QString m_emoji;
 };
 
 class MessagePoll : public QObject, public MessageContent

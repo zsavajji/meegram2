@@ -199,10 +199,6 @@ if (BUILD_HARMATTAN)
 
     target_link_libraries(meegram PRIVATE ${boostable_LIBRARIES} $<$<BOOL:${SANITIZE_ADDRESS}>:-static-libasan> -static-libstdc++)
 
-    if(NOT EXISTS "${CMAKE_BINARY_DIR}/debian")
-        file(COPY ${CMAKE_SOURCE_DIR}/debian DESTINATION ${CMAKE_BINARY_DIR})
-    endif()
-
     # CMake rewrites RPATH on install and, by default, drops everything - the
     # -Wl,-rpath above only applies to the binary in the build tree. Without this the
     # installed binary has no RPATH at all and cannot find the libraries below.
@@ -246,7 +242,13 @@ if (BUILD_HARMATTAN)
                 PATTERN "libssl.so.*"
                 PATTERN "libcrypto.so.*")
 
+    # dpkg-buildpackage reads debian/ from the build directory, so it has to be copied
+    # there - and copied on every run. This used to be a configure-time file(COPY)
+    # guarded by "if not exists", which meant the build tree kept the debian/ of its
+    # first-ever configure forever: editing debian/changelog had no effect and the
+    # package kept coming out with the old version number.
     add_custom_target(package
+        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/debian ${CMAKE_BINARY_DIR}/debian
         COMMAND mad dpkg-buildpackage -nc -uc -us
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Building Debian package with mad..."

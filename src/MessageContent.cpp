@@ -296,7 +296,18 @@ MessageContact::MessageContact(td::td_api::object_ptr<td::td_api::messageContact
 MessageAnimatedEmoji::MessageAnimatedEmoji(td::td_api::object_ptr<td::td_api::messageAnimatedEmoji> content, QObject *parent)
     : QObject(parent)
 {
-    Q_UNUSED(content)
+    m_emoji = QString::fromStdString(content->emoji_);
+}
+
+QString MessageAnimatedEmoji::text() const
+{
+    return m_emoji;
+}
+
+QString MessageAnimatedEmoji::formattedText() const
+{
+    // A bare emoji carries no entities, so there is nothing to format.
+    return m_emoji;
 }
 
 MessagePoll::MessagePoll(td::td_api::object_ptr<td::td_api::messagePoll> content, QObject *parent)

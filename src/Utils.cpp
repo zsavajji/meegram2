@@ -24,14 +24,34 @@
 
 namespace {
 
-// constexpr int EmojiSize18 = 18;
+constexpr int EmojiSize16 = 16;
 constexpr int EmojiSize24 = 24;
-// constexpr int EmojiSize32 = 32;
-// constexpr int EmojiSize48 = 48;
+constexpr int EmojiSize32 = 32;
+
+// Telegram draws a message that is nothing but a few emoji larger than body text.
+// The assets are 32px, so one emoji gets the full size and each extra one steps down,
+// which keeps the whole line about as wide either way: 32, 2x24, 3x16.
+constexpr int MaxBigEmoji = 3;
+
+QString emojiTag(const QString &filename, int size) noexcept
+{
+    return QString("<img src=\":/emoji/%1\" width=\"%2\" height=\"%2\">").arg(filename, QString::number(size));
+}
+
+struct EmojiEntry
+{
+    // Formatted once at build time for the size nearly every call wants - titles,
+    // previews, message bodies. That prebuild is the whole point of this table.
+    QString tag;
+
+    // For the rare call that asks for another size. Points into Emoji::emojis(),
+    // a static array, so it stays valid for the life of the process.
+    const Emoji *emoji;
+};
 
 struct EmojiTable
 {
-    std::unordered_map<QString, QString> map;
+    std::unordered_map<QString, EmojiEntry> map;
 
     // Distinct key lengths, longest first. Probing only lengths that actually
     // exist keeps the per-position work to a handful of lookups.
@@ -64,8 +84,7 @@ const EmojiTable &emojiTable()
             lengths.insert(unicode.size());
             t.canStart[unicode.at(0).unicode() >> 8] = true;
 
-            t.map.emplace(std::move(unicode),
-                          QString("<img src=\":/emoji/%1\" width=\"%2\" height=\"%2\">").arg(emoji.filename(), QString::number(EmojiSize24)));
+            t.map.emplace(std::move(unicode), EmojiEntry{emojiTag(emoji.filename(), EmojiSize24), &emoji});
         }
 
         t.keyLengthsDesc.assign(lengths.rbegin(), lengths.rend());
@@ -252,11 +271,14 @@ QString Utils::formatTime(int totalSeconds) noexcept
     return result;
 }
 
-QString Utils::replaceEmoji(const QString &text) noexcept
+QString Utils::replaceEmoji(const QString &text, int size) noexcept
 {
     MEEGRAM_SCOPE("Utils::replaceEmoji");
 
     const auto &table = emojiTable();
+
+    if (size <= 0)
+        size = EmojiSize24;
 
     // Fast path: the overwhelming majority of chat titles and messages contain no
     // emoji at all. One array index per code unit, and we hand back the original
@@ -297,7 +319,7 @@ QString Utils::replaceEmoji(const QString &text) noexcept
                 if (const auto it = table.map.find(text.mid(i, length)); it != table.map.end())
                 {
                     result.append(text.midRef(lastPos, i - lastPos));
-                    result.append(it->second);
+                    result.append(size == EmojiSize24 ? it->second.tag : emojiTag(it->second.emoji->filename(), size));
 
                     i += length;
                     lastPos = i;
@@ -316,6 +338,71 @@ QString Utils::replaceEmoji(const QString &text) noexcept
     result.append(text.midRef(lastPos));
 
     return result;
+}
+
+int Utils::emojiOnlySize(const QString &text) noexcept
+{
+    MEEGRAM_SCOPE("Utils::emojiOnlySize");
+
+    const auto &table = emojiTable();
+
+    int count = 0;
+    int i = 0;
+
+    while (i < text.size())
+    {
+        // "hi 😀" is an ordinary message; "😀 😀" is not, so spacing between the
+        // emoji is allowed but nothing else is.
+        if (text.at(i).isSpace())
+        {
+            ++i;
+            continue;
+        }
+
+        int matched = 0;
+
+        if (table.canStart[text.at(i).unicode() >> 8])
+        {
+            const int remaining = text.size() - i;
+
+            // Longest match first, same as replaceEmoji, so a keycap sequence is one
+            // emoji rather than its base character plus leftovers.
+            for (const int length : table.keyLengthsDesc)
+            {
+                if (length > remaining)
+                    continue;
+
+                if (table.map.find(text.mid(i, length)) != table.map.end())
+                {
+                    matched = length;
+                    break;
+                }
+            }
+        }
+
+        // One non-emoji character is enough to make this a normal message. Bailing
+        // here is also what keeps this cheap for ordinary text: it stops at the
+        // first letter rather than scanning the whole body.
+        if (matched == 0)
+            return 0;
+
+        if (++count > MaxBigEmoji)
+            return 0;
+
+        i += matched;
+    }
+
+    switch (count)
+    {
+        case 1:
+            return EmojiSize32;
+        case 2:
+            return EmojiSize24;
+        case 3:
+            return EmojiSize16;
+        default:
+            return 0;  // no emoji at all, so nothing to enlarge
+    }
 }
 
 void Utils::copyToClipboard(const QString &text) noexcept
@@ -475,7 +562,10 @@ QString Utils::getContent(MessageContent *content, int contentType, bool isOutgo
             return tr("AttachContact");
         }
         case td::td_api::messageAnimatedEmoji::ID: {
-            return tr("AttachSticker");
+            // The emoji itself, not the word "Sticker" - this is a one-emoji text
+            // message, and the list has room to show what was actually said.
+            auto animatedEmoji = static_cast<MessageAnimatedEmoji *>(content);
+            return animatedEmoji->text();
         }
         case td::td_api::messageGame::ID: {
             return tr("AttachGame");

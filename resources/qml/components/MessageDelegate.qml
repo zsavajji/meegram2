@@ -31,7 +31,12 @@ Item {
 
             content: Label {
                 id: messageText
-                text: utils.replaceEmoji(model.content.formattedText)
+
+                // Nothing but one to three emoji draws them large, the way Telegram
+                // does. 0 for everything else, which is the normal body size.
+                property int emojiSize: utils.emojiOnlySize(model.content.text)
+
+                text: utils.replaceEmoji(model.content.formattedText, emojiSize)
                 textFormat: Text.RichText
                 color: model.isOutgoing ? "white" : "black"
                 width: isPortrait ? 380 : 754
@@ -270,6 +275,10 @@ Item {
         function get(contentType) {
             switch (contentType) {
             case "messageText":
+            // TDLib sends a lone emoji as messageAnimatedEmoji, not messageText.
+            // MessageAnimatedEmoji exposes the same text/formattedText, so the text
+            // bubble renders it and emojiOnlySize gives it the large size.
+            case "messageAnimatedEmoji":
                 return textMessageComponent;
             case "messagePhoto":
                 return photoMessageComponent;

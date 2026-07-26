@@ -476,8 +476,11 @@ void MessageModel::editMessage(qlonglong messageId, const QString &text) noexcep
 
     // A photo's text is its caption, and TDLib rejects editMessageText for anything
     // that is not a text message - so the menu's Edit entry would have looked like it
-    // worked and done nothing.
-    if (it != m_messageMap.end() && it->second->contentType() != td::td_api::messageText::ID)
+    // worked and done nothing. messageAnimatedEmoji counts as text: it is a one-emoji
+    // text message that TDLib reports under another content type, and it has no caption
+    // for editMessageCaption to edit.
+    if (it != m_messageMap.end() && it->second->contentType() != td::td_api::messageText::ID &&
+        it->second->contentType() != td::td_api::messageAnimatedEmoji::ID)
     {
         auto request = td::td_api::make_object<td::td_api::editMessageCaption>();
 
