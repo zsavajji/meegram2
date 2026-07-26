@@ -727,5 +727,12 @@ Page {
         }
     }
 
-    Component.onDestruction: { chatManager.closeChat(chat.id) }
+    // Runs on app shutdown as well as on leaving the page, and by then appWindow's
+    // properties can already be gone - chatManager reads back null and this threw.
+    // Nothing needs closing at that point: the process is going away and TDLib drops an
+    // open chat with the connection.
+    Component.onDestruction: {
+        if (chatManager && chat)
+            chatManager.closeChat(chat.id)
+    }
 }
