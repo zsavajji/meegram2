@@ -43,7 +43,20 @@ signals:
     void chatFoldersUpdated();
     void basicGroupUpdated(qlonglong groupId);
     void basicGroupFullInfoUpdated(qlonglong groupId);
+    // Any change at all to a chat object, including the chat merely arriving in the
+    // store. Fired from eleven different updates, so it means "look again", not
+    // "something happened" - see chatLastMessageChanged before wiring anything that
+    // has a side effect the user can see.
     void chatUpdated(qlonglong chatId);
+
+    // The chat's last message actually changed. The narrow signal behind chatUpdated,
+    // for the one case where acting on a plain chatUpdated is wrong: updateNewChat
+    // carries a fully populated last_message_, so a chat merely being delivered - which
+    // is what scrolling the list does, in batches - is indistinguishable from a message
+    // arriving in it. Notifications went out for chats the user had only just scrolled
+    // into view before this existed.
+    void chatLastMessageChanged(qlonglong chatId);
+
     void chatPositionUpdated(qlonglong chatId);
     void fileUpdated(int fileId);
     void supergroupUpdated(qlonglong groupId);

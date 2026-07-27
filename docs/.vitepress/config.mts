@@ -15,6 +15,7 @@ export default defineConfig({
     nav: [
       { text: 'Features', link: '/features' },
       { text: 'Architecture', link: '/architecture' },
+      { text: 'Restructuring', link: '/restructuring' },
       { text: 'Building', link: '/building' },
       { text: 'Troubleshooting', link: '/troubleshooting' },
       {
@@ -52,11 +53,27 @@ export default defineConfig({
           { text: 'The shape of it', link: '/architecture#the-shape-of-it' },
           { text: 'Ownership', link: '/architecture#ownership' },
           { text: 'Data flow', link: '/architecture#data-flow-one-incoming-message' },
+          { text: 'Data flow: notifications', link: '/architecture#data-flow-one-notification' },
           { text: 'StorageManager', link: '/architecture#storagemanager-the-hub' },
           { text: 'C++/QML boundary', link: '/architecture#the-c-qml-boundary' },
+          { text: 'Ids across the boundary', link: '/architecture#ids-cross-the-boundary-as-decimal-strings-in-both-directions' },
           { text: 'Threading', link: '/architecture#threading' },
+          { text: 'Client: the only door', link: '/architecture#client-is-the-only-door-to-tdlib' },
           { text: 'Component reference', link: '/architecture#component-reference' },
           { text: 'What the graph showed', link: '/architecture#what-the-knowledge-graph-showed' },
+        ],
+      },
+      {
+        text: 'Restructuring',
+        collapsed: true,
+        items: [
+          { text: 'What the socket costs', link: '/restructuring#what-the-socket-actually-costs' },
+          { text: 'Where the split goes', link: '/restructuring#why-the-split-goes-below-storagemanager-not-around-it' },
+          { text: 'The wire format', link: '/restructuring#the-hard-part-the-wire-format' },
+          { text: 'What relocates', link: '/restructuring#what-genuinely-relocates' },
+          { text: 'Sequencing', link: '/restructuring#sequencing' },
+          { text: 'The cheap alternative', link: '/restructuring#the-cheap-alternative-for-comparison' },
+          { text: 'Open questions', link: '/restructuring#open-questions' },
         ],
       },
       {

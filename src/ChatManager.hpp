@@ -112,7 +112,9 @@ signals:
 
     // A chat that openChat() refused has finished being fetched. ok says whether it can
     // be opened now; the caller retries openChat() or reports the failure.
-    void chatAvailable(qlonglong chatId, bool ok);
+    // chatId is a decimal string: main.qml feeds it straight back into openChat(), and
+    // every Q_INVOKABLE on this class already takes ids that way. No C++ listener.
+    void chatAvailable(const QString &chatId, bool ok);
 
     // The chat the user is looking at, or 0 when none. Drives notification
     // suppression; separate from selectedChatChanged because that one carries no id

@@ -21,14 +21,15 @@ class Chat : public QObject
     Q_PROPERTY(Message *lastMessage READ lastMessage NOTIFY chatChanged)
     Q_PROPERTY(bool isMarkedAsUnread READ isMarkedAsUnread NOTIFY chatChanged)
     Q_PROPERTY(int unreadCount READ unreadCount NOTIFY chatChanged)
-    Q_PROPERTY(qlonglong lastReadInboxMessageId READ lastReadInboxMessageId NOTIFY chatChanged)
-    Q_PROPERTY(qlonglong lastReadOutboxMessageId READ lastReadOutboxMessageId NOTIFY chatChanged)
     Q_PROPERTY(int unreadMentionCount READ unreadMentionCount NOTIFY chatChanged)
 
     Q_PROPERTY(int muteFor READ muteFor NOTIFY chatChanged)
     Q_PROPERTY(bool isMuted READ isMuted NOTIFY chatChanged)
 
-    Q_PROPERTY(qlonglong typeId READ typeId NOTIFY chatChanged)
+    // lastReadInboxMessageId, lastReadOutboxMessageId and typeId are deliberately not
+    // Q_PROPERTY: they are qlonglong and read only from C++. A qlonglong reaching QML1
+    // has to land in a `property variant` or it comes back corrupted, so the ones that
+    // do cross are kept to id alone. Add the getter to a caller, not a property here.
 
     Q_ENUMS(Type)
 public:

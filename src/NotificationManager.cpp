@@ -114,7 +114,11 @@ NotificationManager::NotificationManager(std::shared_ptr<StorageManager> storage
 {
     // chatUpdated already covers updateChatLastMessage, so this needs no subscriber of
     // its own on the raw update stream.
+    // Two signals, two jobs. chatUpdated is the broad one - it fires when a chat merely
+    // arrives in the store, which a scroll of the chat list does in batches - so it may
+    // only take banners down. Raising one needs the narrow signal.
     connect(m_storageManager.get(), SIGNAL(chatUpdated(qlonglong)), SLOT(handleChatUpdate(qlonglong)));
+    connect(m_storageManager.get(), SIGNAL(chatLastMessageChanged(qlonglong)), SLOT(handleNewMessage(qlonglong)));
 }
 
 void NotificationManager::setActiveChat(qlonglong chatId) noexcept
@@ -126,6 +130,16 @@ void NotificationManager::setActiveChat(qlonglong chatId) noexcept
 }
 
 void NotificationManager::handleChatUpdate(qlonglong chatId) noexcept
+{
+    evaluateChat(chatId, false);
+}
+
+void NotificationManager::handleNewMessage(qlonglong chatId) noexcept
+{
+    evaluateChat(chatId, true);
+}
+
+void NotificationManager::evaluateChat(qlonglong chatId, bool mayPublish) noexcept
 {
     const auto chat = m_storageManager->chat(chatId);
     if (!chat)
@@ -155,6 +169,31 @@ void NotificationManager::handleChatUpdate(qlonglong chatId) noexcept
         return;
     }
 
+    // Everything past here can only raise a banner, so a plain chat update stops.
+    // Without this a scroll of the chat list notifies: updateNewChat arrives with
+    // last_message_ already filled in, and a chat being delivered to the store for the
+    // first time looks exactly like a message landing in it.
+    if (!mayPublish)
+        return;
+
+    // Being in the store is not being subscribed. TDLib admits a chat the moment it is
+    // referenced anywhere - the origin of a forward, a search hit, the sender of a
+    // message in a group someone else is in - and keeps sending updates for it. None of
+    // that means the user follows it. Membership of a list lives in positions_, which
+    // stays empty for a chat that only exists in the store, and setPositions() has
+    // already run for this update by the time we get here.
+    if (chat->positions().empty())
+    {
+        qWarning() << "notification: chat" << chatId << "skipped - in the store but not in any chat list";
+        return;
+    }
+
+    // Never step backwards. Unlike m_notifiedMessageId this survives a withdraw, so a
+    // re-delivered or out-of-order update cannot raise a banner for a message this chat
+    // has already notified past.
+    if (message->id() <= m_highWaterMessageId.value(chatId, 0))
+        return;
+
     if (m_notifiedMessageId.value(chatId) == message->id())
         return;
 
@@ -181,6 +220,7 @@ void NotificationManager::handleChatUpdate(qlonglong chatId) noexcept
     }
 
     m_notifiedMessageId.insert(chatId, message->id());
+    m_highWaterMessageId.insert(chatId, message->id());
 
     auto body = Utils::getContent(message, m_storageManager, m_locale);
 
@@ -318,7 +358,7 @@ void NotificationManager::activate()
 
     withdraw(chatId);
 
-    emit chatRequested(chatId);
+    emit chatRequested(QString::number(chatId));
 }
 
 void NotificationManager::requestPhotoDownload(int fileId) noexcept
@@ -331,14 +371,22 @@ void NotificationManager::requestPhotoDownload(int fileId) noexcept
 
 bool NotificationManager::registerService() noexcept
 {
-    if (m_serviceAttempted)
-        return m_serviceRegistered;
+    if (m_serviceRegistered)
+        return true;
 
-    m_serviceAttempted = true;
     m_serviceRegistered = QDBusConnection::sessionBus().registerService(QLatin1String(ServiceName));
 
+    // Latched only on success, for the same reason as notificationUserId(): the session
+    // bus may not have the name available when the first message arrives, and a single
+    // early failure used to disable tap-to-open for the rest of the session. Retried on
+    // every publish now, but the warning stays a one-off - this runs per notification.
     if (!m_serviceRegistered)
-        qWarning() << "tap-to-open disabled, could not register" << ServiceName;
+    {
+        if (!m_serviceWarned)
+            qWarning() << "tap-to-open disabled, could not register" << ServiceName;
+
+        m_serviceWarned = true;
+    }
 
     return m_serviceRegistered;
 }

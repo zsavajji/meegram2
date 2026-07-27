@@ -11,8 +11,7 @@ class Message : public QObject
     Q_OBJECT
 
     Q_PROPERTY(qlonglong id READ id CONSTANT)
-    Q_PROPERTY(qlonglong chatId READ chatId CONSTANT)
-    Q_PROPERTY(qlonglong senderId READ senderId CONSTANT)
+    // chatId and senderId are deliberately not Q_PROPERTY - see the note in Chat.hpp.
     Q_PROPERTY(bool isOutgoing READ isOutgoing CONSTANT)
     Q_PROPERTY(QDateTime date READ date CONSTANT)
     Q_PROPERTY(QDateTime editDate READ editDate NOTIFY messageChanged)

@@ -478,7 +478,7 @@ void ChatManager::handleChatFetched(qlonglong chatId, bool ok) noexcept
     if (!ok)
         m_fetchingChatId = 0;  // a network failure should not block a later attempt
 
-    emit chatAvailable(chatId, ok);
+    emit chatAvailable(QString::number(chatId), ok);
 }
 
 void ChatManager::closeChat(const QString &rawChatId) noexcept

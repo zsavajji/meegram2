@@ -425,7 +425,7 @@ void AppManager::handleAuthorizationState(const td::td_api::AuthorizationState &
     m_notificationManager = std::make_unique<NotificationManager>(m_storageManager, m_locale);
 
     connect(m_chatManager.get(), SIGNAL(activeChatChanged(qlonglong)), m_notificationManager.get(), SLOT(setActiveChat(qlonglong)));
-    connect(m_notificationManager.get(), SIGNAL(chatRequested(qlonglong)), SIGNAL(chatRequested(qlonglong)));
+    connect(m_notificationManager.get(), SIGNAL(chatRequested(QString)), SIGNAL(chatRequested(QString)));
 
     emit chatManagerChanged();
 }

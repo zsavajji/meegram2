@@ -197,6 +197,9 @@ void StorageManager::handleResult(td::td_api::Object *object)
                 it->second->setLastMessage(std::move(update->last_message_));
                 it->second->setPositions(std::move(update->positions_));
                 emit chatUpdated(update->chat_id_);
+                // The only site that may raise a notification. Every other emit of
+                // chatUpdated is a chat that changed or merely arrived, not a message.
+                emit chatLastMessageChanged(update->chat_id_);
                 emit chatPositionUpdated(update->chat_id_);
             }
             break;

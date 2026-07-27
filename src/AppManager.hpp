@@ -68,7 +68,8 @@ signals:
     void appInitialized();
 
     // Forwarded from NotificationManager: a system notification was tapped.
-    void chatRequested(qlonglong chatId);
+    // Relayed straight from NotificationManager; a decimal string, see the note there.
+    void chatRequested(const QString &chatId);
 
 public slots:
     void close() noexcept;
