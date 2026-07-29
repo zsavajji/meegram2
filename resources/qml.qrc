@@ -15,7 +15,6 @@
         <file>qml/ArchivedChatPage.qml</file>
         <file>qml/AuthenticationPage.qml</file>
         <file>qml/ChatPage.qml</file>
-        <file>qml/ChatsPage.qml</file>
         <file>qml/CodeEnterPage.qml</file>
         <file>qml/LanguageSettingsPage.qml</file>
         <file>qml/MainPage.qml</file>

@@ -202,7 +202,7 @@ is emitted, so a slot may read them as current for that update.
 
 ## The C++/QML boundary
 
-QML sees exactly **three** context properties (`src/main.cpp:124-127`) plus one
+QML sees exactly **three** context properties (`src/main.cpp:138-141`) plus one
 image provider:
 
 ```cpp
@@ -228,16 +228,29 @@ and `QrCode` — plus 33 uncreatable types so QML can hold typed pointers to
 ### QML page flow
 
 ```
-main.qml (PageStackWindow)
-└── MainPage                       initialPage; calls appManager.initialize()
-    ├── AuthenticationPage         if not authorised
+main.qml (PageStackWindow)     owns appManager.initialize() and the `initialized` latch
+└── MainPage                   initialPage, and the only page ever at depth 1
+    ├── Loader                 one binding picks the app's state:
+    │   ├── busyComponent          !appWindow.initialized
+    │   ├── infoComponent          initialised, no chatManager yet (signed out)
+    │   └── chat{,Tabs}Layout      chatManager exists → ChatListView → ChatItem
+    ├── AuthenticationPage     a *sheet* over the page, never on the stack
     │   └── Loader → SignInPage / CodeEnterPage / PasswordPage / QrCodePage
-    └── ChatsPage                  on appInitialized + authorised
-        ├── ChatListView → ChatItem      (main list, and one per folder tab)
-        ├── ArchivedChatPage
-        ├── SettingsPage → LanguageSettingsPage
-        └── ChatPage → MessageDelegate → MessageBubble / ServiceMessageDelegate
+    ├── ArchivedChatPage       pushed to depth 2
+    ├── SettingsPage → LanguageSettingsPage
+    └── ChatPage → MessageDelegate → MessageBubble / ServiceMessageDelegate
 ```
+
+Nothing is pushed at startup: the chat list *is* the root page, reached by swapping
+`MainPage`'s `Loader` rather than by stacking a second page on a splash screen. So
+`pageStack.pop(null, true)` returns to the chat list, which is what the notification
+handler wants.
+
+The signed-in test is `appManager.chatManager`, not `appManager.authorized` —
+`authorizedChanged` is emitted at `AppManager.cpp:418` but `chatManager` is not
+constructed until `430`, and `ChatListView` calls `model.refresh()` as soon as it is
+built. The `initialized` gate comes first because `Locale` is a `QTranslator` whose
+strings arrive with the language pack, and QML1 never retranslates.
 
 All page loading is synchronous `Qt.createComponent` — QML1 has no incubator.
 

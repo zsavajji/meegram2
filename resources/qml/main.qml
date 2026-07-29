@@ -16,6 +16,11 @@ PageStackWindow {
 
     property bool isPortrait: screen.currentOrientation !== Screen.Landscape
 
+    // Latched from appManager's one-shot appInitialized. It lives here rather than on a
+    // page because appWindow is created once and never destroyed - a page that misses the
+    // signal, or is recreated after it, can never recover it.
+    property bool initialized: false
+
     initialPage: Component { MainPage {} }
 
     onOrientationChangeFinished: showStatusBar = isPortrait
@@ -36,18 +41,13 @@ PageStackWindow {
     Connections {
         target: appManager
 
-        // A system notification was tapped. Back out to the chat list first, so
-        // repeated taps do not stack chat pages on top of each other.
-        //
-        // Down to depth 2, not pop(null). The chat list is not the root page: MainPage
-        // is, and it is the startup spinner with ChatsPage pushed on top of it once,
-        // when appInitialized fires. pop(null) means "pop down to the first page", so it
-        // took ChatsPage with it and left the app on a spinner that never resolves
-        // again, with no way back short of restarting.
-        onChatRequested: {
-            while (pageStack.depth > 2)
-                pageStack.pop(undefined, true)
+        onAppInitialized: appWindow.initialized = true
 
+        // A system notification was tapped. Back out to the chat list first, so repeated
+        // taps do not stack chat pages on top of each other. The chat list is the root
+        // page, so popping to it is exactly what pop(null) does.
+        onChatRequested: {
+            pageStack.pop(null, true)
             openChat(chatId)
         }
     }
@@ -107,5 +107,11 @@ PageStackWindow {
         pageStack.push(component);
     }
 
-    Component.onCompleted: theme.inverted = settings.invertedTheme
+    Component.onCompleted: {
+        theme.inverted = settings.invertedTheme
+
+        // Starting the app is not a page's job - the root page used to own this, which
+        // tied the whole startup sequence to the lifetime of one page.
+        appManager.initialize()
+    }
 }

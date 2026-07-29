@@ -193,8 +193,13 @@ Item {
         target: authorization
         onStateChanged: {
             if (authorization.state === "ready") {
+                // No push: the root page swaps itself to the chat list as soon as
+                // chatManager exists, which is a moment after this fires. Just get the
+                // sheet out of the way and reclaim it - open() reparented it to
+                // appWindowContent, so it outlives whatever created it and nothing else
+                // ever destroyed it. The delay clears the 450ms close transition.
                 close()
-                pageStack.push(Qt.createComponent("ChatsPage.qml"))
+                root.destroy(1000)
             } else {
                 contentField.sourceComponent = authorizationState;
             }

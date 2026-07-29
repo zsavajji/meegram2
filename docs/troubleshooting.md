@@ -188,18 +188,17 @@ history requests. A latent crash needs the code path to work before it can fire.
 
 ### Tapping a notification lands on the startup spinner
 
-`MainPage` is the **root page and a permanent spinner** — its `Loader` shows a
-`BusyIndicator` by default, and `ChatsPage` is *pushed on top of it* from
-`onAppInitialized`, which fires exactly once. So the stack is
-`MainPage → ChatsPage → ChatPage`, and the chat list is not the bottom.
+**Resolved structurally — `MainPage` is now the chat list itself.**
 
-The notification handler used `pageStack.pop(null, true)` to get back to the list.
-`pop(null)` means "pop down to the **first** page", so it took `ChatsPage` with it and
-left the app on a spinner nothing would ever resolve again — unrecoverable without a
-restart, and it looked like the chat list hanging on load.
+`MainPage` used to be the root page *and* a permanent spinner, with `ChatsPage` pushed on
+top of it from a one-shot `onAppInitialized`. The chat list sat at depth 2, so
+`pageStack.pop(null, true)` — "pop down to the first page" — took `ChatsPage` with it and
+left the app on a spinner nothing would ever resolve again. It was worked around with
+`while (pageStack.depth > 2)` plus an `onStatusChanged` re-push guard.
 
-Pop down to `depth > 2` instead. `MainPage` also re-pushes `ChatsPage` if it ever becomes
-the active page again while authorised, so no future path can strand the app there.
+`MainPage` now swaps its own `Loader` between spinner, welcome and chat list instead of
+pushing anything, so the chat list is depth 1 and `pop(null, true)` is correct. Both
+workarounds are gone. There is no longer a page under the chat list to strand the app on.
 
 ### A popped page closes the chat that replaced it
 

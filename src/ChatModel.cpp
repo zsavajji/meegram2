@@ -325,6 +325,15 @@ void ChatModel::refresh()
     m_listFullyLoaded = false;
     m_emptyRetries = 0;
 
+    // Without this, a refresh() while a loadChats is still in flight is dropped by the
+    // guard in requestMoreChats() and m_loading never clears - the spinner stays up
+    // forever.
+    // ponytail: lets a second loadChats overlap the in-flight one. Both land in
+    // handleChatsLoaded, m_populated guards the seed, and the stale callback repopulates
+    // the cleared model - which is what refresh wanted anyway. Track a request id if
+    // overlapping requests ever start costing something.
+    m_requestPending = false;
+
     clear();
 
     // One batch, not the whole list. Previously this started a 500ms repeating timer
