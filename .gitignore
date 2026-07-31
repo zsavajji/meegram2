@@ -65,3 +65,13 @@ node_modules/
 
 # graphify: generated knowledge-graph output, rebuilt from the sources
 graphify-out/
+
+# build artifacts
+*.deb
+*.changes
+*.tar.xz
+*.tar.gz
+
+# submodules
+openssl-*/
+zlib*/
