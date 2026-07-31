@@ -301,6 +301,13 @@ Run the app over SSH when profiling — `invoker` in the `.desktop` swallows std
 closing the Telegram connection. Background and measurements are in
 `docs/restructuring.md`.
 
+It also moves the notifications: `meegramd` posts them (`src/daemon/Notifier.cpp`) and
+the app builds `NotificationEndpoint` instead of `NotificationManager`, which is one
+D-Bus method for opening a chat when a banner is tapped. The two notifiers are
+alternatives, never both — running both would race to post the same banner. So a build
+with the transport `OFF` still notifies, only for as long as the app is open, which is
+what it always did.
+
 It needs the client-direction JSON codec, which TDLib does not ship.
 `tools/setup-dependencies.sh` generates it into `td/td/generate/auto/` after building
 TDLib; configure fails with a pointer to that script if it is missing. Re-run the script
@@ -357,18 +364,24 @@ session bus's activation environment, so an env-var switch could be turned on by
 what the check excludes. `com.meegram.Daemon.service` never passes it, so an activated
 daemon always enforces.
 
-Two checks that need no app:
+Three checks that need no app:
 
 ```sh
 cmake --build build-app --target json_roundtrip && ./build-app/json_roundtrip
+cmake --build build-app --target notifier_check && ./build-app/notifier_check
 
 ./build-app/meegramd --trust-any-peer &
 printf '{"@type":"getOption","name":"version","@extra":"1"}\n' | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/meegram.sock
 ```
 
-The first asserts that 64-bit ids survive the codec in both directions. The second should
-come back with a matching `"@extra":"1"` — and without `--trust-any-peer` it should
-instead close immediately, which is the peer check doing its job.
+The first asserts that 64-bit ids survive the codec in both directions. The second feeds
+the notifier the update lines TDLib actually emits and asserts on the banner text it
+composes — everything except the D-Bus call, which needs a device. It prints two lines
+about a missing `com.meego.core.MNotificationManager` when run off-device; that is the
+notifier reporting that it cannot post and carrying on, which is the intended behaviour
+and not a failed assertion. The third should come back with a matching `"@extra":"1"` —
+and without `--trust-any-peer` it should instead close immediately, which is the peer
+check doing its job.
 
 ---
 

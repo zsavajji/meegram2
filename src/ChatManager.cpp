@@ -6,8 +6,10 @@
 #include "StorageManager.hpp"
 #include "Utils.hpp"
 
+#include <QApplication>
 #include <QDateTime>
 #include <QDebug>
+#include <QEvent>
 #include <QStringList>
 
 #include <algorithm>
@@ -339,6 +341,33 @@ ChatManager::ChatManager(std::shared_ptr<StorageManager> storageManager, std::sh
     updateFolderModels();
 
     connect(m_storage.get(), SIGNAL(chatFoldersUpdated()), SLOT(onChatFoldersUpdated()));
+
+    // See eventFilter: openChat has to track the window, not just the page.
+    qApp->installEventFilter(this);
+}
+
+bool ChatManager::eventFilter(QObject *object, QEvent *event) noexcept
+{
+    if (!m_selectedChat || (event->type() != QEvent::ApplicationActivate && event->type() != QEvent::ApplicationDeactivate))
+        return QObject::eventFilter(object, event);
+
+    // Harmattan keeps a backgrounded app alive and its window "visible" - the task
+    // switcher draws a live thumbnail of it - so a chat left open stays open across a
+    // minimise. TDLib takes openChat to mean the user is reading the chat: it marks
+    // messages read there and suppresses their notifications, and meegramd reads it the
+    // same way. Neither is true of a chat sitting in the switcher, which is exactly when
+    // a banner is wanted.
+    //
+    // Only the TDLib side is reopened and reclosed. m_selectedChat, the models and the
+    // page stay as they are; the user has not left the chat, they have left the app.
+    const auto chatId = m_selectedChat->id();
+
+    if (event->type() == QEvent::ApplicationActivate)
+        m_client->send(td::td_api::make_object<td::td_api::openChat>(chatId));
+    else
+        m_client->send(td::td_api::make_object<td::td_api::closeChat>(chatId));
+
+    return QObject::eventFilter(object, event);
 }
 
 QObject *ChatManager::folderModel() const noexcept

@@ -95,9 +95,15 @@ if (MEEGRAM_JSON_TRANSPORT)
     # generated C++ for a Q_OBJECT that is definitionally not there.
     set_source_files_properties(${MEEGRAM_CODEC_SOURCES} PROPERTIES COMPILE_OPTIONS "-w" SKIP_AUTOMOC ON)
 
-    set(MEEGRAM_CLIENT_SOURCES src/ClientProxy.cpp src/JsonCodec.cpp ${MEEGRAM_CODEC_SOURCES})
+    # NotificationEndpoint rather than NotificationManager: meegramd posts the
+    # notifications under this transport and the app keeps only the tap endpoint. The two
+    # are alternatives, not layers - building both would mean two processes racing to post
+    # the same banner.
+    set(MEEGRAM_CLIENT_SOURCES src/ClientProxy.cpp src/JsonCodec.cpp src/NotificationEndpoint.cpp ${MEEGRAM_CODEC_SOURCES})
+    set(MEEGRAM_CLIENT_HEADERS src/NotificationEndpoint.hpp)
 else()
-    set(MEEGRAM_CLIENT_SOURCES src/Client.cpp)
+    set(MEEGRAM_CLIENT_SOURCES src/Client.cpp src/NotificationManager.cpp)
+    set(MEEGRAM_CLIENT_HEADERS src/NotificationManager.hpp)
 endif()
 
 set(SRC_FILES
@@ -122,7 +128,6 @@ set(SRC_FILES
     src/MessageContent.cpp
     src/MessageModel.cpp
     src/MessageService.cpp
-    src/NotificationManager.cpp
     src/PluralRules.cpp
     src/QrCodeItem.cpp
     src/Settings.cpp
@@ -156,7 +161,7 @@ set(HEADER_FILES
     src/MessageContent.hpp
     src/MessageModel.hpp
     src/MessageService.hpp
-    src/NotificationManager.hpp
+    ${MEEGRAM_CLIENT_HEADERS}
     src/PluralRules.hpp
     src/QrCodeItem.hpp
     src/ScopeTimer.hpp
@@ -292,13 +297,20 @@ if (MEEGRAM_JSON_TRANSPORT)
             "usr/lib/dbus-1.0/include.")
     endif()
 
-    add_executable(meegramd src/daemon/main.cpp)
+    add_executable(meegramd src/daemon/main.cpp src/daemon/Notifier.cpp)
     target_link_libraries(meegramd PRIVATE Td::TdJsonStatic Threads::Threads ${DBUS_LIBRARY})
     target_compile_options(meegramd PRIVATE -Wall -Wextra -Wno-psabi)
 
     # SYSTEM: dbus-protocol.h has pre-C++11 string-literal concatenation that warns under
-    # -Wall, and it is not ours to fix.
-    target_include_directories(meegramd SYSTEM PRIVATE ${DBUS_INCLUDE_DIR} ${DBUS_ARCH_INCLUDE_DIR})
+    # -Wall, and it is not ours to fix. The tdutils headers are the notifier's JSON
+    # reader - not installed by TDLib, hence the source and build trees, same as the app.
+    # No extra link: Td::TdJsonStatic already pulls Td::tdutils, which is where
+    # json_decode lives.
+    target_include_directories(meegramd SYSTEM PRIVATE
+        ${DBUS_INCLUDE_DIR}
+        ${DBUS_ARCH_INCLUDE_DIR}
+        ${TDLIB_SOURCE_DIR}/tdutils
+        ${TDLIB_BUILD_DIR}/tdutils)
 
     # TDLib's Clocks uses clock_gettime, which on Harmattan's glibc 2.10 lives in librt
     # rather than libc. The meegram target never trips over this because Qt drags librt
@@ -306,6 +318,37 @@ if (MEEGRAM_JSON_TRANSPORT)
     find_library(RT_LIBRARY rt)
     if (RT_LIBRARY)
         target_link_libraries(meegramd PRIVATE ${RT_LIBRARY})
+    endif()
+
+    # The notifier's self-check: JSON in, banner text out, with no phone in the loop. Not
+    # wired into the app - build and run it after touching src/daemon/Notifier.cpp, the
+    # same way as json_roundtrip. See tools/notifier_check.cpp.
+    add_executable(notifier_check EXCLUDE_FROM_ALL tools/notifier_check.cpp src/daemon/Notifier.cpp)
+    target_include_directories(notifier_check PRIVATE src/daemon)
+    target_include_directories(notifier_check SYSTEM PRIVATE
+        ${DBUS_INCLUDE_DIR}
+        ${DBUS_ARCH_INCLUDE_DIR}
+        ${TDLIB_SOURCE_DIR}/tdutils
+        ${TDLIB_BUILD_DIR}/tdutils)
+    target_link_libraries(notifier_check PRIVATE Td::TdJsonStatic Threads::Threads ${DBUS_LIBRARY})
+
+    if (RT_LIBRARY)
+        target_link_libraries(notifier_check PRIVATE ${RT_LIBRARY})
+    endif()
+
+    # The whole file is assertions, and CMAKE_CXX_FLAGS_RELEASE carries -DNDEBUG.
+    target_compile_options(notifier_check PRIVATE -UNDEBUG)
+
+    if (BUILD_HARMATTAN)
+        # Same flags as json_roundtrip above. Worth having on a check that only ever runs
+        # by hand: the interesting place to run this one is the device, where the platform
+        # notification manager exists, and without the loader and rpath below a
+        # cross-built binary does not start at all.
+        target_compile_options(notifier_check PRIVATE
+            -march=armv7-a -mtune=cortex-a8 -mfpu=neon -mfloat-abi=hard -mthumb)
+        target_link_options(notifier_check PRIVATE
+            -Wl,-rpath,/opt/meegram/lib -Wl,--dynamic-linker=/lib/ld-linux.so.3 -pie -rdynamic)
+        target_link_libraries(notifier_check PRIVATE -static-libstdc++)
     endif()
 
     if (BUILD_HARMATTAN)

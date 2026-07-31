@@ -107,6 +107,10 @@ public:
     Q_INVOKABLE bool openChat(const QString &chatId) noexcept;
     Q_INVOKABLE void closeChat(const QString &chatId) noexcept;
 
+    // Installed on the application, to close and reopen the selected chat as the window
+    // loses and regains focus. Public because that is where QObject declares it.
+    bool eventFilter(QObject *object, QEvent *event) noexcept override;
+
 signals:
     void selectedChatChanged();
 

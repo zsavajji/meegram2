@@ -100,9 +100,17 @@ ChatManager
 
 ## Data flow: one notification
 
+**Which of these runs depends on the transport.** With `MEEGRAM_JSON_TRANSPORT=ON` —
+the device build — none of it does: `meegramd` posts the notifications
+(`src/daemon/Notifier.cpp`), driven by TDLib's own `updateNotificationGroup` rather
+than by chat updates, and the app is left with `NotificationEndpoint`, one D-Bus method
+that opens a chat when a banner is tapped. What follows describes the in-process
+transport, which still composes and posts its own banners because nothing else is
+resident to do it. See `restructuring.md`.
+
 `NotificationManager` never touches QML and never touches `Client`. It is a
 `StorageManager` consumer that talks straight out over D-Bus, which is why banners
-keep working with no UI on screen — and why it is the piece that most wants to
+keep working with no UI on screen — and why it is the piece that most wanted to
 outlive the UI process.
 
 1. `chatLastMessageChanged` fires (only from `updateChatLastMessage`).
@@ -355,7 +363,8 @@ inherits that ordering guarantee for free, and any code that stashes the raw
 | `PluralRules` | Per-language plural forms |
 | `Settings` | `QSettings` wrapper |
 | `Emoji` | 3,773-entry static table backing emoji substitution |
-| `NotificationManager` | Harmattan banners over D-Bus; owns the tap-to-open service and object paths |
+| `NotificationManager` | Harmattan banners over D-Bus; owns the tap-to-open service and object paths. In-process transport only — with `meegramd` it is not built |
+| `NotificationEndpoint` | Daemon transport only: `com.meegram` `/notification` `openChat`, called by `meegramd` when a banner is tapped |
 | `ChatPhotoProvider` | `image://chatPhoto/` — decodes avatars at the requested size, crops and masks them, with a cache |
 | `StickerProvider` | `image://sticker/` — decodes WebP stickers via libwebp, scaled during decode |
 | `LottieAnimation` | rlottie renderer; auth pages only, never in a list |

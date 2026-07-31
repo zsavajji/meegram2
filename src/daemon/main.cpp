@@ -1,20 +1,33 @@
 // meegramd - the resident half of MeeGram.
 //
 // Owns the TDLib connection and its database lock, so closing the UI window stops
-// closing the Telegram connection (docs/restructuring.md). It is deliberately the dumbest
-// component in the system: it speaks only td_json_client - the installed public C API -
-// and never links td_api, Qt, or the JSON codec. Bytes in from a socket go to td_send;
-// bytes out of td_receive go to every connected socket.
+// closing the Telegram connection (docs/restructuring.md). Two jobs, and the split
+// between them is the whole design:
 //
-// It does not parse the JSON it relays. Nothing here needs to: requests are opaque, and
-// responses are matched by the UI on "@extra", which the UI makes globally unique so two
-// UIs cannot collide (see Client::send in src/ClientProxy.cpp). That is why there is no
-// per-connection @extra rewriting and no request routing table - a second UI receives a
-// foreign response, fails to find a handler for its @extra, and drops it, which is what
-// today's Client already does with an unmatched request id.
+//   - the relay, which is this file. It speaks td_json_client - the installed public C
+//     API - and never links td_api or Qt. Bytes in from a socket go to td_send; bytes out
+//     of td_receive go to every connected socket, unexamined.
+//
+//   - the notifier, src/daemon/Notifier.cpp, which posts the system notifications. That
+//     is the part the UI used to own, and owning it here is what makes a closed app still
+//     notify.
+//
+// The relay does not parse the JSON it carries. Nothing here needs to: requests are
+// opaque, and responses are matched by the UI on "@extra", which the UI makes globally
+// unique so two UIs cannot collide (see Client::send in src/ClientProxy.cpp). That is why
+// there is no per-connection @extra rewriting and no request routing table - a second UI
+// receives a foreign response, fails to find a handler for its @extra, and drops it,
+// which is what today's Client already does with an unmatched request id.
+//
+// The notifier does parse, on a copy, after the line has been relayed - so a UI never
+// waits on it. It reads tdutils' JSON, not the generated td_api codec: a preview needs a
+// dozen fields, and binding 1.2 MB of generated C++ into this process to read them would
+// undo the resident-set argument the daemon exists for.
 //
 // Framing is one JSON object per line. TDLib emits compact single-line JSON and escapes
 // every control character inside strings, so a raw newline never appears in a payload.
+
+#include "Notifier.hpp"
 
 #include <td/telegram/td_json_client.h>
 
@@ -30,12 +43,14 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <chrono>
 #include <climits>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -91,6 +106,78 @@ constexpr size_t MaxOutgoingBytes = 8u << 20;
 // Touched by both threads: the receive loop broadcasts, the poll loop adds and removes.
 std::mutex connectionsMutex;
 std::vector<Connection> connections;
+
+// Never deleted, deliberately. The receive thread is detached and parked in td_receive
+// with no way to be woken, so a notifier destroyed when main returns is one the other
+// thread can still be inside. A process-lifetime leak of one object is the cheaper half
+// of that trade.
+Notifier *notifier = nullptr;
+
+// How often to prod TDLib into retrying while it is not connected. Matches the td_receive
+// timeout, so on a quiet offline client the prod lands on the very tick that wakes the
+// receive loop and nothing else has to keep time.
+constexpr double NudgeIntervalSeconds = 30.0;
+
+// Reconnection, which TDLib will not do on its own here.
+//
+// It retries by itself, but every retry goes through a per-client backoff and three flood
+// controls, and the only thing that clears them is ConnectionCreator::on_network - reached
+// from setNetworkType, and from nothing else. A client that never calls it has no way to
+// say "the network is back, stop waiting", so a daemon started with no network stayed in
+// its retry pattern long after wifi appeared. Killing and restarting it was the only way
+// out, which is a fine description of the bug and a poor description of a daemon.
+//
+// A phone is exactly the device this happens on: it boots, something starts, and the
+// network arrives a minute later.
+//
+// So: while TDLib says it is not connected, send setNetworkType every 30 seconds.
+// StateManager bumps its generation whether or not the type changed, so the same value
+// resent is still the signal - which means this needs no idea of what the real network is
+// doing, and cannot be wrong about it. It costs one local request per 30s while offline
+// and stops entirely once connected.
+//
+// Deliberately not ICd2 (com.nokia.icd2 state_sig, the platform's own connectivity
+// signal): it would be more precise and it would be a second D-Bus dialect to get right,
+// for a wakeup this already gets for free.
+void nudgeIfOffline(int clientId, std::optional<bool> connected)
+{
+    static auto lastNudge = std::chrono::steady_clock::time_point{};
+
+    // Empty until TDLib has reported a connection state at all, which it does not do
+    // before a client has sent setTdlibParameters. A daemon nobody has connected to yet is
+    // not offline, it is idle - and saying "not connected" about it sends whoever is
+    // reading the log after the wrong problem, which is exactly what it did.
+    if (!connected.has_value() || *connected)
+        return;
+
+    const auto now = std::chrono::steady_clock::now();
+
+    if (lastNudge != std::chrono::steady_clock::time_point{} &&
+        std::chrono::duration<double>(now - lastNudge).count() < NudgeIntervalSeconds)
+        return;
+
+    lastNudge = now;
+
+    std::fprintf(stderr, "meegramd: not connected; asking TDLib to retry\n");
+
+    td_send(clientId, R"({"@type":"setNetworkType","type":{"@type":"networkTypeOther"},"@extra":"meegramd-network"})");
+}
+
+// Whether TDLib has just said it is connected, or empty if this line is not about the
+// connection at all. The update carries exactly one state object, so this needs no parse -
+// and the relay stays a relay.
+//
+// Updating counts as connected: it means the connection is up and TDLib is draining the
+// backlog behind it, which is the one state where prodding it would be actively unhelpful.
+std::optional<bool> connectionState(const char *line, size_t length)
+{
+    constexpr char Prefix[] = "{\"@type\":\"updateConnectionState\"";
+
+    if (length < sizeof(Prefix) - 1 || std::memcmp(line, Prefix, sizeof(Prefix) - 1) != 0)
+        return std::nullopt;
+
+    return std::strstr(line, "connectionStateReady") != nullptr || std::strstr(line, "connectionStateUpdating") != nullptr;
+}
 
 // Returns the following element, so it can drive a loop that erases as it walks.
 // Callers must already hold connectionsMutex.
@@ -403,6 +490,11 @@ int main(int argc, char *argv[])
     // broadcast path; this covers everything else.
     ::signal(SIGPIPE, SIG_IGN);
 
+    // Before any other libdbus call, which is what the API requires. Two threads reach
+    // D-Bus here: the poll loop owns the bus name and dispatches taps, and the receive
+    // thread posts notifications on its own private connection.
+    dbus_threads_init_default();
+
     // Before the socket, deliberately - see claimBusName.
     DBusConnection *busConnection = nullptr;
     if (claimBusName(&busConnection) == BusStatus::AlreadyRunning)
@@ -424,6 +516,14 @@ int main(int argc, char *argv[])
     // Nothing is created until the first request is sent, so this is just an id.
     const int clientId = td_create_client_id();
 
+    // Its constructor sends the option that turns TDLib's notifications on, so this also
+    // instantiates the client.
+    notifier = new Notifier([clientId](const std::string &request) { td_send(clientId, request.c_str()); });
+
+    // Taps arrive on the connection that owns com.meegram.Daemon, and are dispatched by
+    // the poll loop below.
+    notifier->attachTapHandler(busConnection);
+
     // Receive on its own thread: td_receive blocks, and the poll loop below has to stay
     // responsive to new connections and inbound requests while it does.
     std::thread receiver([clientId] {
@@ -436,11 +536,42 @@ int main(int argc, char *argv[])
         // this one: they match on a "<pid>-" prefix of their own.
         td_send(clientId, R"({"@type":"getOption","name":"version","@extra":"meegramd"})");
 
+        // Empty until TDLib first says. See nudgeIfOffline: before that it has no
+        // parameters and is not trying to connect, so there is nothing to prod.
+        std::optional<bool> connected;
+
         for (;;)
         {
             const char *line = td_receive(30.0);
+
             if (line)
-                broadcast(line, std::strlen(line));
+            {
+                const size_t length = std::strlen(line);
+
+                if (const auto state = connectionState(line, length))
+                {
+                    connected = *state;
+
+                    // Verbatim, because the distinction is the diagnosis and there are
+                    // only a handful of these in a session: WaitingForNetwork is the
+                    // device having no route, Connecting is TDLib failing to reach
+                    // Telegram over one it believes it has.
+                    std::fprintf(stderr, "meegramd: %s\n", line);
+                }
+
+                // Relayed first. The notifier makes blocking D-Bus calls, and a UI waiting
+                // on a chat list must not be behind a notification daemon that is thinking
+                // about it. TDLib's buffer stays valid until the next td_receive, so it is
+                // still ours to read afterwards.
+                broadcast(line, length);
+
+                notifier->onUpdate(line, length);
+            }
+
+            // On every trip, not only on the timeout: a client that is failing to connect
+            // is not necessarily a quiet one, and the 30 seconds are counted here rather
+            // than assumed from td_receive's.
+            nudgeIfOffline(clientId, connected);
         }
     });
     receiver.detach();
@@ -526,6 +657,12 @@ int main(int argc, char *argv[])
             }
         }
 
+        // Requests the notifier wants to see, handed to it after connectionsMutex is
+        // released. It posts notifications under a lock of its own and a blocked
+        // notification daemon can hold that for a couple of seconds - which, taken while
+        // holding this one, would stall the broadcast thread behind it.
+        std::vector<std::string> peeked;
+
         for (size_t i = firstConnection; i < fds.size(); ++i)
         {
             if (fds[i].revents == 0)
@@ -569,13 +706,23 @@ int main(int argc, char *argv[])
 
             for (size_t newline; (newline = it->pending.find('\n')) != std::string::npos;)
             {
-                const std::string request = it->pending.substr(0, newline);
+                std::string request = it->pending.substr(0, newline);
                 it->pending.erase(0, newline + 1);
 
-                if (!request.empty())
-                    td_send(clientId, request.c_str());
+                if (request.empty())
+                    continue;
+
+                td_send(clientId, request.c_str());
+
+                // Peeked, not intercepted: openChat and closeChat are how this process
+                // knows which chat the user is looking at, which is the one thing about
+                // the UI that the update stream does not say.
+                peeked.push_back(std::move(request));
             }
         }
+
+        for (const auto &request : peeked)
+            notifier->onRequest(request);
     }
 
     ::close(listener);

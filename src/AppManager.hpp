@@ -3,7 +3,15 @@
 #include "LanguagePackInfoModel.hpp"
 // Included rather than forward declared: unique_ptr needs the complete type wherever
 // AppManager's implicit destructor is instantiated.
+//
+// Two of them, one per transport. With meegramd in the picture the notifications are
+// posted there and the app keeps only the tap endpoint; without it, nothing else is
+// resident, so the app still composes and posts them itself.
+#ifdef MEEGRAM_JSON_TRANSPORT
+#include "NotificationEndpoint.hpp"
+#else
 #include "NotificationManager.hpp"
+#endif
 
 #include <td/telegram/td_api.h>
 
@@ -83,6 +91,14 @@ private slots:
 
     void loadLanguagePack() noexcept;
 
+    // Re-arms loadLanguagePack after a failed attempt. A slot because the failure is
+    // noticed on the reader thread and a timer has to be started on this one.
+    void scheduleLanguagePackRetry() noexcept;
+
+    // Fires once, a few seconds in. Silent unless startup is incomplete, in which case it
+    // names the half that is missing.
+    void reportInitializationStall() noexcept;
+
 private:
     void setParameters() noexcept;
 
@@ -109,8 +125,14 @@ private:
 
     std::unique_ptr<LanguagePackInfoModel> m_languagePackInfoModel;
 
-    // Not exposed to QML; it works off StorageManager and ChatManager signals alone.
+    // Not exposed to QML. Under the daemon transport it is a D-Bus endpoint and nothing
+    // more, built with the rest of AppManager; otherwise it is the in-process notifier,
+    // which needs a StorageManager and so waits for authorization.
+#ifdef MEEGRAM_JSON_TRANSPORT
+    std::unique_ptr<NotificationEndpoint> m_notificationEndpoint;
+#else
     std::unique_ptr<NotificationManager> m_notificationManager;
+#endif
 
     std::array<bool, 2> m_initializationStatus{false, false};
 };

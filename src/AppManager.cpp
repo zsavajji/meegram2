@@ -12,6 +12,7 @@
 #include <QDebug>
 #include <QDir>
 #include <QLocale>
+#include <QTimer>
 
 #include <algorithm>
 
@@ -214,6 +215,14 @@ constexpr auto createLocale(const QString &languageCode) -> std::optional<QLocal
     return std::nullopt;  // Return empty optional if not found
 }
 
+// Long enough that a slow first sync is not accused of being stuck, short enough to be in
+// the log before anyone reaches for a debugger.
+constexpr int InitializationStallMs = 8000;
+
+// The language pack is only ever missing because the network was, so this retries at the
+// pace a network comes back at, not at the pace a request fails.
+constexpr int LanguagePackRetryMs = 5000;
+
 }  // namespace
 
 AppManager::AppManager(QObject *parent)
@@ -227,6 +236,15 @@ AppManager::AppManager(QObject *parent)
     connect(qApp, SIGNAL(aboutToQuit()), this, SLOT(close()));
 
     connect(m_client.get(), SIGNAL(result(td::td_api::Object *)), SLOT(handleResult(td::td_api::Object *)));
+
+#ifdef MEEGRAM_JSON_TRANSPORT
+    // Before authorization, and before the socket has said anything: a tap that started
+    // this process is already on its way, and the D-Bus call that carries it is delivered
+    // as soon as com.meegram is owned. Registering it later means dropping that first tap.
+    m_notificationEndpoint = std::make_unique<NotificationEndpoint>();
+
+    connect(m_notificationEndpoint.get(), SIGNAL(chatRequested(QString)), SIGNAL(chatRequested(QString)));
+#endif
 }
 
 bool AppManager::isAuthorized() const noexcept
@@ -276,7 +294,14 @@ LanguagePackInfoModel *AppManager::languagePackInfoModel() const noexcept
 
 void AppManager::close() noexcept
 {
+#ifndef MEEGRAM_JSON_TRANSPORT
     m_client->send(td::td_api::make_object<td::td_api::close>(), {});
+#endif
+    // With the daemon transport this instance does not own TDLib - meegramd does, and it
+    // is shared. Sending close on aboutToQuit closed the daemon's client too, which is
+    // exactly the connection the daemon exists to keep alive: the process kept running,
+    // its TDLib did not, and nothing arrived until it was restarted. meegramd closes its
+    // own client when the session bus goes away.
 }
 
 void AppManager::setOption(const QString &name, const QVariant &value)
@@ -318,6 +343,9 @@ void AppManager::initialize() noexcept
     setParameters();
     requestAuthorizationState();
     loadLanguagePack();
+
+    // Says why the spinner is still there, once, if it still is.
+    QTimer::singleShot(InitializationStallMs, this, SLOT(reportInitializationStall()));
 
     m_languagePackInfoModel = std::make_unique<LanguagePackInfoModel>(m_client);
 }
@@ -418,7 +446,50 @@ void AppManager::loadLanguagePack() noexcept
                 checkInitializationStatus();
             }
         }
+        else if (!m_initializationStatus[1])
+        {
+            // The response was an error, which offline on a first launch is what this
+            // always is: there is nothing in the local pack database to answer from. The
+            // callback used to stop here, so the second initialization flag was never set,
+            // appInitialized() never fired, and the app sat on the spinner for the rest of
+            // the run - including after the network came back, because nothing asked again.
+            //
+            // A timer rather than a connection-state hook, which was the first thing tried
+            // here and cannot work: under the daemon transport TDLib announced its
+            // connection state long before this process attached, and a late-joining
+            // client is never told again. That is the same reason requestAuthorizationState
+            // exists, and there is no getConnectionState to do it with.
+            //
+            // Queued, because this callback runs on the reader thread and a QTimer belongs
+            // to the thread that starts it.
+            QMetaObject::invokeMethod(this, "scheduleLanguagePackRetry", Qt::QueuedConnection);
+        }
     });
+}
+
+void AppManager::scheduleLanguagePackRetry() noexcept
+{
+    if (m_initializationStatus[1])
+        return;
+
+    qWarning() << "language pack request failed; retrying in" << LanguagePackRetryMs << "ms";
+
+    QTimer::singleShot(LanguagePackRetryMs, this, SLOT(loadLanguagePack()));
+}
+
+void AppManager::reportInitializationStall() noexcept
+{
+    if (std::all_of(m_initializationStatus.begin(), m_initializationStatus.end(), [](bool status) { return status; }))
+        return;
+
+    // The one line this used to be missing. A spinner that never resolves said nothing
+    // about which half of startup was stuck, and the two have entirely different causes:
+    // no parameters means nothing is coming back over the socket at all, no language pack
+    // means the socket works and the request failed.
+    qWarning() << "startup stalled after" << InitializationStallMs << "ms - setTdlibParameters"
+               << (m_initializationStatus[0] ? "ok" : "PENDING") << "| language pack" << (m_initializationStatus[1] ? "ok" : "PENDING")
+               << "| connection" << (m_connectionStateString.isEmpty() ? QLatin1String("never reported") : QLatin1String("reported"))
+               << m_connectionStateString << "| authorized" << m_isAuthorized;
 }
 
 void AppManager::checkInitializationStatus() noexcept
@@ -457,10 +528,16 @@ void AppManager::handleAuthorizationState(const td::td_api::AuthorizationState &
 
     m_chatManager = std::make_shared<ChatManager>(m_storageManager, m_locale);
 
+#ifndef MEEGRAM_JSON_TRANSPORT
+    // Only the in-process transport builds one of these. Under the daemon transport
+    // meegramd has been posting notifications since before this app was started, and it
+    // learns which chat is on screen from the openChat it relays - so there is nothing to
+    // construct and nothing to tell.
     m_notificationManager = std::make_unique<NotificationManager>(m_storageManager, m_locale);
 
     connect(m_chatManager.get(), SIGNAL(activeChatChanged(qlonglong)), m_notificationManager.get(), SLOT(setActiveChat(qlonglong)));
     connect(m_notificationManager.get(), SIGNAL(chatRequested(QString)), SIGNAL(chatRequested(QString)));
+#endif
 
     emit chatManagerChanged();
 }
@@ -495,4 +572,5 @@ void AppManager::handleConnectionState(const td::td_api::ConnectionState &connec
 
     m_connectionStateString = state;
     emit connectionStateChanged();
+
 }

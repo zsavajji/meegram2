@@ -1,0 +1,19 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure)
+        # meegramd is D-Bus activated and never exits on its own - outliving the UI is the
+        # entire point of it - so an upgrade leaves the *old* binary resident and the newly
+        # installed one unused. Nothing about that is visible from the app: it connects to
+        # the running daemon and works, with none of the changes that were just installed.
+        #
+        # Not restarted here, only stopped: the next client to want it activates it through
+        # com.meegram.Daemon, so the first launch after an upgrade gets the new binary.
+        pkill -x meegramd || true
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

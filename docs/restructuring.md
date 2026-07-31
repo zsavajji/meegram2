@@ -1,9 +1,13 @@
 # Restructuring: TDLib as a service
 
-A design note, not a plan of record. Nothing here is built.
+A design note that has since been partly built. **What is built:** `meegramd` owns TDLib
+and relays it over a Unix socket (`src/daemon/main.cpp`), and it posts the system
+notifications itself (`src/daemon/Notifier.cpp`). **What is not:** `Authorization` still
+runs in the UI, so a first login needs the app open. See "Sequencing" at the end for
+what each step actually landed as — that list is the status, and it is kept honest.
 
-**The goal.** Today the app must stay resident to receive messages — TDLib lives in
-the UI process, so closing the window closes the connection. The intended end state is
+**The goal.** The app used to have to stay resident to receive messages — TDLib lived in
+the UI process, so closing the window closed the connection. The intended end state is
 a service that owns TDLib and the database, and a UI that is only a front end to it.
 The service outlives the UI; notifications keep arriving with no window open.
 
@@ -341,12 +345,23 @@ Not everything can be proxied.
 
 - **`Authorization` moves service-side.** The service owns the database, so it must own
   the login state machine; the UI drives it over IPC. A real port.
-- **`NotificationManager` moves service-side** — the point of the exercise. But it
+- **`NotificationManager` moves service-side** — the point of the exercise. ~~But it
   reads `Chat`, `Message` and `Locale` to compose banner text, so the service needs a
-  slim model of its own or must compose from raw `td_api`. **Design this piece first**:
-  it is the only one that cannot simply proxy, and it decides how much of
-  `StorageManager` the service ends up needing. If the answer is "most of it", the case
-  for cutting at `Client` weakens considerably.
+  slim model of its own or must compose from raw `td_api`.~~ **Done**, and the premise
+  was wrong in a useful way. The fear was that composing a banner needs so much of
+  `StorageManager` that the whole cut at `Client` stops making sense. It does not,
+  because the daemon does not drive off chat updates at all: TDLib has its own
+  notification subsystem (`updateNotificationGroup`), which already applies the
+  notification settings, ignores outgoing and service messages, and withdraws a
+  notification when its message is read on any device. Nothing had ever switched it on —
+  `notification_group_count_max` defaults to 0, meaning "this client does not show
+  notifications" — so the update stream it feeds on did not exist to be found.
+
+  What the daemon keeps of its own is three maps filled from updates it was relaying
+  anyway: chat titles, user names, and chat photo paths. No requests, no responses to
+  correlate, no model. `src/daemon/Notifier.cpp`, ~700 lines including the content
+  preview switch, against 450 for the version in the app that could only run while the
+  app did.
 - **`Locale` is process-wide.** Every `tr()` in the process routes through
   `Locale::getString`. Both processes need one, fed from the same language pack.
 - **Late-joining UI clients.** The service outlives any UI instance. TDLib's model is
@@ -365,18 +380,38 @@ given that every segfault in this codebase so far has been object lifetime.
 
 ## Sequencing
 
-The seam means this never needs a big-bang branch. Each step ships.
+The seam means this never needs a big-bang branch. Each step ships. Status is per step
+and is the point of this list — "the restructure is done" is not a thing anyone should
+have to infer.
 
 1. **Make `Client` an interface** with two implementations, in-process and IPC. Ship
-   the in-process one. Zero behaviour change, fully reversible.
+   the in-process one. Zero behaviour change, fully reversible. — **done**, one public
+   `Client.hpp` over `src/Client.cpp` and `src/ClientProxy.cpp`, selected by
+   `MEEGRAM_JSON_TRANSPORT`.
 2. **Stand up the service** using the existing `initialize()` body verbatim. Nothing
-   connects to it yet.
-3. **Prototype the wire format and measure on device.** Go/no-go. Everything after this
-   is wasted if serialization is too slow.
-4. **Move `Authorization`.**
-5. **Move `NotificationManager`.** The app stops needing to be resident — the point.
+   connects to it yet. — **done**, `src/daemon/main.cpp`, though not verbatim: the
+   daemon relays `td_json_client` and the UI still sends `setTdlibParameters`.
+3. **Prototype the wire format and measure on device.** Go/no-go. — **done**,
+   `tools/json_bench.cpp`.
+4. **Move `Authorization`.** — **not done.** The UI still owns the login state machine,
+   so a first login needs the app open. Everything after it only assumes an authorized
+   TDLib, which is why 5 could land first.
+5. **Move `NotificationManager`.** The app stops needing to be resident — the point. —
+   **done**, `src/daemon/Notifier.cpp`. The app keeps `NotificationEndpoint`, which is
+   one D-Bus method for opening a chat when a banner is tapped, and no notification
+   state at all.
 
-Step 3 is the decision point and is reachable in days, not months.
+What is left, in the order it matters:
+
+- **Step 4**, above.
+- **`MEEGRAM_KEEPALIVE` has outlived its question.** It keeps the process and drops the
+  scene, to measure whether that returns the memory. It does not (see above), and with
+  the daemon posting notifications the app no longer has any reason to stay: closing the
+  window is now supposed to exit it. Left in place because it is one `if` in `main.cpp`
+  and it is still the fastest way to reproduce the teardown numbers.
+- **The daemon posts blocking D-Bus calls from the receive thread.** A wedged platform
+  notification daemon stalls the relay for up to two seconds per banner. Its own thread
+  would fix it; the `ponytail:` note in `Notifier.hpp` says so.
 
 ---
 
