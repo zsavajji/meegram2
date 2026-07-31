@@ -58,7 +58,13 @@ PageStackWindow {
     }
 
     Connections {
-        target: chatManager
+        // chatManager is null until authorizationStateReady, so at load time this is
+        // undefined and Qt4 warns twice - once that the target cannot be assigned, once
+        // that onChatAvailable does not exist. The binding re-targets when AppManager
+        // emits chatManagerChanged, so the connection does work; both lines are noise
+        // that reads exactly like a dead connection in the only log we debug from.
+        target: chatManager || null
+        ignoreUnknownSignals: true
 
         // A chat opened by id is not always cached yet - Saved Messages opens myId()
         // directly, and a notification can be tapped before the chat list has loaded.
