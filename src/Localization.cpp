@@ -3,6 +3,9 @@
 #include "ScopeTimer.hpp"
 
 #include <QDebug>
+#include <QDataStream>
+#include <QDir>
+#include <QFile>
 #include <QStringList>
 
 #include <algorithm>
@@ -11,6 +14,26 @@
 #include <regex>
 #include <string>
 #include <string_view>
+
+namespace {
+
+// Next to TDLib's own database, which is where everything else this app persists lives.
+QString cachePath()
+{
+    return QDir::homePath() + DatabaseDirectory + "/langpack.cache";
+}
+
+// Guards against reading a file this build does not understand: bump the version when the
+// layout below changes and the old file is ignored rather than misparsed.
+constexpr quint32 CacheMagic = 0x4d474c50;  // "MGLP"
+constexpr quint32 CacheVersion = 1;
+
+// Pinned rather than left at the running Qt's default, so the file stays readable across a
+// Qt it was not written by. Harmattan's is frozen at 4.7; the pin costs a line and removes
+// the question.
+constexpr auto CacheStreamVersion = QDataStream::Qt_4_7;
+
+}  // namespace
 
 Locale::Locale(QObject *parent)
     : QTranslator(parent)
@@ -57,12 +80,6 @@ QString Locale::translate(const char *context, const char *sourceText, const cha
 {
     Q_UNUSED(context);
     Q_UNUSED(disambiguation);
-
-    // if (n >= 0)
-    // {
-    //     return formatPluralString(sourceText, n);
-    // }
-    // Plural logic that never saw the light of day... 😢
 
     return getString(sourceText);
 }
@@ -205,7 +222,59 @@ void Locale::setLanguagePlural(const QString &value)
     }
 }
 
-void Locale::setLanguagePackStrings(td::td_api::object_ptr<td::td_api::languagePackStrings> languagePackData)
+bool Locale::loadCache(const QString &languageId)
+{
+    QFile file(cachePath());
+    if (!file.open(QIODevice::ReadOnly))
+        return false;
+
+    QDataStream stream(&file);
+    stream.setVersion(CacheStreamVersion);
+
+    quint32 magic = 0;
+    quint32 version = 0;
+    QString cachedId;
+
+    stream >> magic >> version >> cachedId;
+
+    // A different language means the user switched and this file belongs to the old one.
+    // Dropping it here is what makes the switch take effect on the next launch.
+    if (magic != CacheMagic || version != CacheVersion || cachedId != languageId)
+        return false;
+
+    stream >> m_languagePlural >> m_languagePack;
+
+    // A truncated file - a run killed mid-write - leaves QDataStream having filled part of
+    // the hash before it noticed. Half a language pack is worse than none: the keys it did
+    // reach would translate and the rest would not, for the life of the process.
+    if (stream.status() != QDataStream::Ok || m_languagePack.isEmpty())
+    {
+        m_languagePack.clear();
+        m_languagePlural.clear();
+        return false;
+    }
+
+    updatePluralRules();
+
+    return true;
+}
+
+void Locale::saveCache(const QString &languageId) const
+{
+    QFile file(cachePath());
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+    {
+        qWarning() << "cannot cache the language pack in" << cachePath();
+        return;
+    }
+
+    QDataStream stream(&file);
+    stream.setVersion(CacheStreamVersion);
+
+    stream << CacheMagic << CacheVersion << languageId << m_languagePlural << m_languagePack;
+}
+
+void Locale::setLanguagePackStrings(const QString &languageId, td::td_api::object_ptr<td::td_api::languagePackStrings> languagePackData)
 {
     // Any previously memoised translation is derived from the pack being replaced.
     m_stringCache.clear();
@@ -251,6 +320,8 @@ void Locale::setLanguagePackStrings(td::td_api::object_ptr<td::td_api::languageP
     }
 
     updatePluralRules();
+
+    saveCache(languageId);
 }
 
 QString Locale::stringForQuantity(PluralRules::Quantity quantity) const

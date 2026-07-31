@@ -37,20 +37,9 @@ MessageService::MessageService(td::td_api::object_ptr<td::td_api::MessageContent
             m_removedMember = message->user_id_;
             break;
         }
-        case td::td_api::messageChatUpgradeTo::ID: {
-            auto message = td::td_api::move_object_as<td::td_api::messageChatUpgradeTo>(content);
-            m_upgradedToSupergroup = message->supergroup_id_;
-            break;
-        }
         case td::td_api::messageChatUpgradeFrom::ID: {
             auto message = td::td_api::move_object_as<td::td_api::messageChatUpgradeFrom>(content);
             m_groupTitle = QString::fromStdString(message->title_);
-            m_upgradedFromGroup = message->basic_group_id_;
-            break;
-        }
-        case td::td_api::messagePinMessage::ID: {
-            auto message = td::td_api::move_object_as<td::td_api::messagePinMessage>(content);
-            m_pinnedMessage = message->message_id_;
             break;
         }
         case td::td_api::messageChatSetMessageAutoDeleteTime::ID: {
@@ -82,21 +71,6 @@ QStringList MessageService::addedMembers() const
 qlonglong MessageService::removedMember() const
 {
     return m_removedMember;
-}
-
-qlonglong MessageService::upgradedToSupergroup() const
-{
-    return m_upgradedToSupergroup;
-}
-
-qlonglong MessageService::upgradedFromGroup() const
-{
-    return m_upgradedFromGroup;
-}
-
-qlonglong MessageService::pinnedMessage() const
-{
-    return m_pinnedMessage;
 }
 
 int MessageService::autoDeleteTime() const

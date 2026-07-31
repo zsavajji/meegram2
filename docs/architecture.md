@@ -260,6 +260,23 @@ constructed until `430`, and `ChatListView` calls `model.refresh()` as soon as i
 built. The `initialized` gate comes first because `Locale` is a `QTranslator` whose
 strings arrive with the language pack, and QML1 never retranslates.
 
+`initialized` is `setTdlibParameters` accepted **and** the wait for the language pack
+over — where "over" is any of three things, in the order they usually happen:
+
+- `Locale::loadCache` found the pack the last run wrote, in the `AppManager`
+  constructor, before `setSource` builds a single QML object. This is every launch
+  after the first, and it means startup waits for nothing at all.
+- `getLanguagePackStrings` came back. Sent from the `setParameters` callback, not
+  before it: TDLib errors it until it has parameters.
+- `reportInitializationStall` gave up, 8s in. The app goes on untranslated rather
+  than sitting on a spinner that has no way to reach the sign-in page. Retries
+  continue behind it, so a late pack still lands for every page pushed afterwards —
+  just not for the root page, which is already built.
+
+The one string bound before any of that can be true is `MainPage`'s menu, which uses
+`appWindow.tr()` — `qsTr` plus a read of `initialized`, so the binding re-runs when
+the pack lands and shows the key, not an empty item, until it does.
+
 All page loading is synchronous `Qt.createComponent` — QML1 has no incubator.
 
 ### Ids cross the boundary as decimal strings, in both directions

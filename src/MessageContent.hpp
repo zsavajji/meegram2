@@ -4,7 +4,6 @@
 
 #include <td/telegram/td_api.h>
 
-#include <QDebug>
 #include <QMetaType>
 
 #include <memory>
@@ -12,10 +11,7 @@
 class MessageContent
 {
 public:
-    virtual ~MessageContent()
-    {
-        // qDebug() << "Destroying MessageContent at" << this;
-    }
+    virtual ~MessageContent() = default;
 };
 
 class MessageText : public QObject, public MessageContent

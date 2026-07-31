@@ -50,12 +50,7 @@ Item {
             id: mouseArea
             anchors.fill: parent
 
-            onClicked:  {
-                // Dropped two debug console.log calls here; the second ran the full
-                // emoji substitution over the message body on every tap purely to
-                // produce a log line.
-                root.clicked()
-            }
+            onClicked: root.clicked()
             onPressAndHold: root.pressAndHold()
         }
     }

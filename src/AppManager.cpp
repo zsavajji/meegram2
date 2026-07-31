@@ -237,6 +237,16 @@ AppManager::AppManager(QObject *parent)
 
     connect(m_client.get(), SIGNAL(result(td::td_api::Object *)), SLOT(handleResult(td::td_api::Object *)));
 
+    // Here rather than in initialize(), and that is the whole point of it: initialize() is
+    // called from main.qml's Component.onCompleted, by which time the root page has been
+    // built and every qsTr on it evaluated. This constructor runs before setSource, so a
+    // cached pack is in place for the first one. See Locale::loadCache.
+    //
+    // A hit also means startup has nothing to wait for - the request below still goes out
+    // and still refreshes the pack, it just no longer holds the UI.
+    if (m_locale->loadCache(m_settings->languagePackId()))
+        m_initializationStatus[1] = true;
+
 #ifdef MEEGRAM_JSON_TRANSPORT
     // Before authorization, and before the socket has said anything: a tap that started
     // this process is already on its way, and the D-Bus call that carries it is delivered
@@ -342,12 +352,17 @@ void AppManager::initialize() noexcept
 
     setParameters();
     requestAuthorizationState();
-    loadLanguagePack();
 
-    // Says why the spinner is still there, once, if it still is.
+    // No loadLanguagePack here: it goes out from the setParameters callback, once TDLib
+    // has something to answer it with.
+
+    // Says why the spinner is still there, once, and stops waiting for the half that can
+    // never arrive on its own.
     QTimer::singleShot(InitializationStallMs, this, SLOT(reportInitializationStall()));
 
     m_languagePackInfoModel = std::make_unique<LanguagePackInfoModel>(m_client);
+
+    emit languagePackInfoModelChanged();
 }
 
 void AppManager::setParameters() noexcept
@@ -387,6 +402,16 @@ void AppManager::setParameters() noexcept
         {
             m_initializationStatus[0] = true;
             checkInitializationStatus();
+
+            // Only now. TDLib answers getLanguagePackStrings with an error until it has
+            // parameters, and this request used to go out one line after setTdlibParameters
+            // - so on a first launch it lost the race with the database opening and failed
+            // every time, leaving the retry below as the only way startup could finish.
+            // Asking after the parameters are accepted makes the first attempt the one that
+            // works.
+            //
+            // Queued, because this callback runs on the reader thread.
+            QMetaObject::invokeMethod(this, "loadLanguagePack", Qt::QueuedConnection);
         }
     });
 }
@@ -415,8 +440,6 @@ void AppManager::loadLanguagePack() noexcept
 {
     const auto &languageCode = m_settings->languagePackId();
 
-    qDebug() << "Requesting language pack with ID:" << languageCode;
-
     auto request = td::td_api::make_object<td::td_api::getLanguagePackStrings>();
     request->language_pack_id_ = languageCode.toStdString();
 
@@ -425,15 +448,12 @@ void AppManager::loadLanguagePack() noexcept
         {
             const auto &languagePlural = m_settings->languagePluralId();
 
-            qDebug() << "Setting language plural for code:" << languagePlural;
-
             m_locale->setLanguagePlural(languagePlural);
-            m_locale->setLanguagePackStrings(td::td_api::move_object_as<td::td_api::languagePackStrings>(response));
+            m_locale->setLanguagePackStrings(languageCode, td::td_api::move_object_as<td::td_api::languagePackStrings>(response));
 
             if (auto locale = createLocale(languageCode); locale)
             {
                 QLocale::setDefault(*locale);
-                qDebug() << "Default Locale:" << QLocale::languageToString(locale->language()) << QLocale::countryToString(locale->country());
             }
             else
             {
@@ -446,13 +466,17 @@ void AppManager::loadLanguagePack() noexcept
                 checkInitializationStatus();
             }
         }
-        else if (!m_initializationStatus[1])
+        else
         {
             // The response was an error, which offline on a first launch is what this
             // always is: there is nothing in the local pack database to answer from. The
             // callback used to stop here, so the second initialization flag was never set,
             // appInitialized() never fired, and the app sat on the spinner for the rest of
             // the run - including after the network came back, because nothing asked again.
+            //
+            // Retried whether or not startup has given up waiting: the deadline in
+            // reportInitializationStall releases the UI, it does not stop the pack from
+            // arriving, and every page pushed after it lands is translated normally.
             //
             // A timer rather than a connection-state hook, which was the first thing tried
             // here and cannot work: under the daemon transport TDLib announced its
@@ -469,9 +493,6 @@ void AppManager::loadLanguagePack() noexcept
 
 void AppManager::scheduleLanguagePackRetry() noexcept
 {
-    if (m_initializationStatus[1])
-        return;
-
     qWarning() << "language pack request failed; retrying in" << LanguagePackRetryMs << "ms";
 
     QTimer::singleShot(LanguagePackRetryMs, this, SLOT(loadLanguagePack()));
@@ -479,7 +500,7 @@ void AppManager::scheduleLanguagePackRetry() noexcept
 
 void AppManager::reportInitializationStall() noexcept
 {
-    if (std::all_of(m_initializationStatus.begin(), m_initializationStatus.end(), [](bool status) { return status; }))
+    if (std::all_of(m_initializationStatus.begin(), m_initializationStatus.end(), [](const auto &status) { return status.load(); }))
         return;
 
     // The one line this used to be missing. A spinner that never resolves said nothing
@@ -490,11 +511,26 @@ void AppManager::reportInitializationStall() noexcept
                << (m_initializationStatus[0] ? "ok" : "PENDING") << "| language pack" << (m_initializationStatus[1] ? "ok" : "PENDING")
                << "| connection" << (m_connectionStateString.isEmpty() ? QLatin1String("never reported") : QLatin1String("reported"))
                << m_connectionStateString << "| authorized" << m_isAuthorized;
+
+    // And stop waiting for it. Startup waits for the language pack because QML1 never
+    // retranslates (see MainPage.qml), but a first launch with no local pack and no
+    // network cannot be a spinner with no way out - that state has no way to sign in,
+    // which is the one thing a first launch is for. Untranslated is a worse app; no app
+    // is not an app.
+    //
+    // Set unconditionally, not only when the parameters are in: if those are the half
+    // that is late, this is still the last timer that runs, and gating it on them would
+    // put the spinner right back where it was.
+    if (!m_initializationStatus[1])
+    {
+        m_initializationStatus[1] = true;
+        checkInitializationStatus();
+    }
 }
 
 void AppManager::checkInitializationStatus() noexcept
 {
-    if (std::all_of(m_initializationStatus.begin(), m_initializationStatus.end(), [](bool status) { return status; }))
+    if (std::all_of(m_initializationStatus.begin(), m_initializationStatus.end(), [](const auto &status) { return status.load(); }))
     {
         emit appInitialized();
     }
@@ -502,8 +538,6 @@ void AppManager::checkInitializationStatus() noexcept
 
 void AppManager::handleResult(td::td_api::Object *object)
 {
-    // qDebug() << QString::fromStdString(td::td_api::to_string(*object));
-
     if (object->get_id() == td::td_api::updateAuthorizationState::ID)
     {
         handleAuthorizationState(*static_cast<const td::td_api::updateAuthorizationState *>(object)->authorization_state_);
@@ -567,8 +601,6 @@ void AppManager::handleConnectionState(const td::td_api::ConnectionState &connec
 
     if (state == m_connectionStateString)
         return;
-
-    qDebug() << "Connection state:" << state;
 
     m_connectionStateString = state;
     emit connectionStateChanged();

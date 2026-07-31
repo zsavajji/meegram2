@@ -26,9 +26,22 @@ public:
     QString formatTtl(int ttl, bool shorter = false) const;
 
     void setLanguagePlural(const QString &value);
-    void setLanguagePackStrings(td::td_api::object_ptr<td::td_api::languagePackStrings> value);
+    void setLanguagePackStrings(const QString &languageId, td::td_api::object_ptr<td::td_api::languagePackStrings> value);
+
+    // The pack the previous run resolved, read straight off disk. Returns false if there
+    // is nothing usable - no file, another language, or a format this build does not read.
+    //
+    // Exists because of *when*, not because of how often: TDLib persists the pack too, so
+    // asking it is a local read rather than a download. But the answer comes back through
+    // an async round trip, and on the daemon transport that is a ~1 MB reply landing after
+    // the root QML page has already evaluated every qsTr on it. QML1 never retranslates,
+    // so for those strings "later" means "never". This is the same data somewhere it can
+    // be had before the scene is built.
+    bool loadCache(const QString &languageId);
 
 private:
+    void saveCache(const QString &languageId) const;
+
     QString stringForQuantity(PluralRules::Quantity quantity) const;
 
     void addRules(const QStringList &languages, std::unique_ptr<PluralRules> rules);

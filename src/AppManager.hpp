@@ -18,6 +18,7 @@
 #include <QObject>
 
 #include <array>
+#include <atomic>
 #include <memory>
 
 class Authorization;
@@ -34,11 +35,12 @@ class AppManager : public QObject
     Q_PROPERTY(bool authorized READ isAuthorized NOTIFY authorizedChanged)
     Q_PROPERTY(QString connectionStateString READ connectionStateString NOTIFY connectionStateChanged)
 
-    Q_PROPERTY(Client *client READ client NOTIFY clientChanged)
-    Q_PROPERTY(Authorization *authorization READ authorization NOTIFY authorizationChanged)
-    Q_PROPERTY(Locale *locale READ locale NOTIFY localeChanged)
-    Q_PROPERTY(Settings *settings READ settings NOTIFY settingsChanged)
-    Q_PROPERTY(StorageManager *storageManager READ storageManager NOTIFY storageManagerChanged)
+    // All built in the constructor and never replaced, so no change to notify.
+    Q_PROPERTY(Client *client READ client CONSTANT)
+    Q_PROPERTY(Authorization *authorization READ authorization CONSTANT)
+    Q_PROPERTY(Locale *locale READ locale CONSTANT)
+    Q_PROPERTY(Settings *settings READ settings CONSTANT)
+    Q_PROPERTY(StorageManager *storageManager READ storageManager CONSTANT)
 
     Q_PROPERTY(ChatManager *chatManager READ chatManager NOTIFY chatManagerChanged)
 
@@ -61,11 +63,6 @@ public:
     LanguagePackInfoModel *languagePackInfoModel() const noexcept;
 
 signals:
-    void clientChanged();
-    void authorizationChanged();
-    void localeChanged();
-    void settingsChanged();
-    void storageManagerChanged();
     void chatManagerChanged();
     void languagePackInfoModelChanged();
 
@@ -96,7 +93,8 @@ private slots:
     void scheduleLanguagePackRetry() noexcept;
 
     // Fires once, a few seconds in. Silent unless startup is incomplete, in which case it
-    // names the half that is missing.
+    // names the half that is missing and releases the UI from waiting on the language
+    // pack - the only half the app can do without.
     void reportInitializationStall() noexcept;
 
 private:
@@ -134,5 +132,15 @@ private:
     std::unique_ptr<NotificationManager> m_notificationManager;
 #endif
 
-    std::array<bool, 2> m_initializationStatus{false, false};
+    // [0] setTdlibParameters accepted. [1] startup is done waiting on the language pack -
+    // either it arrived or reportInitializationStall gave up on it. Both true is what
+    // appInitialized means, and [1] is deliberately not "the pack is loaded": the retry
+    // outlives the deadline.
+    //
+    // Atomic because the two halves are now set from different threads - [0] and a loaded
+    // [1] from a send() callback on the reader thread, the deadline's [1] from a timer on
+    // this one. Two plain writes racing there can leave each side reading the other's flag
+    // as still false, and the missed emit is a spinner that never resolves, which is the
+    // bug this pair exists to prevent.
+    std::array<std::atomic<bool>, 2> m_initializationStatus{};
 };

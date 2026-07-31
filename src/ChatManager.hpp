@@ -76,10 +76,10 @@ class ChatManager : public QObject
 {
     Q_OBJECT
 
-    Q_PROPERTY(QObject *folderModel READ folderModel NOTIFY folderModelChanged)
+    Q_PROPERTY(QObject *folderModel READ folderModel CONSTANT)
 
-    Q_PROPERTY(QObject *mainModel READ mainModel NOTIFY mainModelChanged)
-    Q_PROPERTY(QObject *archivedModel READ archivedModel NOTIFY archivedModelChanged)
+    Q_PROPERTY(QObject *mainModel READ mainModel CONSTANT)
+    Q_PROPERTY(QObject *archivedModel READ archivedModel CONSTANT)
     Q_PROPERTY(QList<QObject *> folderModels READ folderModels NOTIFY folderModelsChanged)
 
     Q_PROPERTY(Chat *selectedChat READ selectedChat NOTIFY selectedChatChanged)
@@ -125,10 +125,6 @@ signals:
     // and does not fire on close.
     void activeChatChanged(qlonglong chatId);
 
-    void folderModelChanged();
-
-    void mainModelChanged();
-    void archivedModelChanged();
     void folderModelsChanged();
 
 private slots:

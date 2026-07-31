@@ -24,7 +24,6 @@ class MessageModel : public QAbstractListModel
 
     Q_PROPERTY(int count READ count NOTIFY countChanged)
     Q_PROPERTY(bool loading READ loading NOTIFY loadingChanged)
-    Q_PROPERTY(bool backFetching READ backFetching NOTIFY backFetchingChanged)
 
 public:
     explicit MessageModel(std::shared_ptr<Chat> chat, std::shared_ptr<Locale> locale, std::shared_ptr<StorageManager> storage);
@@ -58,7 +57,6 @@ public:
 
     int count() const noexcept;
     bool loading() const noexcept;
-    bool backFetching() const noexcept;
 
     Q_INVOKABLE void getChatHistory(const QString &fromMessageId, int offset, int limit, bool fetchPrevious = false) noexcept;
     // Reports the newest message on screen as read. Nothing ever called the old
@@ -80,8 +78,6 @@ signals:
     void countChanged();
     void loadingChanged();
 
-    void backFetchingChanged();
-
     void fetchedPosition(int numItems);
 
     // A single new message landed at the end - sent or received. Distinct from
@@ -92,7 +88,6 @@ public slots:
     void refresh() noexcept;
 
 private slots:
-    void handleChatItem() noexcept;
     void handleResult(td::td_api::Object *object) noexcept;
 
     // Runs linkContentFile over everything loaded, on the main thread. registerFile is

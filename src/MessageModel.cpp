@@ -21,9 +21,6 @@ MessageModel::MessageModel(std::shared_ptr<Chat> chat, std::shared_ptr<Locale> l
     , m_storage(std::move(storage))
     , m_chat(std::move(chat))
 {
-    qDebug() << "MessageModel initialized.";
-
-    connect(m_chat.get(), SIGNAL(chatChanged()), SLOT(handleChatItem()));
     connect(m_client.get(), SIGNAL(result(td::td_api::Object *)), SLOT(handleResult(td::td_api::Object *)));
 
     setRoleNames(roleNames());
@@ -250,11 +247,6 @@ int MessageModel::count() const noexcept
     return m_messages.size();
 }
 
-bool MessageModel::backFetching() const noexcept
-{
-    return m_backFetching;
-}
-
 bool MessageModel::loading() const noexcept
 {
     return m_loading;
@@ -274,11 +266,6 @@ void MessageModel::requestHistory(qlonglong fromMessageId, int offset, int limit
     request->limit_ = limit;
     request->only_local_ = false;
 
-    // Logged on the way out as well as on the way back, so an empty log distinguishes
-    // "never asked" from "asked and got nothing". qWarning survives release builds;
-    // reading either needs the binary run directly, since invoker discards stderr.
-    qWarning() << "getChatHistory ->" << "chat" << m_chat->id() << "from" << fromMessageId << "offset" << offset << "limit" << limit;
-
     m_client->send(std::move(request), [this, fetchPrevious, alive = m_alive](auto &&response) {
         // Runs on the TDLib worker thread, and the model may already be gone: leaving a
         // chat destroys it, and a history request is usually still outstanding when you
@@ -292,11 +279,7 @@ void MessageModel::requestHistory(qlonglong fromMessageId, int offset, int limit
                 m_loading = false;
                 emit loadingChanged();
             }
-            if (m_backFetching)
-            {
-                m_backFetching = false;
-                emit backFetchingChanged();
-            }
+            m_backFetching = false;
 
             emit countChanged();
         };
@@ -424,8 +407,6 @@ void MessageModel::fetchMoreBack() noexcept
     m_backFetching = true;
 
     requestHistory(std::ranges::min(m_messages), 0, MessageSliceLimit, true);
-
-    emit backFetchingChanged();
 }
 
 void MessageModel::viewMessagesUpTo(int index) noexcept
@@ -556,15 +537,6 @@ void MessageModel::refresh() noexcept
     endResetModel();
 
     emit countChanged();
-}
-
-void MessageModel::handleChatItem() noexcept
-{
-    qDebug() << "Title" << m_chat->title();
-    qDebug() << "Unread count" << m_chat->unreadCount();
-    qDebug() << "Last read inbox message id" << m_chat->lastReadInboxMessageId();
-    qDebug() << "Last read outbox message id" << m_chat->lastReadOutboxMessageId();
-    qDebug() << "Unread mention count" << m_chat->unreadMentionCount();
 }
 
 void MessageModel::handleResult(td::td_api::Object *object) noexcept
@@ -702,11 +674,7 @@ void MessageModel::reloadHistory() noexcept
             emit loadingChanged();
         }
 
-        if (m_backFetching)
-        {
-            m_backFetching = false;
-            emit backFetchingChanged();
-        }
+        m_backFetching = false;
 
         emit countChanged();
         return;

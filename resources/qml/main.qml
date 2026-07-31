@@ -52,6 +52,17 @@ PageStackWindow {
         }
     }
 
+    // For the handful of strings that exist before the language pack does - anything built
+    // with this window rather than pushed later. QML1 has no retranslate, so a plain qsTr
+    // out there keeps its first result for the life of the process; reading `initialized`
+    // here is what re-runs the caller's binding once the pack is in. Until then qsTr hands
+    // back the key, which is at least readable - the empty string this replaces was three
+    // blank menu items whenever the pack was slow.
+    function tr(key) {
+        var retranslateOnInitialized = initialized;
+        return qsTr(key);
+    }
+
     function showInfoBanner(message) {
         banner.text = message
         banner.show()
@@ -91,11 +102,6 @@ PageStackWindow {
     }
 
     function openChat(chatId) {
-        // Every caller routes through here - the chat list, Saved Messages, a tapped
-        // notification, the fetch retry. A failure with no "tap row" line before it did
-        // not come from the list.
-        utils.log("openChat requested for " + chatId)
-
         // Push only if there is something to show. This used to push regardless, so a
         // chat that could not be selected produced a page with chat, chatInfo and
         // messageModel all undefined - a spinner that never resolved. A refusal means a

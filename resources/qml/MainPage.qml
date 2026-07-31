@@ -266,21 +266,21 @@ Page {
         id: myMenu
 
         // The one place on this page that qsTr is read outside the initialized gate: the
-        // menu is built with the page, which is now the root page, so it is created before
-        // the language pack can possibly have arrived and QML1 never retranslates. Naming
-        // appWindow.initialized in the binding is what re-runs qsTr once it does - without
-        // it these three read out as their keys for the life of the process.
+        // menu is built with the page, which is now the root page, so on a launch with no
+        // cached pack it is created before any strings exist. appWindow.tr is qsTr plus
+        // the dependency that re-runs these once they do - and unlike the empty string it
+        // replaces, it shows the key rather than nothing while it waits.
         MenuLayout {
             MenuItem {
-                text: appWindow.initialized ? qsTr("SavedMessages") : ""
+                text: appWindow.tr("SavedMessages")
                 onClicked: appWindow.openChat(storageManager.myId())
             }
             MenuItem {
-                text: appWindow.initialized ? qsTr("ArchivedChats") : ""
+                text: appWindow.tr("ArchivedChats")
                 onClicked: pageStack.push(Qt.createComponent("ArchivedChatPage.qml"), { model: chatManager.archivedModel })
             }
             MenuItem {
-                text: appWindow.initialized ? qsTr("SETTINGS") : ""
+                text: appWindow.tr("SETTINGS")
                 onClicked: pageStack.push(Qt.createComponent("SettingsPage.qml"))
             }
             MenuItem {

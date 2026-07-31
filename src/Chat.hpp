@@ -23,7 +23,6 @@ class Chat : public QObject
     Q_PROPERTY(int unreadCount READ unreadCount NOTIFY chatChanged)
     Q_PROPERTY(int unreadMentionCount READ unreadMentionCount NOTIFY chatChanged)
 
-    Q_PROPERTY(int muteFor READ muteFor NOTIFY chatChanged)
     Q_PROPERTY(bool isMuted READ isMuted NOTIFY chatChanged)
 
     // lastReadInboxMessageId, lastReadOutboxMessageId and typeId are deliberately not
@@ -52,7 +51,6 @@ public:
     qlonglong lastReadOutboxMessageId() const noexcept;
     int unreadMentionCount() const noexcept;
 
-    int muteFor() const noexcept;
     bool isMuted() const noexcept;
 
     qlonglong typeId() const noexcept;

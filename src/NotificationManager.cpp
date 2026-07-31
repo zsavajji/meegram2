@@ -149,22 +149,13 @@ void NotificationManager::evaluateChat(qlonglong chatId, bool mayPublish) noexce
     if (!message || message->isOutgoing() || message->isService())
         return;
 
-    // The steady-state exits are silent. chatUpdated fires for read state, positions,
-    // notification settings and mention counts, so most calls land on one of these and
-    // logging them buries the interesting lines - and every qWarning here is a syslog
-    // write on a device that has better things to do.
-
     // Unread by message id rather than unreadCount: TDLib sends updateChatReadInbox
     // after updateChatLastMessage, so the count is still the pre-arrival one here.
     // Checked before the dedupe below, or a message read elsewhere after we had already
     // notified would never get its banner taken down.
     if (message->id() <= chat->lastReadInboxMessageId())
     {
-        // Read here or on another device. Drop the banner this phone is still showing -
-        // worth a line only when there was actually one to drop.
-        if (m_published.contains(chatId))
-            qWarning() << "notification: chat" << chatId << "withdrawn - read elsewhere";
-
+        // Read here or on another device. Drop the banner this phone is still showing.
         withdraw(chatId);
         return;
     }
@@ -183,10 +174,7 @@ void NotificationManager::evaluateChat(qlonglong chatId, bool mayPublish) noexce
     // stays empty for a chat that only exists in the store, and setPositions() has
     // already run for this update by the time we get here.
     if (chat->positions().empty())
-    {
-        qWarning() << "notification: chat" << chatId << "skipped - in the store but not in any chat list";
         return;
-    }
 
     // Never step backwards. Unlike m_notifiedMessageId this survives a withdraw, so a
     // re-delivered or out-of-order update cannot raise a banner for a message this chat
@@ -203,21 +191,11 @@ void NotificationManager::evaluateChat(qlonglong chatId, bool mayPublish) noexce
     if (chatId == m_activeChatId && isForeground())
         return;
 
-    // Past here, staying quiet is unusual enough to be worth explaining.
     if (chat->isMuted())
-    {
-        // muteFor is reported because Chat::isMuted() is muteFor > 0 and ignores
-        // use_default_mute_for_ - if that field is stale for this chat this is where it
-        // would show up.
-        qWarning() << "notification: chat" << chatId << "skipped - muted, muteFor" << chat->muteFor();
         return;
-    }
 
     if (message->date().toTime_t() < m_startedAt)
-    {
-        qWarning() << "notification: chat" << chatId << "skipped - older than app start";
         return;
-    }
 
     m_notifiedMessageId.insert(chatId, message->id());
     m_highWaterMessageId.insert(chatId, message->id());
@@ -269,13 +247,7 @@ void NotificationManager::publish(qlonglong chatId, const QString &summary, cons
 {
     const auto userId = notificationUserId();
     if (userId == 0)
-    {
-        // The last silent early return on this path. Everything else says why it stayed
-        // quiet, and this one being mute is how "no notifications at all, no explanation"
-        // stayed possible.
-        qWarning() << "notification: chat" << chatId << "not posted - no notification user id";
         return;
-    }
 
     // Tap-to-open is best effort: without it the banner still shows, it just does
     // nothing when touched. registerObject returns false for a path that is already
@@ -295,13 +267,7 @@ void NotificationManager::publish(qlonglong chatId, const QString &summary, cons
         // updateNotification answers false, not an error, for an id it no longer
         // knows.
         if (reply.type() != QDBusMessage::ErrorMessage && QDBusReply<bool>(reply).value())
-        {
-            // Logged because an update that reports success but refreshes a banner the
-            // user already swiped away is indistinguishable from no notification at all
-            // - and it would hit an ongoing conversation, not a first message.
-            qWarning() << "notification: updated existing banner" << it.value() << "for chat" << chatId;
             return;
-        }
 
         // The user dismissed it, or the daemon restarted. Fall through and post a new
         // one instead of silently dropping the message.
@@ -338,8 +304,6 @@ void NotificationManager::publish(qlonglong chatId, const QString &summary, cons
     }
 
     const auto published = QDBusReply<uint>(reply).value();
-
-    qWarning() << "notification: posted for chat" << chatId << "id" << published << "image" << (imagePath.isEmpty() ? "none" : "yes");
 
     m_published.insert(chatId, published);
 }

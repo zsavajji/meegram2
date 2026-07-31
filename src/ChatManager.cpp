@@ -429,22 +429,6 @@ bool ChatManager::openChat(const QString &rawChatId) noexcept
         // by id that TDLib has not pushed yet lands here - Saved Messages, which opens
         // myId() directly, and a notification tapped before the chat list has loaded.
         // Fetch it instead of giving up; getChat makes TDLib push updateNewChat.
-        // The nearest stored id rather than the whole list: dumping 150 of them produced
-        // a line long enough that the log transport dropped characters from it, which
-        // showed up as ids running together and as ids below TDLib's -1999999999999
-        // floor. One number says the same thing and survives the trip.
-        const auto ids = m_storage->chatIds();
-
-        qlonglong nearest = 0;
-        for (const auto id : ids)
-        {
-            if (nearest == 0 || qAbs(id - chatId) < qAbs(nearest - chatId))
-                nearest = id;
-        }
-
-        qWarning() << "openChat: no chat in storage for id" << chatId << "- storage holds" << ids.size()
-                   << "chats; nearest stored id is" << nearest << "off by" << (nearest - chatId);
-
         fetchChat(chatId);
         return false;
     }

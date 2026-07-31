@@ -96,11 +96,6 @@ int Chat::unreadMentionCount() const noexcept
     return m_unreadMentionCount;
 }
 
-int Chat::muteFor() const noexcept
-{
-    return m_muteFor;
-}
-
 bool Chat::isMuted() const noexcept
 {
     return m_muteFor > 0;

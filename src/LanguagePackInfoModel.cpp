@@ -74,8 +74,6 @@ void LanguagePackInfoModel::loadLocalizationData() noexcept
     auto request = td::td_api::make_object<td::td_api::getLocalizationTargetInfo>();
     request->only_local_ = true;
 
-    qDebug() << "Loading localization target info...";
-
     m_client->send(std::move(request), [this](auto &&response) {
         if (response->get_id() == td::td_api::localizationTargetInfo::ID)
         {

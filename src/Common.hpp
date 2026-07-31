@@ -39,9 +39,7 @@ static auto DefaultLanguageCode = QLocale::system().name().left(2);
 constexpr auto DeviceModel = "Nokia N9";
 constexpr auto SystemVersion = "MeeGo 1.2 Harmattan";
 
-constexpr auto WaitTimeout = 30.0;  // 30 sec
-
-[[maybe_unused]] constexpr std::array<int, 3> ServiceNotificationsUserIds = {42777, 333000, 777000};
+constexpr std::array<int, 3> ServiceNotificationsUserIds = {42777, 333000, 777000};
 
 constexpr auto ChatSliceLimit = 25;
 constexpr auto MessageSliceLimit = 20;

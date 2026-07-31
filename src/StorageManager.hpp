@@ -42,7 +42,6 @@ public:
 signals:
     void chatFoldersUpdated();
     void basicGroupUpdated(qlonglong groupId);
-    void basicGroupFullInfoUpdated(qlonglong groupId);
     // Any change at all to a chat object, including the chat merely arriving in the
     // store. Fired from eleven different updates, so it means "look again", not
     // "something happened" - see chatLastMessageChanged before wiring anything that
@@ -58,11 +57,8 @@ signals:
     void chatLastMessageChanged(qlonglong chatId);
 
     void chatPositionUpdated(qlonglong chatId);
-    void fileUpdated(int fileId);
     void supergroupUpdated(qlonglong groupId);
-    void supergroupFullInfoUpdated(qlonglong groupId);
     void userUpdated(qlonglong userId);
-    void userFullInfoUpdated(qlonglong userId);
 
     void chatOnlineMemberCountUpdated(qlonglong chatId, int onlineMemberCount);
 
@@ -74,13 +70,6 @@ public slots:
     qlonglong myId() const noexcept;
 
     QVariant getOption(const QString &name) const noexcept;
-
-    BasicGroup *getBasicGroup(qlonglong groupId) const noexcept;
-    Chat *getChat(qlonglong chatId) const noexcept;
-    File *getFile(int fileId) const noexcept;
-    Supergroup *getSupergroup(qlonglong groupId) const noexcept;
-    SupergroupFullInfo *getSupergroupFullInfo(qlonglong groupId) const noexcept;
-    User *getUser(qlonglong userId) const noexcept;
 
 private slots:
     void handleResult(td::td_api::Object *object);

@@ -367,10 +367,8 @@ Page {
             // too, and the prepend that followed jumped the view to the top of the
             // fetched block - which is where opening a chat kept landing.
             onAtYBeginningChanged: {
-                if (atYBeginning && !loading && !followLast) {
-                    console.log("Fetching more messages...")
+                if (atYBeginning && !loading && !followLast)
                     messageModel.fetchMoreBack()
-                }
             }
         }
 

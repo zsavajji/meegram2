@@ -331,11 +331,6 @@ void QrCodeItem::updateQrCode()
     // Generate the QR code image
     m_qrCodeImage = Qr::Generate(qrData, pixelSize, m_foreground);
 
-    // Optionally, you can replace the center of the QR code with another image if needed
-    // Uncomment and replace 'centerImage' with the desired image
-    // QImage centerImage = ...;
-    // m_qrCodeImage = Qr::ReplaceCenter(m_qrCodeImage, centerImage);
-
     update();
 }
 

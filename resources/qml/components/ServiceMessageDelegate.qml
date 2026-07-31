@@ -40,7 +40,6 @@ Item {
                 y: (UI.FIELD_DEFAULT_HEIGHT - font.pixelSize) / 2
                 width: root.width - UI.PADDING_XLARGE * 2
                 text: utils.replaceEmoji(model.serviceMessage)
-                onLinkActivated: { console.log(link)}
             }
         }
     }

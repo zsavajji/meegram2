@@ -127,36 +127,6 @@ QVariant StorageManager::getOption(const QString &name) const noexcept
     return QVariant();
 }
 
-BasicGroup *StorageManager::getBasicGroup(qlonglong groupId) const noexcept
-{
-    return this->basicGroup(groupId).get();
-}
-
-Chat *StorageManager::getChat(qlonglong chatId) const noexcept
-{
-    return this->chat(chatId).get();
-}
-
-File *StorageManager::getFile(int fileId) const noexcept
-{
-    return this->file(fileId).get();
-}
-
-Supergroup *StorageManager::getSupergroup(qlonglong groupId) const noexcept
-{
-    return this->supergroup(groupId).get();
-}
-
-SupergroupFullInfo *StorageManager::getSupergroupFullInfo(qlonglong groupId) const noexcept
-{
-    return this->supergroupFullInfo(groupId).get();
-}
-
-User *StorageManager::getUser(qlonglong userId) const noexcept
-{
-    return this->user(userId).get();
-}
-
 void StorageManager::handleResult(td::td_api::Object *object)
 {
     switch (object->get_id())
@@ -333,7 +303,6 @@ void StorageManager::handleResult(td::td_api::Object *object)
             auto supergroupId = update->supergroup_id_;
             auto supergroupFullInfo = std::make_shared<SupergroupFullInfo>(std::move(update->supergroup_full_info_));
             m_supergroupFullInfo.insert_or_assign(supergroupId, std::move(supergroupFullInfo));
-            emit supergroupFullInfoUpdated(supergroupId);
             break;
         }
         case td::td_api::updateChatFolders::ID: {
@@ -357,7 +326,6 @@ void StorageManager::handleResult(td::td_api::Object *object)
             {
                 m_files[fileId] = std::make_shared<File>(std::move(update->file_));
             }
-            emit fileUpdated(fileId);
             break;
         }
         case td::td_api::updateOption::ID: {

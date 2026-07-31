@@ -14,9 +14,6 @@ class MessageService : public QObject, public MessageContent
     Q_PROPERTY(QString groupTitle READ groupTitle CONSTANT)
     Q_PROPERTY(QStringList addedMembers READ addedMembers CONSTANT)
     Q_PROPERTY(qlonglong removedMember READ removedMember CONSTANT)
-    Q_PROPERTY(qlonglong upgradedToSupergroup READ upgradedToSupergroup CONSTANT)
-    Q_PROPERTY(qlonglong upgradedFromGroup READ upgradedFromGroup CONSTANT)
-    Q_PROPERTY(qlonglong pinnedMessage READ pinnedMessage CONSTANT)
     Q_PROPERTY(int autoDeleteTime READ autoDeleteTime CONSTANT)
     Q_PROPERTY(QString customAction READ customAction CONSTANT)
 
@@ -26,20 +23,14 @@ public:
     QString groupTitle() const;
     QStringList addedMembers() const;
     qlonglong removedMember() const;
-    qlonglong upgradedToSupergroup() const;
-    qlonglong upgradedFromGroup() const;
-    qlonglong pinnedMessage() const;
     int autoDeleteTime() const;
     QString customAction() const;
 
 private:
     QString m_groupTitle;
     QStringList m_addedMembers;
-    qlonglong m_removedMember;
-    qlonglong m_upgradedToSupergroup;
-    qlonglong m_upgradedFromGroup;
-    qlonglong m_pinnedMessage;
-    int m_autoDeleteTime;
+    qlonglong m_removedMember{0};
+    int m_autoDeleteTime{0};
     QString m_customAction;
 };
 

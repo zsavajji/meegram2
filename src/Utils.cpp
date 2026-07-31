@@ -437,11 +437,6 @@ bool Utils::saveToGallery(const QString &localPath) noexcept
     return QFile::copy(localPath, destination);
 }
 
-void Utils::log(const QString &message) noexcept
-{
-    qWarning() << "QML:" << message;
-}
-
 void Utils::copyToClipboard(const QString &text) noexcept
 {
     QApplication::clipboard()->setText(text);
@@ -878,26 +873,6 @@ QString Utils::getUserShortName(std::shared_ptr<User> user) noexcept
     }
 
     return QString();
-}
-
-QString Utils::getUserFullName(std::shared_ptr<User> user) noexcept
-{
-    if (!user)
-        return QString();
-
-    switch (user->type())
-    {
-        case User::Type::Bot:
-        case User::Type::Regular:
-            return QString(user->firstName() + " " + user->lastName()).trimmed();
-
-        case User::Type::Deleted:
-        case User::Type::Unknown:
-            return tr("HiddenName");
-
-        default:
-            return QString();
-    }
 }
 
 bool Utils::isMeUser(std::shared_ptr<User> user, std::shared_ptr<StorageManager> storage) noexcept
