@@ -492,6 +492,75 @@ build_rlottie() {
     success "rlottie built and installed successfully."
 }
 
+# TDLib's JSON converter never implemented to_json for vector<bytes>: it emits the
+# literal placeholder "UNSUPPORTED STORED VECTOR OF BYTES", which is not valid C++.
+# Upstream never trips it, because server mode only emits to_json for Objects and no
+# Object has such a field. Client mode emits to_json for queries, and two of those do -
+# inputPassportElementErrorSourceFiles and ...TranslationFiles, both file_hashes. So
+# generating the client-direction codec (below) requires implementing the missing case.
+#
+# Not target-specific, unlike TD_HAS_MMSG: this one is about what we generate, not what
+# the N9 can run. Same idempotence rule, for the same reason - td/ is reused across runs.
+patch_td_json_vector_bytes() {
+    local header="td/td/tl/tl_json.h"
+    local converter="td/td/generate/tl_json_converter.cpp"
+
+    # The helper goes next to the JsonVectorInt64 it mirrors. tl_json.h is already
+    # included by every generated file, so nothing needs a new include.
+    if grep -q "JsonVectorBytes" "$header"; then
+        info "JsonVectorBytes already present in tl_json.h."
+    elif grep -q "^struct JsonVectorInt64 {$" "$header"; then
+        local block
+        block=$(mktemp)
+        cat > "$block" <<'EOF'
+struct JsonVectorBytes {
+  const vector<string> &value;
+};
+
+inline void to_json(JsonValueScope &jv, const JsonVectorBytes &vec) {
+  auto ja = jv.enter_array();
+  for (auto &value : vec.value) {
+    ja.enter_value() << base64_encode(value);
+  }
+}
+
+EOF
+        # getline rather than sed, so nothing in the block is escape-processed.
+        awk -v f="$block" '
+            /^struct JsonVectorInt64 {$/ && !done {
+                while ((getline line < f) > 0) print line
+                done = 1
+            }
+            { print }
+        ' "$header" > "$header.new" && mv "$header.new" "$header"
+        rm -f "$block"
+        success "Added JsonVectorBytes to tl_json.h."
+    else
+        error "No 'struct JsonVectorInt64 {' anchor in $header."
+        error "TDLib has restructured tl_json.h; the vector<bytes> patch needs revisiting."
+        exit 1
+    fi
+
+    if grep -q "JsonVectorBytes{" "$converter"; then
+        info "Converter already emits JsonVectorBytes."
+    elif grep -q "UNSUPPORTED STORED VECTOR OF BYTES" "$converter"; then
+        sed -i 's|object = "UNSUPPORTED STORED VECTOR OF BYTES";|object = PSTRING() << "JsonVectorBytes{" << object << "}";|' \
+            "$converter"
+        # sed exits 0 on no match, and a silent miss here surfaces much later as
+        # 'UNSUPPORTED was not declared in this scope' in a generated file.
+        if ! grep -q "JsonVectorBytes{" "$converter"; then
+            error "Found the placeholder in $converter but could not rewrite it."
+            error "The surrounding line has changed; the vector<bytes> patch needs revisiting."
+            exit 1
+        fi
+        success "Converter now emits JsonVectorBytes for vector<bytes>."
+    else
+        error "Found neither the placeholder nor JsonVectorBytes in $converter."
+        error "TDLib has likely implemented vector<bytes> itself; the patch needs revisiting."
+        exit 1
+    fi
+}
+
 # Build TDLib
 build_tdlib() {
     if [ -d "td" ]; then
@@ -530,6 +599,8 @@ build_tdlib() {
             exit 1
         fi
     fi
+
+    patch_td_json_vector_bytes
 
     # Written only after install succeeds, so a failed run always rebuilds. Keyed on
     # everything that changes the output: the pinned commit, the target, and whether
@@ -615,6 +686,74 @@ build_tdlib() {
     success "TDLib built and installed successfully."
 }
 
+# TDLib generates its JSON codec in the server direction only - to_json for results,
+# from_json for requests. A UI talking to meegramd needs the mirror, and TDLib ships
+# neither half of it (docs/restructuring.md). tools/generate_json_client.cpp re-runs
+# TDLib's own generator entry point in client mode to produce it.
+#
+# Host-compiled by hand rather than added to TDLib's CMake: it is a build-time tool that
+# must never be cross-compiled, and keeping it here holds the td/ diff to the two lines
+# patch_td_json_vector_bytes applies. Needed only for -DMEEGRAM_JSON_TRANSPORT=ON, but
+# generated unconditionally - it costs a few seconds and being absent is a confusing
+# configure-time failure.
+generate_json_client_codec() {
+    local td_root=$(realpath td)
+    local auto_dir="$td_root/td/generate/auto"
+    local tlo="$auto_dir/tlo/td_api.tlo"
+    local header="$auto_dir/td/telegram/td_api_json_client.h"
+
+    if [ ! -f "$tlo" ]; then
+        error "No $tlo - TDLib's own generators have not run."
+        return 1
+    fi
+
+    # Regenerate only when the schema is newer than what was generated from it. The
+    # generator itself rewrites files only when their contents change, so this is about
+    # skipping the compile, not the write.
+    #
+    # tl_json_converter.cpp is in the list because patch_td_json_vector_bytes rewrites
+    # it: without this, applying the patch to an already-generated tree would leave the
+    # placeholder standing in the output.
+    if [ -z "${FORCE_REBUILD:-}" ] && [ -f "$header" ] && [ "$header" -nt "$tlo" ] &&
+        [ "$header" -nt tools/generate_json_client.cpp ] &&
+        [ "$header" -nt "$td_root/td/generate/tl_json_converter.cpp" ]; then
+        warn "Client-direction JSON codec is up to date, skipping."
+        return
+    fi
+
+    # A Harmattan cross-build keeps its host-side generator tree in build/generate; a
+    # native build has everything in build/tdlib. Either way these are host binaries.
+    local host_tree="build/generate"
+    if [ ! -f "$host_tree/tdtl/libtdtl.a" ]; then
+        host_tree="build/tdlib"
+    fi
+
+    if [ ! -f "$host_tree/tdtl/libtdtl.a" ] || [ ! -f "$host_tree/tdutils/libtdutils.a" ]; then
+        error "No host-built libtdtl.a/libtdutils.a under build/. Cannot generate the JSON codec."
+        return 1
+    fi
+
+    info "Generating the client-direction TDLib JSON codec..."
+
+    local generator
+    generator=$(realpath "$host_tree")/generate_json_client
+
+    # tl_json_converter.cpp is compiled in rather than linked: TDLib builds it straight
+    # into its generate_json executable and never archives it into a library.
+    "${HOSTCXX:-g++}" -std=c++17 -O1 -o "$generator" \
+        tools/generate_json_client.cpp \
+        "$td_root/td/generate/tl_json_converter.cpp" \
+        -I"$td_root/td/generate" -I"$td_root/tdtl" -I"$td_root/tdutils" -I"$(realpath "$host_tree")/tdutils" \
+        "$(realpath "$host_tree")/tdtl/libtdtl.a" "$(realpath "$host_tree")/tdutils/libtdutils.a" \
+        -lcrypto -lz -lpthread
+
+    # Paths inside the generator are relative to td/generate/auto, which is where TDLib
+    # runs its own generators from.
+    (cd "$auto_dir" && "$generator")
+
+    success "Client-direction JSON codec generated."
+}
+
 # Main function to run the build process
 main() {
     validate_args
@@ -624,6 +763,7 @@ main() {
     build_rlottie
     build_webp
     build_tdlib
+    generate_json_client_codec
 }
 
 main "$@"

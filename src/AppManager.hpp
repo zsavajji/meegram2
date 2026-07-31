@@ -86,6 +86,10 @@ private slots:
 private:
     void setParameters() noexcept;
 
+    // Queries the current authorization state and replays it as an update, because TDLib
+    // only announces changes. See Client::injectUpdate.
+    void requestAuthorizationState() noexcept;
+
     void checkInitializationStatus() noexcept;
 
     void handleAuthorizationState(const td::td_api::AuthorizationState &authorizationState);

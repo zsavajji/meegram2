@@ -14,6 +14,12 @@ Client::Client(QObject *parent)
     initialize();
 }
 
+// Out of line only because the header now declares it - ClientProxy needs a real one to
+// unblock its reader, and the two share a declaration. Behaviour is the implicit
+// destructor's, unchanged: ~jthread requests a stop and joins, which takes effect when
+// the receive(30.0) below next returns.
+Client::~Client() = default;
+
 int Client::clientId() const noexcept
 {
     return m_clientId;

@@ -316,6 +316,7 @@ void AppManager::initialize() noexcept
     setOption("language_pack_id", m_settings->languagePackId());
 
     setParameters();
+    requestAuthorizationState();
     loadLanguagePack();
 
     m_languagePackInfoModel = std::make_unique<LanguagePackInfoModel>(m_client);
@@ -340,11 +341,45 @@ void AppManager::setParameters() noexcept
     // request->use_test_dc_ = true;
 
     m_client->send(std::move(request), [this](auto &&response) {
-        if (response->get_id() == td::td_api::ok::ID)
+        // A TDLib that is already running rejects a second setTdlibParameters, and that
+        // is what a UI attaching to a live meegramd always sends. The rejection means the
+        // parameters *are* set, which is the only thing this flag records, so it counts
+        // as success - otherwise appInitialized() never fires and the app never starts.
+        //
+        // Matched on the message because TDLib gives it no distinct code: it is a plain
+        // 400 (td/telegram/Requests.cpp, on_request for setTdlibParameters).
+        const auto alreadyRunning = [&response] {
+            if (response->get_id() != td::td_api::error::ID)
+                return false;
+
+            return static_cast<const td::td_api::error &>(*response).message_ == "Unexpected setTdlibParameters";
+        };
+
+        if (response->get_id() == td::td_api::ok::ID || alreadyRunning())
         {
             m_initializationStatus[0] = true;
             checkInitializationStatus();
         }
+    });
+}
+
+void AppManager::requestAuthorizationState() noexcept
+{
+    // The state may have last changed before this process existed - see the note on
+    // Client::injectUpdate. Asking is the only way a late-attaching UI can find out.
+    //
+    // Sent straight after setParameters, which on a fresh client is still in flight;
+    // TDLib queues this behind it and answers with a real state rather than the
+    // placeholder it reports before initialization. On the in-process transport the
+    // answer is simply the state TDLib was about to announce anyway, so replaying it
+    // costs one redundant update and keeps the two transports behaving identically.
+    m_client->send(td::td_api::make_object<td::td_api::getAuthorizationState>(), [this](auto &&response) {
+        if (!response || response->get_id() == td::td_api::error::ID)
+            return;
+
+        auto state = td::td_api::move_object_as<td::td_api::AuthorizationState>(response);
+
+        m_client->injectUpdate(td::td_api::make_object<td::td_api::updateAuthorizationState>(std::move(state)));
     });
 }
 

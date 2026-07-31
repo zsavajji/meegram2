@@ -36,6 +36,22 @@ error now means the macro genuinely moved upstream, not that it was already appl
 Check `td/tdutils/td/utils/port/config.h`. The patch disables `recvmmsg`/`sendmmsg`,
 which the N9's kernel does not have.
 
+**`'UNSUPPORTED' was not declared in this scope` (`td_api_json_client_4.cpp`)**
+The line reads `ToJson(UNSUPPORTED STORED VECTOR OF BYTES)` — a placeholder TDLib's
+converter emits for `vector<bytes>` fields, which it never implemented. Upstream never
+hits it: server mode only emits `to_json` for `Object`s, none of which have such a
+field. Our client-direction generator emits `to_json` for queries, two of which do.
+`setup-dependencies.sh` patches this, so seeing it means the generated codec predates
+the patch — re-run the script, or `FORCE_REBUILD=1` if it reports the codec up to date.
+
+**`No 'struct JsonVectorInt64 {' anchor in td/td/tl/tl_json.h`**
+**`Found neither the placeholder nor JsonVectorBytes in ...tl_json_converter.cpp`**
+The `vector<bytes>` patch above could not find what it edits, after a `TDLIB_COMMIT`
+bump. Like `TD_HAS_MMSG`, it refuses to no-op silently: "no match" means upstream moved,
+not "already applied". The second message is the one to read carefully — it is also what
+upstream *implementing* `vector<bytes>` looks like, in which case delete
+`patch_td_json_vector_bytes` rather than re-anchoring it.
+
 **`Compiler exited 0 but produced no binary` / `Probe is not an ARM binary`**
 The toolchain verification refuses to report success without a real ARM binary.
 Usually means the wrong compiler is first on `PATH`.

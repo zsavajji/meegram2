@@ -289,9 +289,86 @@ Installed artefacts in the sysroot survive, but the trees and stamps do not.
 | `BUILD_HARMATTAN` | `OFF` | Device ABI flags, boostable, install rules, packaging. |
 | `QT_SDK_PATH` | — | SDK root. Also feeds `QML_IMPORT_PATH` for the Qt Creator code model. |
 | `MEEGRAM_GL_VIEWPORT` | `ON` | `QGLWidget` viewport for `QDeclarativeView`. Turn off to A/B against software paint. |
-| `MEEGRAM_PROFILE` | `OFF` | Enables `src/ScopeTimer.hpp`; prints a timing table to stderr every 5 s. |
+| `MEEGRAM_PROFILE` | `OFF` | Enables `src/ScopeTimer.hpp`: a timing table to stderr every 5 s, carrying current RSS, plus the labelled `MEEGRAM RSS` startup markers in `main.cpp`. |
+| `MEEGRAM_JSON_TRANSPORT` | `OFF` | Talk to TDLib through the `meegramd` daemon over a Unix socket instead of in-process. Builds `meegramd`, swaps `src/Client.cpp` for `src/ClientProxy.cpp`. |
+| `MEEGRAM_JSON_BENCH` | `OFF` | Builds `json_bench`, which measures what the JSON wire format costs per update on device. |
 
 Run the app over SSH when profiling — `invoker` in the `.desktop` swallows stderr.
+
+### The daemon transport
+
+`-DMEEGRAM_JSON_TRANSPORT=ON` moves TDLib into `meegramd`, so closing the window stops
+closing the Telegram connection. Background and measurements are in
+`docs/restructuring.md`.
+
+It needs the client-direction JSON codec, which TDLib does not ship.
+`tools/setup-dependencies.sh` generates it into `td/td/generate/auto/` after building
+TDLib; configure fails with a pointer to that script if it is missing. Re-run the script
+after moving the `td/` submodule — the generated codec tracks the schema, and only the
+schema's timestamp is checked.
+
+Generating it needs a two-line patch in `td/`, because TDLib's converter has no
+`to_json` for `vector<bytes>` and emits a placeholder that does not compile — background
+in [restructuring.md](/restructuring). The script applies it (`JsonVectorBytes` into
+`td/td/tl/tl_json.h`, and the call site at `td/td/generate/tl_json_converter.cpp:65`),
+the same way it applies `TD_HAS_MMSG`: idempotently, on every run, so a fresh `td/` clone
+or a `TDLIB_COMMIT` bump picks it up with no manual step.
+
+Worth knowing it exists, because it is the one thing in the pipeline that writes into
+`td/`. `git -C td diff` after a build is expected to show those two files plus
+`config.h`, not a dirty checkout to clean up.
+
+`meegramd` starts on demand. It is D-Bus activated under `com.meegram.Daemon`
+(`resources/com.meegram.Daemon.service`, installed to `/usr/share/dbus-1/services`), and
+`Client` asks for it whenever the socket is not already there. Nothing needs starting by
+hand, and nothing stops it — surviving the UI is the point.
+
+It listens on `$XDG_RUNTIME_DIR/meegram.sock`, falling back to `~/.meegram/sock`. A
+second instance exits rather than stealing the socket from a running one; the bus name is
+what arbitrates, so that holds even when two start at once.
+
+Running it by hand still works and is how to read its stderr:
+
+```sh
+/opt/meegram/bin/meegramd          # over SSH there is usually no session bus
+```
+
+With no `DBUS_SESSION_BUS_ADDRESS` it warns, skips the name, and relays anyway. Note this
+gives up the cross-process locking — kill any activated instance first, or the second one
+refuses to start.
+
+### Who is allowed to connect
+
+The socket carries a logged-in Telegram session with no further authentication, so
+`meegramd` checks every connection with `SO_PEERCRED`: same uid, and the peer's
+`/proc/<pid>/exe` must be the `meegram` binary sitting next to `meegramd` itself. The
+expected path is derived from the daemon's own location, so it works installed
+(`/opt/meegram/bin`) and in a build tree without configuration. A rejected peer sees its
+`connect()` succeed and then an immediate EOF; the reason is on the daemon's stderr.
+
+What this is worth: it stops another application on the device from simply opening the
+socket. It is not a boundary against a determined attacker at the same uid, who can
+ptrace the real UI or just read `~/.meegram/tdlib` — unencrypted, since nothing calls
+`checkDatabaseEncryptionKey`.
+
+`--trust-any-peer` disables the check, for driving the relay by hand. It is a flag and
+not an environment variable on purpose: any process at this uid can add variables to the
+session bus's activation environment, so an env-var switch could be turned on by exactly
+what the check excludes. `com.meegram.Daemon.service` never passes it, so an activated
+daemon always enforces.
+
+Two checks that need no app:
+
+```sh
+cmake --build build-app --target json_roundtrip && ./build-app/json_roundtrip
+
+./build-app/meegramd --trust-any-peer &
+printf '{"@type":"getOption","name":"version","@extra":"1"}\n' | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/meegram.sock
+```
+
+The first asserts that 64-bit ids survive the codec in both directions. The second should
+come back with a matching `"@extra":"1"` — and without `--trust-any-peer` it should
+instead close immediately, which is the peer check doing its job.
 
 ---
 
