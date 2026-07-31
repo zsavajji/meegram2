@@ -99,6 +99,12 @@ int main(int argc, char *argv[])
     char pending[1 << 16];
     size_t used = 0;
 
+    /* The check for the daemon's write queue: a ~1 MB languagePackStrings response is far
+     * larger than the socket buffer, so most of it can only arrive if the poll loop is
+     * woken to finish it. Ask an otherwise idle daemon for the full pack and compare -
+     * a total that stops around 200 KB is the tail being stranded. */
+    size_t total = 0;
+
     for (int elapsed = 0; elapsed < seconds;)
     {
         struct pollfd waiting;
@@ -148,6 +154,7 @@ int main(int argc, char *argv[])
         }
 
         used += (size_t)n;
+        total += (size_t)n;
         pending[used] = '\0';
 
         char *line = pending;
@@ -163,6 +170,8 @@ int main(int argc, char *argv[])
         used = strlen(line);
         memmove(pending, line, used + 1);
     }
+
+    fprintf(stderr, "read %lu bytes in total\n", (unsigned long)total);
 
     return 0;
 }

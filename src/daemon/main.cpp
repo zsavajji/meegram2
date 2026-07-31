@@ -107,6 +107,32 @@ constexpr size_t MaxOutgoingBytes = 8u << 20;
 std::mutex connectionsMutex;
 std::vector<Connection> connections;
 
+// Wakes the poll loop when broadcast leaves a partial write behind.
+//
+// Without it the queue in Connection::outgoing has no one to drain it. broadcast() runs on
+// the receive thread and writes only what the socket takes without blocking; the poll loop
+// is what finishes the rest on POLLOUT - but it asks for POLLOUT when it *builds* its
+// descriptor set, and by then it is already parked in poll() with the previous set, which
+// asked for POLLIN alone. Nothing else was guaranteed to wake it: a UI waiting on a large
+// response sends nothing, and a quiet TDLib produces no further updates.
+//
+// A ~1 MB languagePackStrings response against a ~200 KB socket buffer strands ~800 KB
+// every single time, so startup hung on whether some unrelated update happened along to
+// wake the loop. That is the whole "sometimes it loads the chats".
+int wakeupPipe[2] = {-1, -1};
+
+void wakePollLoop()
+{
+    if (wakeupPipe[1] < 0)
+        return;
+
+    const char byte = 0;
+
+    // EAGAIN means an unread wakeup is already in the pipe, which carries the same meaning.
+    // The return is ignored for that reason, not out of carelessness.
+    (void)!::write(wakeupPipe[1], &byte, 1);
+}
+
 // Never deleted, deliberately. The receive thread is detached and parked in td_receive
 // with no way to be woken, so a notifier destroyed when main returns is one the other
 // thread can still be inside. A process-lifetime leak of one object is the cheaper half
@@ -217,25 +243,38 @@ bool flushOutgoing(Connection &connection)
 
 void broadcast(const char *line, size_t length)
 {
-    const std::lock_guard<std::mutex> lock(connectionsMutex);
+    bool queued = false;
 
-    for (auto it = connections.begin(); it != connections.end();)
     {
-        it->outgoing.append(line, length);
-        it->outgoing.push_back('\n');
+        const std::lock_guard<std::mutex> lock(connectionsMutex);
 
-        if (it->outgoing.size() > MaxOutgoingBytes)
+        for (auto it = connections.begin(); it != connections.end();)
         {
-            std::fprintf(stderr, "meegramd: dropping a client %zu bytes behind\n", it->outgoing.size());
-            it = closeConnection(it);
-            continue;
-        }
+            it->outgoing.append(line, length);
+            it->outgoing.push_back('\n');
 
-        if (flushOutgoing(*it))
+            if (it->outgoing.size() > MaxOutgoingBytes)
+            {
+                std::fprintf(stderr, "meegramd: dropping a client %zu bytes behind\n", it->outgoing.size());
+                it = closeConnection(it);
+                continue;
+            }
+
+            if (!flushOutgoing(*it))
+            {
+                it = closeConnection(it);
+                continue;
+            }
+
+            queued = queued || !it->outgoing.empty();
             ++it;
-        else
-            it = closeConnection(it);
+        }
     }
+
+    // Outside the lock: the poll loop takes it as soon as it wakes, and holding it across
+    // the write would hand it a lock it has to wait for.
+    if (queued)
+        wakePollLoop();
 }
 
 // The binary a connecting peer has to be running, derived from this one's own location
@@ -513,6 +552,18 @@ int main(int argc, char *argv[])
     if (listener < 0)
         return 1;
 
+    // Before the receive thread exists, so it can never call wakePollLoop() on a half-built
+    // pipe. Both ends non-blocking: the writer must not park inside broadcast, and the
+    // reader drains until EAGAIN. See wakePollLoop.
+    if (::pipe(wakeupPipe) < 0)
+    {
+        std::perror("meegramd: pipe");
+        return 1;
+    }
+
+    for (const int end : wakeupPipe)
+        ::fcntl(end, F_SETFL, ::fcntl(end, F_GETFL, 0) | O_NONBLOCK);
+
     // Nothing is created until the first request is sent, so this is just an id.
     const int clientId = td_create_client_id();
 
@@ -584,8 +635,11 @@ int main(int argc, char *argv[])
         {
             const std::lock_guard<std::mutex> lock(connectionsMutex);
 
-            fds.reserve(connections.size() + 2);
+            fds.reserve(connections.size() + 3);
             fds.push_back(pollfd{listener, POLLIN, 0});
+
+            // Index 1, always. The wakeup exists for the whole run, unlike the bus.
+            fds.push_back(pollfd{wakeupPipe[0], POLLIN, 0});
 
             if (busFd >= 0)
             {
@@ -611,6 +665,17 @@ int main(int argc, char *argv[])
 
             std::perror("meegramd: poll");
             break;
+        }
+
+        // Drained and otherwise ignored: returning from poll() is the entire point of it.
+        // The queued remainder goes out on the next trip round, which rebuilds the
+        // descriptor set and this time asks for POLLOUT on the connection that is behind.
+        if (fds[1].revents & POLLIN)
+        {
+            char drain[64];
+            while (::read(wakeupPipe[0], drain, sizeof(drain)) > 0)
+            {
+            }
         }
 
         // Nothing here answers method calls - the name is the whole point. Dispatching
