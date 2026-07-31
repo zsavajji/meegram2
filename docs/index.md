@@ -36,6 +36,10 @@ features:
     details: The errors this pipeline actually produces, what each one means, and the rough edges that are known but not yet fixed.
     link: /troubleshooting
     linkText: When it breaks
+  - title: Profiling
+    details: On-device scope timings for the scroll path — which of the performance changes measured as real, and the one cost that dwarfs all of them.
+    link: /profiling
+    linkText: Read the numbers
 ---
 
 ## Before you start

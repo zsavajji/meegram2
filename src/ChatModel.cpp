@@ -55,6 +55,10 @@ const ChatModel::FormattedRow &ChatModel::formattedRow(const std::shared_ptr<Cha
 
     if (!entry.valid)
     {
+        // calls = rows formatted from scratch, against ChatModel::data's calls for the
+        // hit rate. Included in data's total, so never add the two rows together.
+        MEEGRAM_SCOPE("ChatModel::formattedRow.miss");
+
         entry.title = Utils::getChatTitle(chat, m_storageManager);
         entry.date = Utils::getMessageDate(chat->lastMessage());
         entry.lastMessage = Utils::getContent(chat->lastMessage(), m_storageManager, m_locale);
@@ -399,6 +403,10 @@ void ChatModel::sortChats()
         revealAll();
         return;
     }
+
+    // calls = sorts that actually signalled the view, against ChatModel::sortChats for
+    // the ones the sameOrder check swallowed.
+    MEEGRAM_SCOPE("ChatModel::sortChats.layout");
 
     // A pure reorder can go out as layoutChanged. A shrink cannot: rowCount is about
     // to change, and only a reset lets that happen without lying to the view.

@@ -5,6 +5,7 @@
 #include <QDeclarativeView>
 #include <QFontDatabase>
 #include <QModelIndex>
+#include <QPainter>
 #include <QPixmapCache>
 #include <QTextCodec>
 
@@ -39,6 +40,27 @@
 #include "Utils.hpp"
 
 namespace {
+
+#ifdef MEEGRAM_PROFILE
+// Frame counter. drawForeground runs once per QGraphicsView paint whatever the viewport
+// widget is, which is what makes it survive MEEGRAM_GL_VIEWPORT. fps is the delta in its
+// calls between two dumps over the 5s dump interval; its avg is meaningless, the scope
+// wraps a call that does nothing. No Q_OBJECT, for the same reason SceneTeardown has
+// none: main.cpp stays out of moc.
+class ProfiledView : public QDeclarativeView
+{
+protected:
+    void drawForeground(QPainter *painter, const QRectF &rect) override
+    {
+        MEEGRAM_SCOPE("frame");
+        QDeclarativeView::drawForeground(painter, rect);
+    }
+};
+
+using Viewer = ProfiledView;
+#else
+using Viewer = QDeclarativeView;
+#endif
 
 // Drops the QML scene when the window is closed, leaving TDLib and NotificationManager
 // running in the same process. Measured on device: the scene and its pixmap caches are
@@ -200,7 +222,7 @@ Q_DECL_EXPORT int main(int argc, char *argv[])
     qmlRegisterUncreatableType<MessageCall>("MyComponent", 1, 0, "MessageCall", "MessageCall cannot be created from QML.");
     qmlRegisterUncreatableType<MessageService>("MyComponent", 1, 0, "MessageService", "MessageService cannot be created from QML.");
 
-    QDeclarativeView viewer;
+    Viewer viewer;
 
 #ifdef MEEGRAM_GL_VIEWPORT
     // QDeclarativeView is a QGraphicsView, so without a GL viewport every repaint,

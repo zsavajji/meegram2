@@ -404,9 +404,13 @@ Honest list, so nobody goes looking:
 
 ## Performance work
 
-All of it is implemented; **none of it has been measured**. `src/ScopeTimer.hpp`
-instruments `ChatModel::data`, `sortChats`, `Locale::getString` and
-`ChatPhotoProvider::requestImage`, and `-DMEEGRAM_PROFILE=ON` has never been run.
+All of it is implemented, and as of 2026-07-31 **part of it is measured** — see
+[Profiling](/profiling). The short version: the C++ model layer costs 43.8 ms across a
+full-length chat-list flick, and avatar decoding in the same window costs **7.6 seconds**.
+The caching work below is confirmed to be as close to free as the instrument can measure
+(5.9 µs per read, at its ~5 µs noise floor), and equally confirmed to be ~1% of what
+scrolling actually costs. The message-list half is still unmeasured: it is blocked on a
+history-paging failure and a segfault.
 
 What is in:
 
@@ -422,6 +426,8 @@ What is in:
 - `cacheBuffer` cut to half a screen either side
 - emoji assets at the size they are drawn
 
-`-DMEEGRAM_GL_VIEWPORT=OFF` remains an untested one-flag A/B. Qt 4's `QGraphicsView`
+`-DMEEGRAM_GL_VIEWPORT=OFF` remains a half-tested one-flag A/B. Qt 4's `QGraphicsView`
 cannot do partial updates with a GL viewport, so on a mostly-static chat list it may
-well be slower than software paint. Nobody has checked.
+well be slower than software paint. What is now known is the memory side: the SGX GL
+context costs **9.1 MiB** of resident set ([Profiling](/profiling#s0-startup-markers)).
+Whether it earns that back in frames is still unchecked.

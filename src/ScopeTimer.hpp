@@ -155,7 +155,12 @@ private:
 
 }  // namespace profiling
 
-#define MEEGRAM_SCOPE(name) const ::profiling::ScopeTimer meegramScopeTimer_(name)
+// Line-numbered so two scopes can share a function - an outer total and an inner
+// branch counter is the shape most of these measurements take, and a fixed name makes
+// that a redeclaration error.
+#define MEEGRAM_SCOPE_CAT_(a, b) a##b
+#define MEEGRAM_SCOPE_NAME_(line) MEEGRAM_SCOPE_CAT_(meegramScopeTimer_, line)
+#define MEEGRAM_SCOPE(name) const ::profiling::ScopeTimer MEEGRAM_SCOPE_NAME_(__LINE__)(name)
 #define MEEGRAM_RSS(name) ::profiling::mark(name)
 
 #else

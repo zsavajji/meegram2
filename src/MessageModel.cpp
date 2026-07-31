@@ -224,6 +224,10 @@ const MessageModel::FormattedRow &MessageModel::formattedRow(qlonglong messageId
 
     if (!entry.valid)
     {
+        // calls = messages formatted from scratch, against MessageModel::data's calls
+        // for the hit rate. Included in data's total, so never add the two rows together.
+        MEEGRAM_SCOPE("MessageModel::formattedRow.miss");
+
         entry.sender = Utils::getSenderName(message, m_storage);
         entry.date = message->date().toString(QObject::tr("formatterDay12H"));
         entry.section = sectionFor(message);

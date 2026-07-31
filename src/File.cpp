@@ -1,5 +1,7 @@
 #include "File.hpp"
 
+#include "ScopeTimer.hpp"
+
 File::File(td::td_api::object_ptr<td::td_api::file> file, QObject *parent)
     : QObject(parent)
     , m_file(std::move(file))
@@ -34,17 +36,26 @@ bool File::isDownloadingCompleted() const
 
 void File::setFile(td::td_api::object_ptr<td::td_api::file> file)
 {
+    // calls = updateFile packets reaching a bound File; the fileChanged scope below is
+    // how many of them a delegate could see. Their ratio is what this guard bought.
+    MEEGRAM_SCOPE("File::setFile");
+
     m_file = std::move(file);
 
     // TDLib sends an updateFile for every chunk that lands. Only five fields of it are
-    // exposed here and a progress tick moves none of them - but fileChanged notifies
-    // all five, so every binding reading a File used to re-run on every packet, for
-    // every visible row that happened to be downloading. That is the chat list's worst
-    // moment: you flick, the avatars start arriving, and the rows you are dragging
-    // re-evaluate their source binding on each one. Emit only when a delegate could
-    // actually see a difference.
+    // exposed here and an intermediate progress tick moves none of them - but
+    // fileChanged notifies all five, so every binding reading a File would otherwise
+    // re-run on every packet, for every visible row that happened to be downloading.
+    // Emit only when a delegate could actually see a difference.
+    //
+    // Measured (docs/profiling.md): this suppresses 54% of notifications while photos
+    // download, and 0% while avatars do. Avatars are small enough that every packet
+    // they produce is a state transition - starts, completes - so there are no
+    // intermediate ticks to filter. Which means the chat list, the case this was
+    // written for, is the one place the guard cannot help; the win is on media.
     if (updateFileProperties())
     {
+        MEEGRAM_SCOPE("File::fileChanged");
         emit fileChanged();
     }
 }
