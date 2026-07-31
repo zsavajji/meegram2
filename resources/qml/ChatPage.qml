@@ -272,6 +272,10 @@ Page {
             onMovementEnded: {
                 followLast = listView.atYEnd
                 markVisibleAsRead()
+
+                // followLast has just been updated by this movement, which is the state
+                // fetchOlder needs and the atYBeginning edge never had.
+                fetchOlder()
             }
 
             section.property: "section"
@@ -353,23 +357,48 @@ Page {
                     messageModel.viewMessagesUpTo(index)
             }
 
-            onCountChanged: {
-                if (!messageModel.loading && loading) {
-                    goToInitialPosition()
-                    beginSettle()
-                    markVisibleAsRead()
-                    loading = false
-                }
+            // The opening sequence needs both halves of "the first page is here": rows
+            // present, and the model finished loading. They arrive in either order, and
+            // on this path the count wins - endInsertRows() fires from inside
+            // handleHistoryResponse, before cleanupFlags() clears the model's flag. So
+            // onCountChanged alone always saw loading still true and skipped, leaving
+            // this page's own loading stuck true for the life of the chat: the view was
+            // never positioned on the newest message, and fetchOlder was blocked on the
+            // first guard forever. Whichever signal lands second now does the work.
+            function settleIfLoaded() {
+                if (messageModel.loading || !loading || count === 0)
+                    return
+
+                goToInitialPosition()
+                beginSettle()
+                markVisibleAsRead()
+                loading = false
             }
 
-            // Only after the user has deliberately scrolled back. While the view is
-            // still settling on the newest message a short chat sits at atYBeginning
-            // too, and the prepend that followed jumped the view to the top of the
-            // fetched block - which is where opening a chat kept landing.
-            onAtYBeginningChanged: {
-                if (atYBeginning && !loading && !followLast)
-                    messageModel.fetchMoreBack()
+            onCountChanged: settleIfLoaded()
+
+            // Paging back into history. Only after the user has deliberately scrolled
+            // back: while the view is still settling on the newest message a short chat
+            // sits at atYBeginning too, and the prepend that answers is restored onto
+            // the row that was at the top - the oldest loaded message, which is where
+            // opening a chat kept landing. settleTimer.running is what excludes that,
+            // rather than followLast, which cannot: it is still true from the previous
+            // movement at the moment the atYBeginning edge is crossed mid-flick.
+            //
+            // Called from onMovementEnded as well, and that is the call that matters.
+            // The edge alone deadlocks: it is rejected mid-flick for the followLast
+            // above, and once the view is pinned at the top atYBeginning never changes
+            // again, so it never fires a second time. Backing off and returning does not
+            // re-arm it either - MessageSliceLimit is 20, so the way back down reaches
+            // atYEnd and sets followLast true again (docs/profiling.md).
+            function fetchOlder() {
+                if (loading || settleTimer.running || followLast || !atYBeginning)
+                    return
+
+                messageModel.fetchMoreBack()
             }
+
+            onAtYBeginningChanged: fetchOlder()
         }
 
         Column {
@@ -707,6 +736,10 @@ Page {
 
     Connections {
         target: messageModel
+
+        // The other half of settleIfLoaded: when the model finishes loading after the
+        // rows have already landed, this is the signal that arrives second.
+        onLoadingChanged: listView.settleIfLoaded()
 
         onFetchedPosition: {
             listView.positionViewAtIndex(numItems, ListView.Beginning);

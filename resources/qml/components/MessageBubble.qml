@@ -64,7 +64,8 @@ Item {
             leftMargin: isOutgoing ? 80 : 20
         }
         color: model.isOutgoing ? "white" : "black"
-        text: utils.replaceEmoji(model.sender)
+        // Cached in the model; see ChatItem's titleHtml.
+        text: model.senderHtml
         font.pixelSize: 20
         font.bold: true
         wrapMode: Text.WrapAnywhere

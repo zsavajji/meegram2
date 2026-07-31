@@ -32,6 +32,10 @@ public:
     enum Role {
         IdRole = Qt::UserRole + 1,
         SenderRole,
+        // The sender name with emoji replaced by <img> tags, for the bubble to display.
+        // Separate from SenderRole because the plain one is carried into the reply
+        // composer, where markup would show through.
+        SenderHtmlRole,
         ChatIdRole,
         IsOutgoingRole,
         DateRole,
@@ -137,6 +141,7 @@ private:
     struct FormattedRow
     {
         QString sender;
+        QString senderHtml;
         QString date;
         QString section;
         QString replyToSender;

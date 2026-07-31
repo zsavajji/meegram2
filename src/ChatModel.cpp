@@ -60,6 +60,13 @@ const ChatModel::FormattedRow &ChatModel::formattedRow(const std::shared_ptr<Cha
         MEEGRAM_SCOPE("ChatModel::formattedRow.miss");
 
         entry.title = Utils::getChatTitle(chat, m_storageManager);
+
+        // Measured at 380us a call and it used to run from a QML binding in the
+        // delegate, so it re-ran on every rebind even when this cache took no misses:
+        // 233 calls and 88.5ms during a 60s warm scroll, against 9.6ms for every
+        // data() call in the same window (docs/profiling.md). Here it runs once a row.
+        entry.titleHtml = Utils::replaceEmoji(entry.title);
+
         entry.date = Utils::getMessageDate(chat->lastMessage());
         entry.lastMessage = Utils::getContent(chat->lastMessage(), m_storageManager, m_locale);
 
@@ -93,6 +100,8 @@ QVariant ChatModel::data(const QModelIndex &index, int role) const
             return chatPtr->type();
         case TitleRole:
             return formattedRow(chatPtr).title;
+        case TitleHtmlRole:
+            return formattedRow(chatPtr).titleHtml;
         case DateRole:
             return formattedRow(chatPtr).date;
         case PhotoRole:
@@ -126,6 +135,7 @@ QHash<int, QByteArray> ChatModel::roleNames() const
     roles[IdRole] = "id";
     roles[TypeRole] = "type";
     roles[TitleRole] = "title";
+    roles[TitleHtmlRole] = "titleHtml";
     roles[DateRole] = "date";
     roles[PhotoRole] = "photo";
     roles[LastMessageRole] = "lastMessage";

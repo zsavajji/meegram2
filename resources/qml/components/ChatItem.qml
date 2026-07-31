@@ -68,7 +68,9 @@ Item {
             // "down" with the background fill alone.
             color: "#282828"
             elide: Text.ElideRight
-            text: utils.replaceEmoji(model.title)
+            // titleHtml, not utils.replaceEmoji(model.title): the substitution is cached
+            // in the model now, so it runs once a row instead of on every rebind.
+            text: model.titleHtml
         }
 
         Label {

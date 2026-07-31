@@ -30,6 +30,10 @@ public:
         IdRole = Qt::UserRole + 1,
         TypeRole,
         TitleRole,
+        // The title with emoji replaced by <img> tags, for the row to display. Separate
+        // from TitleRole because the plain one goes into the delete confirmation, where
+        // markup would show through.
+        TitleHtmlRole,
         PhotoRole,
         DateRole,
         LastMessageRole,
@@ -94,6 +98,7 @@ private:
     struct FormattedRow
     {
         QString title;
+        QString titleHtml;
         QString date;
         QString lastMessage;
         bool valid{false};

@@ -304,6 +304,31 @@ QString Utils::replaceEmojiSized(const QString &text, int size) noexcept
     if (!mayContainEmoji)
         return text;
 
+    // Only the substitution below is memoised, never the fast path above: that one is a
+    // scan with no allocation, and hashing the string to look it up would cost about
+    // what it saves.
+    //
+    // The delegates re-evaluate these bindings on every rebind, so scrolling substitutes
+    // the same message text over and over - measured at 182ms per 60s of message-list
+    // scrolling, against 53.7ms for every data() call in the same window
+    // (docs/profiling.md). ChatModel and MessageModel now cache their own titles and
+    // sender names, but message *content* has no row cache to put this in, and neither
+    // do service messages, so it goes here and covers every caller at once.
+    //
+    // Outer key is the size because a QHash key of QPair needs a qHash overload Qt 4.7
+    // does not ship, and size takes about three distinct values. Values share their data
+    // with the strings the model already holds, so this is cheaper than it looks.
+    //
+    // ponytail: cleared wholesale at 2000 entries rather than evicted by age. A chat
+    // scrolled far enough to trip that pays one repopulation; an LRU is the upgrade if
+    // that ever shows up in a measurement.
+    static QHash<int, QHash<QString, QString>> memo;
+
+    auto &bySize = memo[size];
+
+    if (const auto it = bySize.constFind(text); it != bySize.constEnd())
+        return it.value();
+
     QString result;
     result.reserve(text.size() + text.size() / 2);
 
@@ -344,6 +369,11 @@ QString Utils::replaceEmojiSized(const QString &text, int size) noexcept
     }
 
     result.append(text.midRef(lastPos));
+
+    if (bySize.size() >= 2000)
+        bySize.clear();
+
+    bySize.insert(text, result);
 
     return result;
 }

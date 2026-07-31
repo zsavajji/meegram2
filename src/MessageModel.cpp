@@ -95,6 +95,8 @@ QVariant MessageModel::data(const QModelIndex &index, int role) const
             return message->id();
         case SenderRole:
             return formattedRow(messageId, message.get()).sender;
+        case SenderHtmlRole:
+            return formattedRow(messageId, message.get()).senderHtml;
         case ChatIdRole:
             return message->chatId();
         case IsOutgoingRole:
@@ -229,6 +231,12 @@ const MessageModel::FormattedRow &MessageModel::formattedRow(qlonglong messageId
         MEEGRAM_SCOPE("MessageModel::formattedRow.miss");
 
         entry.sender = Utils::getSenderName(message, m_storage);
+
+        // Same reason as ChatModel's titleHtml: this ran from a QML binding in the
+        // bubble, so it re-ran on every rebind regardless of this cache
+        // (docs/profiling.md).
+        entry.senderHtml = Utils::replaceEmoji(entry.sender);
+
         entry.date = message->date().toString(QObject::tr("formatterDay12H"));
         entry.section = sectionFor(message);
         entry.replyToSender = replyToSender(message);
@@ -261,6 +269,7 @@ QHash<int, QByteArray> MessageModel::roleNames() const noexcept
     QHash<int, QByteArray> roles;
     roles[IdRole] = "id";
     roles[SenderRole] = "sender";
+    roles[SenderHtmlRole] = "senderHtml";
     roles[ChatIdRole] = "chatId";
     roles[IsOutgoingRole] = "isOutgoing";
     roles[DateRole] = "date";

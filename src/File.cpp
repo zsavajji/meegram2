@@ -48,7 +48,7 @@ void File::setFile(td::td_api::object_ptr<td::td_api::file> file)
     // re-run on every packet, for every visible row that happened to be downloading.
     // Emit only when a delegate could actually see a difference.
     //
-    // Measured (docs/profiling.md): this suppresses 54% of notifications while photos
+    // Measured (docs/profiling.md): this suppresses 46% of notifications while photos
     // download, and 0% while avatars do. Avatars are small enough that every packet
     // they produce is a state transition - starts, completes - so there are no
     // intermediate ticks to filter. Which means the chat list, the case this was
