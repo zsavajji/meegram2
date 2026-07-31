@@ -90,6 +90,11 @@ public slots:
 private slots:
     void handleResult(td::td_api::Object *object) noexcept;
 
+    // The getChatHistory reply, handed over from the TDLib worker thread. Takes ownership
+    // of the raw pointer; void* because a queued Q_ARG needs a registered metatype and
+    // td_api::object_ptr is move-only, the same handover Client::disposeObject uses.
+    void handleHistoryResponse(void *responseObject, bool fetchPrevious) noexcept;
+
     // Runs linkContentFile over everything loaded, on the main thread. registerFile is
     // idempotent, so re-linking an already canonical file costs a hash lookup.
     void linkLoadedContentFiles() noexcept;

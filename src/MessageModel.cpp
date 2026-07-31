@@ -299,77 +299,104 @@ void MessageModel::requestHistory(qlonglong fromMessageId, int offset, int limit
     m_client->send(std::move(request), [this, fetchPrevious, alive = m_alive](auto &&response) {
         // Runs on the TDLib worker thread, and the model may already be gone: leaving a
         // chat destroys it, and a history request is usually still outstanding when you
-        // do. Everything below touches members or emits, so bail before any of it.
+        // do. This is the one member access left here, and it guards the `this` below.
         if (!alive->load())
             return;
 
-        auto cleanupFlags = [this]() {
-            if (m_loading)
-            {
-                m_loading = false;
-                emit loadingChanged();
-            }
-            m_backFetching = false;
+        // Nothing else is touched on this thread. The body used to run inline here -
+        // filling m_messageMap, inserting into m_messages, driving begin/endInsertRows -
+        // while the GUI thread sat in data() reading all three. A vector reallocating or
+        // a map rehashing under a concurrent reader is a use-after-free, and scrolling is
+        // exactly what triggers the fetch, so it landed while delegates were being built.
+        // handleHistoryResponse already named that hazard for StorageManager's file map and
+        // hopped only that one call, while the lines right above it did the same thing to
+        // this model's own containers.
+        //
+        // Same hop ChatModel::handleChatsLoaded makes, and the same void* handover
+        // Client::disposeObject uses: a queued Q_ARG needs a registered metatype, and
+        // td_api::object_ptr is move-only.
+        //
+        // ponytail: if the model dies between the check above and the queued call landing,
+        // this response leaks - one object, bounded by chats opened. Hand over a shared_ptr
+        // if that ever shows up in a measurement.
+        QMetaObject::invokeMethod(this, "handleHistoryResponse", Qt::QueuedConnection, Q_ARG(void *, response.release()),
+                                  Q_ARG(bool, fetchPrevious));
+    });
+}
 
-            emit countChanged();
-        };
+void MessageModel::handleHistoryResponse(void *responseObject, bool fetchPrevious) noexcept
+{
+    // Ownership arrives here. Everything below runs on the GUI thread, so it may touch the
+    // model freely - which is the whole point of the hop.
+    td::td_api::object_ptr<td::td_api::Object> response(static_cast<td::td_api::Object *>(responseObject));
 
-        if (response->get_id() != td::td_api::messages::ID)
+    if (!response)
+        return;
+
+    auto cleanupFlags = [this]() {
+        if (m_loading)
         {
-            // qWarning, not qDebug: release builds define QT_NO_DEBUG_OUTPUT, so a
-            // rejected request left no trace at all and the chat just span forever.
-            if (response->get_id() == td::td_api::error::ID)
-            {
-                const auto *error = static_cast<const td::td_api::error *>(response.get());
-                qWarning() << "getChatHistory failed:" << error->code_ << QString::fromStdString(error->message_);
-            }
-
-            cleanupFlags();
-            return;
+            m_loading = false;
+            emit loadingChanged();
         }
+        m_backFetching = false;
 
-        auto messagesResponse = td::td_api::move_object_as<td::td_api::messages>(response);
-        if (!messagesResponse || messagesResponse->messages_.empty())
+        emit countChanged();
+    };
+
+    if (response->get_id() != td::td_api::messages::ID)
+    {
+        // qWarning, not qDebug: release builds define QT_NO_DEBUG_OUTPUT, so a rejected
+        // request left no trace at all and the chat just span forever.
+        if (response->get_id() == td::td_api::error::ID)
         {
-            // An empty answer does not mean the chat is empty. TDLib may return fewer
-            // messages than asked for - or none - while its own fetch is still in
-            // flight, and expects the request to be repeated; for a supergroup there is
-            // often nothing cached locally to answer from on the first call. Treating
-            // empty as final is what leaves a group on a spinner forever.
-            //
-            // Queued, and via the timer's own start slot: this runs on the TDLib worker
-            // thread, and a QTimer may only be started from the thread that owns it.
-            // m_loading stays set, so the view keeps showing it is still working.
-            QMetaObject::invokeMethod(&m_historyRetryTimer, "start", Qt::QueuedConnection);
-            return;
+            const auto *error = static_cast<const td::td_api::error *>(response.get());
+            qWarning() << "getChatHistory failed:" << error->code_ << QString::fromStdString(error->message_);
         }
-
-        m_historyRetries = 0;
-
-        std::vector<qlonglong> newMessageIds;
-        for (auto &&message : messagesResponse->messages_)
-        {
-            const auto messageId = message->id_;
-            if (!m_messageMap.contains(messageId))
-            {
-                newMessageIds.emplace_back(messageId);
-                m_messageMap[messageId] = std::make_unique<Message>(std::move(message));
-            }
-        }
-
-        if (!newMessageIds.empty())
-        {
-            insertMessages(std::move(newMessageIds), fetchPrevious);
-        }
-
-        // Not called inline: this whole callback runs on the TDLib worker thread, and
-        // linkContentFile reaches into StorageManager's file map, which the main thread
-        // mutates on every updateFile. Two threads doing try_emplace on one
-        // unordered_map can leave a reader walking a broken bucket chain forever.
-        QMetaObject::invokeMethod(this, "linkLoadedContentFiles", Qt::QueuedConnection);
 
         cleanupFlags();
-    });
+        return;
+    }
+
+    auto messagesResponse = td::td_api::move_object_as<td::td_api::messages>(response);
+    if (!messagesResponse || messagesResponse->messages_.empty())
+    {
+        // An empty answer does not mean the chat is empty. TDLib may return fewer messages
+        // than asked for - or none - while its own fetch is still in flight, and expects
+        // the request to be repeated; for a supergroup there is often nothing cached
+        // locally to answer from on the first call. Treating empty as final is what leaves
+        // a group on a spinner forever.
+        //
+        // m_loading stays set, so the view keeps showing it is still working.
+        m_historyRetryTimer.start();
+        return;
+    }
+
+    m_historyRetries = 0;
+
+    std::vector<qlonglong> newMessageIds;
+    for (auto &&message : messagesResponse->messages_)
+    {
+        const auto messageId = message->id_;
+        if (!m_messageMap.contains(messageId))
+        {
+            newMessageIds.emplace_back(messageId);
+            m_messageMap[messageId] = std::make_unique<Message>(std::move(message));
+        }
+    }
+
+    if (!newMessageIds.empty())
+    {
+        insertMessages(std::move(newMessageIds), fetchPrevious);
+    }
+
+    // linkContentFile reaches into StorageManager's file map, which the main thread mutates
+    // on every updateFile - two threads doing try_emplace on one unordered_map can leave a
+    // reader walking a broken bucket chain forever. That is no longer a risk now this runs
+    // on the GUI thread, so the hop it used to need is gone.
+    linkLoadedContentFiles();
+
+    cleanupFlags();
 }
 
 void MessageModel::send(td::td_api::object_ptr<td::td_api::InputMessageContent> content, qlonglong replyToMessageId) noexcept
