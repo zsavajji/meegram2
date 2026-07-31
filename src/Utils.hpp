@@ -70,7 +70,7 @@ public:
 
     static QString getChatTitle(std::shared_ptr<Chat> chat, std::shared_ptr<StorageManager> storage, bool showSavedMessages = true) noexcept;
 
-    static QString getSenderName(Message *message, std::shared_ptr<StorageManager> storage) noexcept;
+    static QString getSenderName(const Message *message, std::shared_ptr<StorageManager> storage) noexcept;
     static QString getSenderAuthor(Message *message, std::shared_ptr<StorageManager> storage, bool openUser) noexcept;
 
     static QString getUserName(std::shared_ptr<User> user, bool openUser) noexcept;

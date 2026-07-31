@@ -35,15 +35,19 @@ signals:
     void fileChanged();
 
 private:
-    void updateFileProperties();
+    // True when one of the exposed properties actually moved, which is what decides
+    // whether fileChanged goes out.
+    bool updateFileProperties();
 
-    int m_id;
+    // Initialised, because a file that arrives with no local part leaves these
+    // untouched and setFile now reads them back to compare.
+    int m_id{};
 
     QString m_localPath;
 
-    bool m_canBeDownloaded;
-    bool m_isDownloadingActive;
-    bool m_isDownloadingCompleted;
+    bool m_canBeDownloaded{};
+    bool m_isDownloadingActive{};
+    bool m_isDownloadingCompleted{};
 
     td::td_api::object_ptr<td::td_api::file> m_file;
 };

@@ -98,7 +98,11 @@ Item {
             // test was always undefined and the selection-colour branch never ran.
             color: "#505050"
             elide: Text.ElideRight
-            text: sanitizeText(model.lastMessage);
+            // ChatModel already strips the line breaks and caches the result, so this
+            // is a plain read - and plain text, so say so rather than let AutoText
+            // sniff every preview for markup.
+            textFormat: Text.PlainText
+            text: model.lastMessage
         }
 
         Loader {
@@ -182,10 +186,6 @@ Item {
         // bare "model" there would sit next to ChatListView's own model property.
         onPressAndHold: menuTarget.open(model.id, model.title, model.isPinned, model.isMuted,
                                         model.unreadCount > 0 || model.isMarkedAsUnread)
-    }
-
-    function sanitizeText(text) {
-        return text.replace(/\n/g, " ").replace(/\r/g, " ");
     }
 
     Component.onCompleted: {

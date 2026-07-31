@@ -4,6 +4,7 @@
 #include "Client.hpp"
 #include "Common.hpp"
 #include "MessageService.hpp"
+#include "ScopeTimer.hpp"
 #include "StorageManager.hpp"
 #include "Utils.hpp"
 
@@ -75,6 +76,10 @@ void MessageModel::fetchMore(const QModelIndex &parent)
 
 QVariant MessageModel::data(const QModelIndex &index, int role) const
 {
+    // The message list's counterpart to ChatModel::data - the two are what a flick
+    // actually costs, so -DMEEGRAM_PROFILE=ON can now see both.
+    MEEGRAM_SCOPE("MessageModel::data");
+
     if (!index.isValid() || index.row() < 0 || index.row() >= static_cast<int>(m_messages.size()))
         return QVariant();
 
@@ -89,13 +94,13 @@ QVariant MessageModel::data(const QModelIndex &index, int role) const
         case IdRole:
             return message->id();
         case SenderRole:
-            return Utils::getSenderName(message.get(), m_storage);
+            return formattedRow(messageId, message.get()).sender;
         case ChatIdRole:
             return message->chatId();
         case IsOutgoingRole:
             return message->isOutgoing();
         case DateRole:
-            return message->date().toString(QObject::tr("formatterDay12H"));
+            return formattedRow(messageId, message.get()).date;
         case EditDateRole:
             return message->editDate().toString(QObject::tr("formatterDay12H"));
         case ContentRole: {
@@ -145,21 +150,12 @@ QVariant MessageModel::data(const QModelIndex &index, int role) const
             return message->isService();
         case ServiceMessageRole:
             return Utils::getServiceContent(message.get(), m_storage, m_locale, true);
-        case SectionRole: {
-            static const auto currentDateTime = QDateTime::currentDateTime();
-            const auto days = message->date().daysTo(currentDateTime);
-
-            if (days == 0)
-                return QObject::tr("MessageScheduleToday");
-            else if (days == 1)
-                return QObject::tr("Yesterday");
-            else
-                return message->date().toString(QObject::tr("chatFullDate"));
-        }
+        case SectionRole:
+            return formattedRow(messageId, message.get()).section;
         case ReplyToSenderRole:
-            return replyToSender(message.get());
+            return formattedRow(messageId, message.get()).replyToSender;
         case ReplyToTextRole:
-            return replyToText(message.get());
+            return formattedRow(messageId, message.get()).replyToText;
     }
 
     return QVariant();
@@ -220,6 +216,40 @@ QString MessageModel::replyToText(const Message *message) const noexcept
         return Utils::getContent(it->second.get(), m_storage, m_locale);
 
     return {};
+}
+
+const MessageModel::FormattedRow &MessageModel::formattedRow(qlonglong messageId, const Message *message) const noexcept
+{
+    auto &entry = m_formatted[messageId];
+
+    if (!entry.valid)
+    {
+        entry.sender = Utils::getSenderName(message, m_storage);
+        entry.date = message->date().toString(QObject::tr("formatterDay12H"));
+        entry.section = sectionFor(message);
+        entry.replyToSender = replyToSender(message);
+        entry.replyToText = replyToText(message);
+        entry.valid = true;
+    }
+
+    return entry;
+}
+
+QString MessageModel::sectionFor(const Message *message) const noexcept
+{
+    // ponytail: sampled once per process, so a session left open across midnight keeps
+    // calling yesterday "Today". Pre-dates the cache; a date-change timer that clears
+    // m_formatted is the upgrade.
+    static const auto currentDateTime = QDateTime::currentDateTime();
+    const auto days = message->date().daysTo(currentDateTime);
+
+    if (days == 0)
+        return QObject::tr("MessageScheduleToday");
+
+    if (days == 1)
+        return QObject::tr("Yesterday");
+
+    return message->date().toString(QObject::tr("chatFullDate"));
 }
 
 QHash<int, QByteArray> MessageModel::roleNames() const noexcept
@@ -534,6 +564,7 @@ void MessageModel::refresh() noexcept
     beginResetModel();
     m_messages.clear();
     m_messageMap.clear();
+    m_formatted.clear();
     endResetModel();
 
     emit countChanged();
@@ -658,6 +689,7 @@ void MessageModel::handleDeleteMessages(qlonglong chatId, std::vector<int64_t> &
 
     std::erase_if(m_messages, [&idsToDelete](const auto &id) { return idsToDelete.contains(id); });
     std::erase_if(m_messageMap, [&idsToDelete](const auto &pair) { return idsToDelete.contains(pair.first); });
+    std::erase_if(m_formatted, [&idsToDelete](const auto &pair) { return idsToDelete.contains(pair.first); });
 
     endRemoveRows();
 }
@@ -710,6 +742,12 @@ int MessageModel::lastMessageIndex() const noexcept
 
 void MessageModel::itemChanged(size_t index) noexcept
 {
+    // Every caller reaches here after mutating the message, so this is the one place
+    // the row's formatted values have to be dropped. Doing it in the handlers instead
+    // would mean a new handler could forget to.
+    if (index < m_messages.size())
+        m_formatted.erase(m_messages[index]);
+
     QModelIndex modelIndex = createIndex(static_cast<int>(index), 0);
 
     emit dataChanged(modelIndex, modelIndex);
@@ -736,6 +774,11 @@ void MessageModel::insertMessages(std::vector<qlonglong> &&newIds, bool prepend)
     }
 
     endInsertRows();
+
+    // A reply preview resolves against the messages currently loaded, so a page of
+    // older history can answer a quote that came back empty before it arrived.
+    // Cheaper to drop the lot on a page fetch than to work out which rows care.
+    m_formatted.clear();
 
     auto mid = m_messages.begin() + (prepend ? newIds.size() : (m_messages.size() - newIds.size()));
     std::ranges::inplace_merge(m_messages.begin(), mid, m_messages.end());

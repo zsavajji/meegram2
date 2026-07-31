@@ -210,10 +210,7 @@ Page {
                     id: allChatsTab
                     anchors.fill: parent
 
-                    ChatListView {
-                        model: mainChatModel
-                        clip: true
-                    }
+                    ChatListView { model: mainChatModel }
                 }
 
                 Repeater {
@@ -239,10 +236,7 @@ Page {
                         Component {
                             id: folderListComponent
 
-                            ChatListView {
-                                model: folderTabPage.folderModel
-                                clip: true
-                            }
+                            ChatListView { model: folderTabPage.folderModel }
                         }
 
                         function ensureLoaded() {

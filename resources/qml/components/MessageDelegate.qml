@@ -36,8 +36,22 @@ Item {
                 // does. 0 for everything else, which is the normal body size.
                 property int emojiSize: utils.emojiOnlySize(model.content.text)
 
-                text: utils.replaceEmojiSized(model.content.formattedText, emojiSize)
-                textFormat: Text.RichText
+                property string html: utils.replaceEmojiSized(model.content.formattedText, emojiSize)
+
+                // A RichText Label builds and lays out a whole QTextDocument; a plain
+                // one goes straight to QTextLayout. Most messages carry no entities, no
+                // link and no emoji, so most bubbles were paying for a document that
+                // held nothing but a run of text - and they were paying for it while the
+                // list was flicking, which is exactly when there is no frame to spare.
+                //
+                // Rich if it has markup or an escaped entity, and also if it has any
+                // whitespace HTML would have collapsed: those are the cases where the
+                // two formats do not draw the same thing, and a message that renders
+                // differently depending on whether it happens to contain a link would be
+                // worse than a slow one. Declared above `text` so the format is set
+                // before the string lands and the text is laid out once, not twice.
+                textFormat: /[<&\n\r\t]|\s\s/.test(html) ? Text.RichText : Text.PlainText
+                text: html
                 color: model.isOutgoing ? "white" : "black"
                 width: isPortrait ? 380 : 754
                 wrapMode: Text.WrapAtWordBoundaryOrAnywhere
@@ -130,10 +144,13 @@ Item {
                 }
 
                 Label {
+                    // Same plain-text fast path as the text bubble above.
+                    property string html: utils.replaceEmoji(model.content.caption)
+
                     width: parent.width
                     visible: text !== ""
-                    text: utils.replaceEmoji(model.content.caption)
-                    textFormat: Text.RichText
+                    textFormat: /[<&\n\r\t]|\s\s/.test(html) ? Text.RichText : Text.PlainText
+                    text: html
                     color: model.isOutgoing ? "white" : "black"
                     wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                     font.pixelSize: 23

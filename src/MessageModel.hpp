@@ -124,6 +124,26 @@ private:
     QString replyToSender(const Message *message) const noexcept;
     QString replyToText(const Message *message) const noexcept;
 
+    // The roles whose values cost a date format, a storage lookup or a content
+    // preview. QML1 has no per-row role cache, so a bubble reading six properties
+    // calls data() six times - and every one of those reads used to re-run
+    // QDateTime::toString (with a tr() lookup for the format), getSenderName and
+    // both reply previews. Same shape and same purpose as ChatModel::FormattedRow.
+    struct FormattedRow
+    {
+        QString sender;
+        QString date;
+        QString section;
+        QString replyToSender;
+        QString replyToText;
+        bool valid{false};
+    };
+
+    const FormattedRow &formattedRow(qlonglong messageId, const Message *message) const noexcept;
+
+    // Today / Yesterday / the full date, for the list's section headers.
+    QString sectionFor(const Message *message) const noexcept;
+
     void itemChanged(size_t index) noexcept;
 
     void insertMessages(std::vector<qlonglong> &&newIds, bool prepend);
@@ -152,4 +172,6 @@ private:
 
     std::vector<qlonglong> m_messages;
     std::unordered_map<qlonglong, std::unique_ptr<Message>> m_messageMap;
+
+    mutable std::unordered_map<qlonglong, FormattedRow> m_formatted;
 };

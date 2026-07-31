@@ -58,6 +58,12 @@ const ChatModel::FormattedRow &ChatModel::formattedRow(const std::shared_ptr<Cha
         entry.title = Utils::getChatTitle(chat, m_storageManager);
         entry.date = Utils::getMessageDate(chat->lastMessage());
         entry.lastMessage = Utils::getContent(chat->lastMessage(), m_storageManager, m_locale);
+
+        // The preview is one elided line, so the line breaks have to go. Here rather
+        // than in the delegate, where it was two JS regex passes over the string every
+        // time the view built a row.
+        entry.lastMessage.replace(QLatin1Char('\n'), QLatin1Char(' ')).replace(QLatin1Char('\r'), QLatin1Char(' '));
+
         entry.valid = true;
     }
 
@@ -373,6 +379,26 @@ void ChatModel::sortChats()
     }
 
     std::ranges::sort(ordered, std::greater{}, [](const auto &entry) { return entry.first; });
+
+    // Most position updates do not actually move anything: another message in the chat
+    // that is already at the top, a read receipt, a mute. Every one of them still went
+    // out as layoutChanged, and a QML1 ListView answers that by re-reading every
+    // delegate it has built and laying the list out again - on a busy account, every
+    // 500ms, including under a finger that is mid-flick. So compare before signalling.
+    //
+    // Owner-equivalence rather than lock()-and-compare: it is the whole point of the
+    // decorate step above not to pay an atomic per element.
+    const auto sameOrder = std::ranges::equal(
+        ordered, m_chats, [](const auto &lhs, const auto &rhs) { return !lhs.owner_before(rhs) && !rhs.owner_before(lhs); },
+        [](const auto &entry) -> const auto & { return entry.second; });
+
+    if (sameOrder)
+    {
+        // Nothing moved, but chats appended by insertChatIfInList are still waiting
+        // behind m_count, and this is what puts them on screen.
+        revealAll();
+        return;
+    }
 
     // A pure reorder can go out as layoutChanged. A shrink cannot: rowCount is about
     // to change, and only a reset lets that happen without lying to the view.

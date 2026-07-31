@@ -777,7 +777,7 @@ QString Utils::getChatTitle(std::shared_ptr<Chat> chat, std::shared_ptr<StorageM
     return !title.isEmpty() ? title : QObject::tr("HiddenName");
 }
 
-QString Utils::getSenderName(Message *message, std::shared_ptr<StorageManager> storage) noexcept
+QString Utils::getSenderName(const Message *message, std::shared_ptr<StorageManager> storage) noexcept
 {
     switch (message->senderType())
     {

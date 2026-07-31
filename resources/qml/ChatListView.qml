@@ -13,6 +13,11 @@ Item {
     ListView {
         id: listView
         anchors.fill: parent
+        // Rows in the cache buffer sit above the viewport, and unclipped they painted
+        // straight over the TopBar every frame of a scroll. Here rather than at each
+        // call site: two of the three set it on the ChatListView and the archived page
+        // did not, so the same list clipped or not depending on how it was reached.
+        clip: true
         // height * 2 kept roughly 36 extra ChatItem delegates alive off-screen, each
         // holding a decoded avatar. Half a screen either side is plenty of runway for
         // flicking and costs a fraction of the memory.

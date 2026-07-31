@@ -103,8 +103,8 @@ Page {
         target: pendingSave
 
         onFileChanged: {
-            // fileChanged also fires on progress, so completion has to be checked
-            // rather than assumed.
+            // Fires on the download starting as well as on it finishing, so completion
+            // has to be checked rather than assumed.
             if (pendingSave && pendingSave.isDownloadingCompleted) {
                 var file = pendingSave;
                 pendingSave = null;
