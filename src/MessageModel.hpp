@@ -73,6 +73,7 @@ public:
 
     Q_INVOKABLE void fetchMoreBack() noexcept;
 
+    // Row of the last read message, or count() when it is not in the loaded slice.
     Q_INVOKABLE int lastMessageIndex() const noexcept;
 
 signals:

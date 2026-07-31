@@ -143,23 +143,15 @@ Page {
                 id: headerContent
                 anchors.fill: parent
 
-                SheetButton {
-                    id: backButton
-                    anchors.left: parent.left
-                    anchors.leftMargin: root.platformStyle.rejectButtonLeftMargin
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: qsTr("WidgetChats")
-                    onClicked: pageStack.pop()
-                }
-
                 Row {
                     id: chatInfoRow
+                    anchors.left: parent.left
+                    anchors.leftMargin: root.platformStyle.rejectButtonLeftMargin
                     anchors.right: parent.right
                     anchors.rightMargin: root.platformStyle.rejectButtonLeftMargin
                     anchors.verticalCenter: parent.verticalCenter
 
                     spacing: 12
-                    layoutDirection: Qt.RightToLeft
 
                     // ChatPhotoProvider returns the avatar already cropped and masked,
                     // so the MaskedItem and its mask Image that used to wrap this are
@@ -202,9 +194,8 @@ Page {
                         Label {
                             text: utils.replaceEmoji(chatInfo.title)
                             font.bold: true
-                            horizontalAlignment: Text.AlignRight
                             elide: Text.ElideRight
-                            width: 230
+                            width: chatInfoRow.width - profilePhotoImage.width - chatInfoRow.spacing
                         }
 
                         Label {
@@ -213,9 +204,8 @@ Page {
                                 weight: Font.Light
                                 pixelSize: 20
                             }
-                            horizontalAlignment: Text.AlignRight
                             elide: Text.ElideRight
-                            width: 230
+                            width: chatInfoRow.width - profilePhotoImage.width - chatInfoRow.spacing
                         }
                     }
                 }
@@ -300,13 +290,15 @@ Page {
             // destroying and rebuilding rows either side it never converges. So it is a
             // bounded retry instead: a handful of passes and then it stops, whatever
             // the layout is doing.
+            // Unread chat: centre on the last read message, so the first unread one is
+            // on screen with context above it. Anything else - and any case where that
+            // message is not in the loaded slice - goes to the end of the list, which is
+            // the newest message: the model keeps ids sorted ascending and a message id
+            // only grows. The end is never merely "the newest fetched": the model now
+            // always loads the slice that ends at the chat's last message.
             function goToInitialPosition() {
                 var index = messageModel.lastMessageIndex()
 
-                // lastMessageIndex() is a find(), so it returns one-past-the-end when
-                // the last read message is not in the loaded slice. Passing that to
-                // positionViewAtIndex does nothing at all, leaving the view wherever
-                // it happened to be.
                 if (chat.unreadCount > 0 && index >= 0 && index < listView.count)
                     listView.positionViewAtIndex(index, ListView.Center)
                 else
@@ -370,8 +362,12 @@ Page {
                 }
             }
 
+            // Only after the user has deliberately scrolled back. While the view is
+            // still settling on the newest message a short chat sits at atYBeginning
+            // too, and the prepend that followed jumped the view to the top of the
+            // fetched block - which is where opening a chat kept landing.
             onAtYBeginningChanged: {
-                if (atYBeginning && !loading) {
+                if (atYBeginning && !loading && !followLast) {
                     console.log("Fetching more messages...")
                     messageModel.fetchMoreBack()
                 }
@@ -731,6 +727,13 @@ Page {
                 // been read the moment it lands.
                 listView.markVisibleAsRead()
             }
+        }
+    }
+
+    tools: ToolBarLayout {
+        ToolIcon {
+            platformIconId: "toolbar-back"
+            onClicked: pageStack.pop()
         }
     }
 

@@ -719,24 +719,25 @@ void MessageModel::reloadHistory() noexcept
 
 void MessageModel::loadMessages() noexcept
 {
-    // The unread branch below anchors on the last read message and uses a negative
-    // offset to also pull in some newer ones. That needs a real anchor: a chat never
-    // opened before has unread messages but lastReadInboxMessageId still 0, and
-    // "messages newer than the newest" is a combination TDLib rejects - so the reply
-    // is an error, not messages, and the chat stayed empty. Groups are where this
-    // shows up, being the chats with unread history that has never been read.
-    const auto unread = m_chat->unreadCount() > 0 && m_chat->lastReadInboxMessageId() != 0;
-
+    // Always the newest slice. This used to anchor on lastReadInboxMessageId with a
+    // negative offset when the chat had unread messages, so opening a chat with more
+    // unread than one slice loaded a window that did not contain the newest message at
+    // all - the bottom of the list was not the last message received.
+    //
     // A chat can have no last message - freshly created, or its history cleared - and
     // this dereferenced it unconditionally. from_message_id 0 means "from the newest",
     // which is what is wanted anyway.
     const auto *lastMessage = m_chat->lastMessage();
-    const auto fromMessageId = unread ? m_chat->lastReadInboxMessageId() : (lastMessage ? lastMessage->id() : 0);
 
-    const auto offset = unread ? -1 - MessageSliceLimit : 0;
-    const auto limit = unread ? 2 * MessageSliceLimit : MessageSliceLimit;
+    requestHistory(lastMessage ? lastMessage->id() : 0, 0, MessageSliceLimit);
+}
 
-    requestHistory(fromMessageId, offset, limit);
+int MessageModel::lastMessageIndex() const noexcept
+{
+    // find() returns end() - i.e. count() - when the last read message is not in the
+    // loaded slice, which is exactly when the view must fall back to the newest
+    // message rather than anchor on whatever happens to be loaded.
+    return std::distance(m_messages.begin(), std::ranges::find(m_messages, m_chat->lastReadInboxMessageId()));
 }
 
 void MessageModel::itemChanged(size_t index) noexcept
@@ -775,14 +776,4 @@ void MessageModel::insertMessages(std::vector<qlonglong> &&newIds, bool prepend)
     {
         emit fetchedPosition(static_cast<int>(newIds.size()));
     }
-}
-
-int MessageModel::lastMessageIndex() const noexcept
-{
-    const auto unread = m_chat->unreadCount() > 0;
-
-    const auto *lastMessage = m_chat->lastMessage();
-    const auto fromMessageId = unread ? m_chat->lastReadInboxMessageId() : (lastMessage ? lastMessage->id() : 0);
-
-    return std::distance(m_messages.begin(), std::ranges::find(m_messages, fromMessageId));
 }

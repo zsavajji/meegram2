@@ -1,0 +1,4 @@
+#!/bin/bash
+export QT_SDK_PATH=/home/zsavajji/QtSDK/
+export TOOLCHAIN_PREFIX=arm-none-linux-gnueabi
+export PATH="$HOME/cross/arm-harmattan/bin:$QT_SDK_PATH/Madde/bin:$PATH"
