@@ -445,6 +445,21 @@ Page {
 
                 messageModel.fetchMoreBack()
             }
+
+            // fetchedPosition is emitted from inside insertMessages, which runs before
+            // handleHistoryResponse reaches cleanupFlags - so at that moment the model
+            // still has m_backFetching set and fetchMoreBack() returns at its own guard.
+            // Calling fillViewport() straight from the handler therefore did nothing at
+            // all, and the chain above stopped after the single page settleTimer started.
+            //
+            // interval 0 fires on the next event-loop turn, by which point the response
+            // handler has run to completion and the flag is clear.
+            Timer {
+                id: fillTimer
+
+                interval: 0
+                onTriggered: listView.fillViewport()
+            }
         }
 
         Column {
@@ -842,7 +857,8 @@ Page {
         onFetchedPosition: {
             listView.positionViewAtIndex(numItems, ListView.Beginning);
             // Keep pulling while the loaded slice still does not fill the screen.
-            listView.fillViewport();
+            // Deferred by a turn; see fillTimer for why calling it directly is a no-op.
+            fillTimer.restart();
         }
 
         // Not onCountChanged: that also fires when a page of older messages is
