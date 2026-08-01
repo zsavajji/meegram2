@@ -104,6 +104,13 @@ private:
     // only announces changes. See Client::injectUpdate.
     void requestAuthorizationState() noexcept;
 
+    // The same problem, for everything else TDLib announces exactly once. Only built under
+    // the daemon transport, which is the only one where "exactly once" can land in a
+    // process that has already exited. See the note in AppManager.cpp.
+#ifdef MEEGRAM_JSON_TRANSPORT
+    void restoreState() noexcept;
+#endif
+
     void checkInitializationStatus() noexcept;
 
     void handleAuthorizationState(const td::td_api::AuthorizationState &authorizationState);

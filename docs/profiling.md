@@ -52,10 +52,13 @@ ssh user@n9 'cat /proc/loadavg'   # wait until the 1-minute figure is under ~0.5
 
 Note it is a decaying average, so it lags the burst it reports by about a minute.
 
-**Restart `meegramd` with the app.** A UI starting against a *resident* daemon also gets
-an empty chat list: the daemon's TDLib already emitted its `updateNewChat` burst to the
-previous UI, and `loadChats` (`ChatModel.cpp:215`) answers 404 rather than re-sending. So
-every run here begins:
+**Restart `meegramd` with the app.** These runs were taken when a UI starting against a
+*resident* daemon came up with an empty chat list: the daemon's TDLib had already emitted
+its `updateNewChat` burst to the previous UI, and `loadChats` answered 404 rather than
+re-sending. `AppManager::restoreState` has since fixed that, so a warm start is a valid run
+now — but it is a *different* one, because the state arrives as a single `getCurrentState`
+reply rather than spread across the sync. Keep restarting the daemon for anything compared
+against these tables:
 
 ```sh
 killall meegram meegramd; sleep 3; killall -9 meegram meegramd
@@ -66,9 +69,9 @@ export DISPLAY=:0
 /opt/meegram/bin/meegram 2>&1 | tee /home/user/prof-<arm>-<scenario>-<run>.log
 ```
 
-That the daemon surviving the UI leaves the next UI with an empty list is a **defect**,
-not a profiling artefact — surviving the UI is the daemon's whole purpose. It is not
-fixed here.
+That the daemon surviving the UI left the next UI with an empty list was a **defect**, not
+a profiling artefact — surviving the UI is the daemon's whole purpose. Fixed since, in
+`AppManager::restoreState`.
 
 ### Reading the tables
 
@@ -361,10 +364,13 @@ profiling session and are fixed in the tree.
   three `console.log` lines answered in one run what two rounds of reading the code got
   wrong.
 
-  **Still open, and not a profiling artefact:** a UI restarting against a *resident*
-  `meegramd` comes up with an empty chat list, because the daemon's TDLib already sent its
-  `updateNewChat` burst to the previous UI and `loadChats` answers 404. Outliving the UI
-  is the daemon's entire purpose, so this reaches real users.
+  **Found here, fixed since, and not a profiling artefact:** a UI restarting against a
+  *resident* `meegramd` came up with an empty chat list, because the daemon's TDLib had
+  already sent its `updateNewChat` burst to the previous UI and `loadChats` answers 404.
+  Outliving the UI is the daemon's entire purpose, so this reached real users. The same
+  hole swallowed `updateUser`, `updateChatFolders` and `updateOption`, so a warm start also
+  had no sender names, no folder tabs and no `my_id`. `AppManager::restoreState` now asks
+  `getCurrentState` on attach and replays the answer as updates.
 
 ## What is not measured
 

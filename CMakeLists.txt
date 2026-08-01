@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(MeeGram VERSION 0.2.0 LANGUAGES CXX)
+project(MeeGram VERSION 0.2.1 LANGUAGES CXX)
 
 # Without this an unset CMAKE_BUILD_TYPE means no -O flag at all, i.e. -O0.
 # This codebase leans on std::ranges views and templates, which -O0 punishes hard.
@@ -411,7 +411,12 @@ if (MEEGRAM_JSON_BENCH)
             "${TDLIB_BUILD_DIR}/tdutils. Set -DTDLIB_BUILD_DIR=... to the TDLib build tree.")
     endif()
 
-    add_executable(json_bench tools/json_bench.cpp)
+    # EXCLUDE_FROM_ALL, like json_roundtrip and notifier_check: it is run by hand, and it
+    # statically links the whole of TDLib twice over (TdStatic and TdJsonStatic). That link
+    # is the largest in the tree by far, and in `all` it ran in parallel with the app's own
+    # link - enough to get collect2 killed by the OOM killer on a 16 GB machine. Build it
+    # on its own: cmake --build build-app --target json_bench
+    add_executable(json_bench EXCLUDE_FROM_ALL tools/json_bench.cpp)
 
     # SYSTEM: JsonBuilder.h has unused-parameter warnings of its own, and this target is
     # built with -Wall -Wextra. They are not ours to fix.

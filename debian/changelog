@@ -1,3 +1,37 @@
+meegram (0.2.1) unstable; urgency=low
+
+  * Notifications now come from meegramd, a resident daemon that owns the TDLib
+    connection and its database lock. Closing the app no longer closes the Telegram
+    connection, so messages still arrive and still notify; tapping one opens that
+    chat, starting the app if it was closed.
+  * The daemon starts on demand through D-Bus activation, and is stopped on upgrade
+    so the newly installed binary is the one that comes back.
+  * Notifications follow TDLib's own notification updates, so per-chat and scope
+    settings are honoured, outgoing and service messages are skipped, and reading a
+    message on another device withdraws its banner here.
+  * The app talks to the daemon over a per-session socket, one JSON object per line.
+  * First launch no longer hangs on the loading screen: the language pack is asked
+    for only once TDLib has accepted its parameters, is cached on disk for the next
+    start, and startup stops waiting for it after a deadline rather than spinning
+    with no way to sign in.
+  * Opening a chat lands on the newest message again, rather than the oldest one
+    loaded, and scrolling back keeps paging through history.
+  * Starting the app while the daemon is already running no longer comes up to an
+    empty chat list that never fills. The app now asks TDLib for the state it missed,
+    which also restores folder tabs, sender names and the connection indicator.
+  * Minimising the app and returning to a chat no longer makes messages vanish or
+    appear twice.
+  * Fixed a crash when a page of history arrived while the message list was being
+    drawn.
+  * Faster chat list: avatars are cached in memory and kept masked on disk between
+    runs, the list no longer relays out when nothing has moved, download progress
+    no longer re-runs every binding on a row, and message rows keep their formatted
+    text.
+  * Optional on-device scope timing, -DMEEGRAM_PROFILE=ON, described in
+    docs/profiling.md.
+
+ -- Andrea Faggin <blackbird5308@gmail.com>  Sat, 01 Aug 2026 12:00:00 +0100
+
 meegram (0.2.0) unstable; urgency=low
 
   * Message actions on long press: reply, copy, edit, delete.

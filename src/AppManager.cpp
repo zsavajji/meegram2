@@ -436,6 +436,51 @@ void AppManager::requestAuthorizationState() noexcept
     });
 }
 
+#ifdef MEEGRAM_JSON_TRANSPORT
+// Everything TDLib announces exactly once, asked for rather than waited on.
+//
+// requestAuthorizationState above solves this for the login state; it is not special.
+// updateNewChat is sent once per chat per TDLib process - send_update_new_chat latches
+// d->is_update_new_chat_sent (td/telegram/MessagesManager.cpp) and nothing clears it - and
+// so are updateUser, updateSupergroup, updateBasicGroup, updateChatFolders, updateOption
+// and updateConnectionState. In process that is invisible, because a fresh client walks
+// every one of them from the beginning on each launch. Against meegramd it is not: its
+// TDLib outlives the UI by design, so a UI started against a running daemon is told none of
+// it, and loadChats then answers 404 because the chat list genuinely is loaded. The chat
+// list stayed empty for the rest of the run - docs/profiling.md carried that as an open
+// defect - and behind it sat the same hole for user names, folder tabs, my_id and the
+// connection state.
+//
+// getCurrentState is TDLib's own answer, and its description says so outright: "Returns all
+// updates needed to restore current TDLib state ... especially useful if TDLib is run in a
+// separate process" (td_api.tl). One request, and the reply is the updates themselves, so
+// replaying them through injectUpdate means StorageManager and every model take their
+// normal path and nothing else in the app has to know this happened.
+//
+// ponytail: the whole state arrives as one line. On a daemon that has been up for days with
+// thousands of dialogs in memory that could approach meegramd's 8 MiB per-client queue cap,
+// which drops the UI rather than truncating. Raise MaxOutgoingBytes if anyone ever hits it;
+// chunking needs a request that can page, and getCurrentState is not one.
+void AppManager::restoreState() noexcept
+{
+    m_client->send(td::td_api::make_object<td::td_api::getCurrentState>(), [this](auto &&response) {
+        if (!response || response->get_id() != td::td_api::updates::ID)
+            return;
+
+        auto updates = td::td_api::move_object_as<td::td_api::updates>(response);
+
+        // In order, which is load-bearing: TDLib emits supergroups before the basic groups
+        // that name them, users before the secret chats that name them, and updateNewChat
+        // before the updateChatLastMessage that carries the chat's positions.
+        for (auto &update : updates->updates_)
+        {
+            if (update)
+                m_client->injectUpdate(std::move(update));
+        }
+    });
+}
+#endif
+
 void AppManager::loadLanguagePack() noexcept
 {
     const auto &languageCode = m_settings->languagePackId();
@@ -479,10 +524,13 @@ void AppManager::loadLanguagePack() noexcept
             // arriving, and every page pushed after it lands is translated normally.
             //
             // A timer rather than a connection-state hook, which was the first thing tried
-            // here and cannot work: under the daemon transport TDLib announced its
-            // connection state long before this process attached, and a late-joining
-            // client is never told again. That is the same reason requestAuthorizationState
-            // exists, and there is no getConnectionState to do it with.
+            // here and could not work: under the daemon transport TDLib announced its
+            // connection state long before this process attached, and there is no
+            // getConnectionState to ask with. restoreState() has since closed that hole -
+            // getCurrentState replays updateConnectionState along with everything else - so
+            // a hook is now possible. The timer is kept because it also covers the case the
+            // hook never did: the pack request failing while the connection is perfectly
+            // fine.
             //
             // Queued, because this callback runs on the reader thread and a QTimer belongs
             // to the thread that starts it.
@@ -562,7 +610,12 @@ void AppManager::handleAuthorizationState(const td::td_api::AuthorizationState &
 
     m_chatManager = std::make_shared<ChatManager>(m_storageManager, m_locale);
 
-#ifndef MEEGRAM_JSON_TRANSPORT
+#ifdef MEEGRAM_JSON_TRANSPORT
+    // After the ChatManager, so its models are connected to StorageManager before the
+    // replay reaches it - and after the m_chatManager guard above, which is what stops the
+    // updateAuthorizationState inside the replay from starting a second one.
+    restoreState();
+#else
     // Only the in-process transport builds one of these. Under the daemon transport
     // meegramd has been posting notifications since before this app was started, and it
     // learns which chat is on screen from the openChat it relays - so there is nothing to

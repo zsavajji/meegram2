@@ -10,7 +10,19 @@ case "$1" in
         #
         # Not restarted here, only stopped: the next client to want it activates it through
         # com.meegram.Daemon, so the first launch after an upgrade gets the new binary.
-        pkill -x meegramd || true
+        #
+        # killall, not pkill. This device's busybox pgrep/pkill is not to be trusted about
+        # its flags and reports success whether or not it matched anything, so the
+        # `pkill -x meegramd || true` that used to be here was a silent no-op - the upgrade
+        # looked clean and the old daemon kept serving. killall matches the exact process
+        # name, so asking for meegramd cannot catch meegram, or the reverse.
+        #
+        # The UI goes with it, and has to: killing the daemon under a running app strands
+        # it. Client's reader thread logs "meegramd closed the connection" and stops - there
+        # is no reconnect path - so it would sit there looking alive on a dead socket until
+        # someone restarted it by hand. Killed first, so nothing re-activates the daemon
+        # between the two.
+        killall meegram meegramd 2>/dev/null || true
         ;;
 esac
 

@@ -434,7 +434,7 @@ copies with plain `cp`, so the unversioned `.so` files are full duplicates.
 ### Verify before touching the device
 
 ```bash
-dpkg-deb -c meegram_0.2.0_armel.deb | grep opt/meegram
+dpkg-deb -c meegram_0.2.1_armel.deb | grep opt/meegram
 arm-none-linux-gnueabi-readelf -d build-app/debian/meegram/opt/meegram/bin/meegram | grep RPATH
 ```
 
@@ -445,8 +445,8 @@ is simply refused by the device.
 ### Install
 
 ```bash
-scp meegram_0.2.0_armel.deb user@<n9>:/tmp/
-ssh user@<n9> 'dpkg -i /tmp/meegram_0.2.0_armel.deb'
+scp meegram_0.2.1_armel.deb user@<n9>:/tmp/
+ssh user@<n9> 'dpkg -i /tmp/meegram_0.2.1_armel.deb'
 ```
 
 Run it over SSH the first time rather than from the launcher — `invoker` swallows

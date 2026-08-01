@@ -704,9 +704,24 @@ void MessageModel::handleMessageEdited(qlonglong chatId, qlonglong messageId, in
 void MessageModel::handleDeleteMessages(qlonglong chatId, std::vector<int64_t> &&messageIds, bool isPermanent, bool fromCache) noexcept
 {
     Q_UNUSED(isPermanent)
-    Q_UNUSED(fromCache)
 
     if (chatId != m_chat->id())
+        return;
+
+    // TDLib dropped these from its own memory. They are still in the chat, and it says so:
+    // from_cache means "no longer loaded", not "deleted". The two arrive as the same update
+    // and this treated them alike, so rows vanished from under the user.
+    //
+    // What arms it is closeChat - MessagesManager::close_dialog sets the unload timeout and
+    // unload_dialog then sends updateDeleteMessages with is_permanent false and from_cache
+    // true. ChatManager::eventFilter sends closeChat when the app is *minimised*, on
+    // purpose, so this fires without leaving the chat page at all: minimise, come back,
+    // messages gone. Reopening the chat rebuilt the model, which is why that looked like a
+    // fix.
+    //
+    // Nothing to do here. The model owns its own Message objects, so TDLib forgetting them
+    // costs this side nothing, and anything scrolled to afterwards is fetched again.
+    if (fromCache)
         return;
 
     std::unordered_set idsToDelete(messageIds.begin(), messageIds.end());
@@ -800,28 +815,51 @@ void MessageModel::insertMessages(std::vector<qlonglong> &&newIds, bool prepend)
 
     std::ranges::sort(newIds);
 
-    if (prepend)
-    {
-        auto pos = static_cast<int>(newIds.size());
-        beginInsertRows(QModelIndex(), 0, pos - 1);
-        m_messages.insert(m_messages.begin(), newIds.begin(), newIds.end());
-    }
-    else
-    {
-        auto pos = static_cast<int>(m_messages.size());
-        beginInsertRows(QModelIndex(), pos, pos + static_cast<int>(newIds.size()) - 1);
-        m_messages.insert(m_messages.end(), newIds.begin(), newIds.end());
-    }
-
-    endInsertRows();
-
     // A reply preview resolves against the messages currently loaded, so a page of
     // older history can answer a quote that came back empty before it arrived.
     // Cheaper to drop the lot on a page fetch than to work out which rows care.
     m_formatted.clear();
 
-    auto mid = m_messages.begin() + (prepend ? newIds.size() : (m_messages.size() - newIds.size()));
-    std::ranges::inplace_merge(m_messages.begin(), mid, m_messages.end());
+    // A row insertion can only describe a page that lands wholly at one end: rowCount grows
+    // there and every row already in the model keeps its index. That is the usual shape -
+    // fetchMoreBack asks for ids below the oldest loaded, fetchMore for ids above the
+    // newest - but it was assumed rather than checked. The old code inserted at one end,
+    // signalled, and only *then* ran inplace_merge across the whole vector, so the view was
+    // told rows had appeared in one place while the data quietly moved them somewhere else.
+    // A QML1 ListView keeps the delegates it has already built for those indices, which is
+    // how one message ended up on screen twice.
+    //
+    // Two ways in. A message arriving while the first history request is in flight puts a
+    // newer id in the model before a page of older ones is appended "at the end". And until
+    // handleDeleteMessages learned to ignore from_cache deletions, every minimise punched
+    // holes through the middle of the loaded range for the next page to land in.
+    const bool atOneEnd = m_messages.empty() || (prepend ? newIds.back() < m_messages.front() : newIds.front() > m_messages.back());
+
+    if (!atOneEnd)
+    {
+        // Rows land in the middle, so every index after each one shifts and a reset is the
+        // only honest signal. Rare by construction, and the alternative - one insertion per
+        // contiguous run - is far easier to get wrong than this is to pay for.
+        beginResetModel();
+
+        m_messages.insert(m_messages.end(), newIds.begin(), newIds.end());
+        std::ranges::sort(m_messages);
+
+        endResetModel();
+    }
+    else if (prepend)
+    {
+        beginInsertRows(QModelIndex(), 0, static_cast<int>(newIds.size()) - 1);
+        m_messages.insert(m_messages.begin(), newIds.begin(), newIds.end());
+        endInsertRows();
+    }
+    else
+    {
+        const auto pos = static_cast<int>(m_messages.size());
+        beginInsertRows(QModelIndex(), pos, pos + static_cast<int>(newIds.size()) - 1);
+        m_messages.insert(m_messages.end(), newIds.begin(), newIds.end());
+        endInsertRows();
+    }
 
     if (prepend)
     {
