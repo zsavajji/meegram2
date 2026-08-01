@@ -158,6 +158,8 @@ QVariant MessageModel::data(const QModelIndex &index, int role) const
             return formattedRow(messageId, message.get()).replyToSender;
         case ReplyToTextRole:
             return formattedRow(messageId, message.get()).replyToText;
+        case SendStateRole:
+            return sendState(message.get());
     }
 
     return QVariant();
@@ -218,6 +220,28 @@ QString MessageModel::replyToText(const Message *message) const noexcept
         return Utils::getContent(it->second.get(), m_storage, m_locale);
 
     return {};
+}
+
+QString MessageModel::sendState(const Message *message) const noexcept
+{
+    // Nothing to say about a message somebody else sent, and a service message is not
+    // sent by anyone. Both hide the indicator by giving the delegate an empty string.
+    if (!message->isOutgoing() || message->isService())
+        return {};
+
+    // Shared instances rather than four literals: this role is read on every rebind while
+    // the list flicks, and the other roles hand back strings the row cache already holds.
+    static const QString Failed("failed"), Sending("sending"), Read("read"), Sent("sent");
+
+    if (message->isFailed())
+        return Failed;
+
+    if (message->isPending())
+        return Sending;
+
+    // The read pointer is a single "everything up to here" id, the outgoing counterpart
+    // of the one viewMessagesUpTo moves on the other side.
+    return message->id() <= m_chat->lastReadOutboxMessageId() ? Read : Sent;
 }
 
 const MessageModel::FormattedRow &MessageModel::formattedRow(qlonglong messageId, const Message *message) const noexcept
@@ -282,6 +306,7 @@ QHash<int, QByteArray> MessageModel::roleNames() const noexcept
     roles[SectionRole] = "section";
     roles[ReplyToSenderRole] = "replyToSender";
     roles[ReplyToTextRole] = "replyToText";
+    roles[SendStateRole] = "sendState";
     return roles;
 }
 
@@ -680,6 +705,16 @@ void MessageModel::handleResult(td::td_api::Object *object) noexcept
             handleNewMessage(std::move(update->message_));
             break;
         }
+        case td::td_api::updateMessageSendSucceeded::ID: {
+            auto update = static_cast<td::td_api::updateMessageSendSucceeded *>(object);
+            handleMessageSendCompleted(std::move(update->message_), update->old_message_id_);
+            break;
+        }
+        case td::td_api::updateMessageSendFailed::ID: {
+            auto update = static_cast<td::td_api::updateMessageSendFailed *>(object);
+            handleMessageSendCompleted(std::move(update->message_), update->old_message_id_);
+            break;
+        }
         case td::td_api::updateMessageContent::ID: {
             auto update = static_cast<td::td_api::updateMessageContent *>(object);
             handleMessageContent(update->chat_id_, update->message_id_, std::move(update->new_content_));
@@ -688,6 +723,11 @@ void MessageModel::handleResult(td::td_api::Object *object) noexcept
         case td::td_api::updateMessageEdited::ID: {
             auto update = static_cast<td::td_api::updateMessageEdited *>(object);
             handleMessageEdited(update->chat_id_, update->message_id_, update->edit_date_, std::move(update->reply_markup_));
+            break;
+        }
+        case td::td_api::updateChatReadOutbox::ID: {
+            auto update = static_cast<td::td_api::updateChatReadOutbox *>(object);
+            handleChatReadOutbox(update->chat_id_, update->last_read_outbox_message_id_);
             break;
         }
         case td::td_api::updateDeleteMessages::ID: {
@@ -731,6 +771,58 @@ void MessageModel::handleNewMessage(td::td_api::object_ptr<td::td_api::message> 
     }
 }
 
+void MessageModel::handleMessageSendCompleted(td::td_api::object_ptr<td::td_api::message> &&message, qlonglong oldMessageId) noexcept
+{
+    if (!message || m_chat->id() != message->chat_id_)
+        return;
+
+    const auto newMessageId = message->id_;
+
+    // Sending a message puts it in the model twice. updateNewMessage delivers it straight
+    // away with a temporary id, and when the server acks it TDLib re-issues the same
+    // message under its real id here - the temporary one is never deleted, it is retired
+    // by this update and nothing else. Ignoring it left the pending copy in m_messages
+    // under an id no later fetch can match, so the next getChatHistory - the retry after
+    // an empty reply, on this very chat - saw the real message as new and appended it
+    // beside the copy already on screen. Reopening the chat rebuilt the model from the
+    // server, which is why that cleared it.
+    const auto it = std::ranges::find(m_messages, oldMessageId);
+    if (it == m_messages.end())
+    {
+        handleNewMessage(std::move(message));
+        return;
+    }
+
+    const auto pos = std::distance(m_messages.begin(), it);
+
+    // The pending Message owns the content object the delegate is bound to, so it has to
+    // outlive the row's update: itemChanged below is what makes QML re-read the row and
+    // let go of that pointer. Destroyed on the way out of this function instead.
+    auto pending = std::move(m_messageMap[oldMessageId]);
+
+    m_messageMap.erase(oldMessageId);
+    m_formatted.erase(oldMessageId);
+
+    m_messageMap[newMessageId] = std::make_unique<Message>(std::move(message));
+    linkContentFile(m_messageMap[newMessageId].get());
+
+    // The real id is above the temporary one, so the row keeps its place - unless a
+    // second message is still pending behind it, which happens when two are sent in
+    // quick succession: the first gets a server id larger than the temporary id the
+    // second still holds. m_messages has to stay sorted, so that case re-sorts.
+    if (it + 1 == m_messages.end() || newMessageId < *(it + 1))
+    {
+        *it = newMessageId;
+        itemChanged(pos);
+        return;
+    }
+
+    beginResetModel();
+    *it = newMessageId;
+    std::ranges::sort(m_messages);
+    endResetModel();
+}
+
 void MessageModel::handleMessageContent(qlonglong chatId, qlonglong messageId, td::td_api::object_ptr<td::td_api::MessageContent> &&newContent) noexcept
 {
     if (chatId != m_chat->id())
@@ -760,6 +852,26 @@ void MessageModel::handleMessageEdited(qlonglong chatId, qlonglong messageId, in
 
         itemChanged(std::distance(m_messages.begin(), std::ranges::find(m_messages, messageId)));
     }
+}
+
+void MessageModel::handleChatReadOutbox(qlonglong chatId, qlonglong lastReadOutboxMessageId) noexcept
+{
+    if (chatId != m_chat->id() || m_messages.empty())
+        return;
+
+    // sendState reads the pointer off the Chat, which StorageManager owns and updates from
+    // this same update - and it is connected to the client first, at startup, so it has
+    // already run by the time this does. Nothing to store here, only rows to repaint.
+    const auto last = std::ranges::upper_bound(m_messages, lastReadOutboxMessageId);
+    if (last == m_messages.begin())
+        return;
+
+    // Everything up to the pointer, rather than only what it just passed: the previous
+    // value is not kept, and rows already green re-read to the same string. Only the rows
+    // on screen actually re-read at all.
+    const auto lastRow = static_cast<int>(std::distance(m_messages.begin(), last)) - 1;
+
+    emit dataChanged(createIndex(0, 0), createIndex(lastRow, 0));
 }
 
 void MessageModel::handleDeleteMessages(qlonglong chatId, std::vector<int64_t> &&messageIds, bool isPermanent, bool fromCache) noexcept

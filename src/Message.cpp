@@ -47,6 +47,12 @@ Message::Message(td::td_api::object_ptr<td::td_api::message> message, QObject *p
 
     m_isOutgoing = m_message->is_outgoing_;
 
+    // Read once here rather than off m_message on every call: the state only ever changes
+    // by TDLib re-issuing the whole message through updateMessageSendSucceeded or
+    // updateMessageSendFailed, and MessageModel builds a fresh Message for those.
+    m_isPending = m_message->sending_state_ != nullptr;
+    m_isFailed = m_isPending && m_message->sending_state_->get_id() == td::td_api::messageSendingStateFailed::ID;
+
     m_date = QDateTime::fromMSecsSinceEpoch(static_cast<qlonglong>(m_message->date_) * 1000);
     m_editDate = QDateTime::fromMSecsSinceEpoch(static_cast<qlonglong>(m_message->edit_date_) * 1000);
 
@@ -131,6 +137,16 @@ qlonglong Message::senderId() const
 bool Message::isOutgoing() const
 {
     return m_isOutgoing;
+}
+
+bool Message::isPending() const noexcept
+{
+    return m_isPending;
+}
+
+bool Message::isFailed() const noexcept
+{
+    return m_isFailed;
 }
 
 QDateTime Message::date() const
