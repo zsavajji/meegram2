@@ -488,13 +488,17 @@ void MessageModel::sendDocument(const QString &filePath, const QString &caption,
 
 void MessageModel::sendVoiceNote(const QString &filePath, int duration, const QString &caption, const QString &replyToMessageId) noexcept
 {
-    auto content = td::td_api::make_object<td::td_api::inputMessageVoiceNote>();
+    auto voiceNote = td::td_api::make_object<td::td_api::inputVoiceNote>();
 
-    content->voice_note_ = td::td_api::make_object<td::td_api::inputFileLocal>(filePath.toStdString());
-    content->duration_ = duration;
+    voiceNote->voice_note_ = td::td_api::make_object<td::td_api::inputFileLocal>(filePath.toStdString());
+    voiceNote->duration_ = duration;
 
     // waveform_ left empty, which TDLib accepts. It is the little bar chart other clients
     // draw behind the play button, and this one draws no waveform to fill in.
+
+    auto content = td::td_api::make_object<td::td_api::inputMessageVoiceNote>();
+
+    content->voice_note_ = std::move(voiceNote);
     content->caption_ = td::td_api::make_object<td::td_api::formattedText>();
     content->caption_->text_ = caption.toStdString();
 
