@@ -5,6 +5,7 @@
 #include <td/telegram/td_api.h>
 
 #include <QObject>
+#include <QVariant>
 
 class Chat;
 class Locale;
@@ -40,6 +41,13 @@ public:
     // drawn at, or 0 for anything else - pass straight to replaceEmoji(). Takes the
     // plain text, not the formatted one, or the markup would count as non-emoji.
     Q_INVOKABLE static int emojiOnlySize(const QString &text) noexcept;
+
+    // The emoji of one Emoji::Category, for the picker grid: a list of
+    // { unicode, filename }. Skin-tone variants are left out - they are 1875 of the
+    // 3773 entries, and a grid holding six of every person is not one anything can
+    // be found in. The base emoji is still sent; Telegram renders it per the
+    // recipient's default.
+    Q_INVOKABLE static QVariantList emojiCategory(int category) noexcept;
 
     // QML1 has no Clipboard element, so the "Copy" message action goes through here.
     Q_INVOKABLE static void copyToClipboard(const QString &text) noexcept;
