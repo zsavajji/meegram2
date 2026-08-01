@@ -967,7 +967,17 @@ void MessageModel::reloadHistory() noexcept
 
     ++m_historyRetries;
 
-    loadMessages();
+    // The retry has to ask the same end of the chat the empty reply came from.
+    // loadMessages() unconditionally requests the newest slice, so an empty answer to a
+    // page-up was retried by re-fetching messages already loaded: no new ids, so
+    // insertMessages returned early and never emitted fetchedPosition, and cleanupFlags
+    // cleared m_backFetching anyway. The page the user scrolled for was dropped and the
+    // list just stopped, until they flicked again. Both flags set is the opening load,
+    // which is the newest slice by definition.
+    if (m_backFetching && !m_loading && !m_messages.empty())
+        requestHistory(std::ranges::min(m_messages), 0, MessageSliceLimit, true);
+    else
+        loadMessages();
 }
 
 void MessageModel::loadMessages() noexcept
