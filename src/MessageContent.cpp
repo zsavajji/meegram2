@@ -520,6 +520,7 @@ MessageVoiceNote::MessageVoiceNote(td::td_api::object_ptr<td::td_api::messageVoi
     : QObject(parent)
 {
     m_caption = QString::fromStdString(content->caption_->text_);
+    m_isListened = content->is_listened_;
 
     // Guarded the same way MessageDocument is: a message TDLib hands over without a voice
     // part is a missing bubble, not a crash.
@@ -545,6 +546,11 @@ File *MessageVoiceNote::file() const
 int MessageVoiceNote::duration() const
 {
     return m_duration;
+}
+
+bool MessageVoiceNote::isListened() const
+{
+    return m_isListened;
 }
 
 const std::shared_ptr<File> &MessageVoiceNote::voiceFile() const noexcept
