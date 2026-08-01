@@ -720,7 +720,6 @@ void MessageModel::refresh() noexcept
     endResetModel();
 
     emit countChanged();
-    emit loadingChanged();
 }
 
 void MessageModel::handleResult(td::td_api::Object *object) noexcept
