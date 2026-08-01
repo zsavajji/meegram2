@@ -4,6 +4,7 @@
         <file>qml/components/ChatItem.qml</file>
         <file>qml/components/CountryPickerDialog.qml</file>
         <file>qml/components/DrillDownDelegate.qml</file>
+        <file>qml/components/EmojiPicker.qml</file>
         <file>qml/components/Icons.qml</file>
         <file>qml/components/ListItem.qml</file>
         <file>qml/components/MessageBubble.qml</file>

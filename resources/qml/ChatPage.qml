@@ -592,6 +592,14 @@ Page {
                     backgroundSelected: "qrc:/images/messaging-textedit-background.png"
                     backgroundCornerMargin: 1
                 }
+
+                // Tapping in to type raises the keyboard, which would come up over the
+                // emoji panel, so the panel gets out of its way. Does not fire when the
+                // panel itself lowers the keyboard: that leaves focus here untouched.
+                onActiveFocusChanged: {
+                    if (activeFocus)
+                        emojiPanel.open = false;
+                }
             }
 
             Rectangle {
@@ -689,6 +697,42 @@ Page {
                     font.pixelSize: 22
                 }
 
+                Label {
+                    id: emojiButton
+
+                    anchors {
+                        right: sendButton.left
+                        rightMargin: 24
+                        verticalCenter: parent.verticalCenter
+                    }
+                    // The recording row needs the space for the elapsed time, and there
+                    // is nothing to type an emoji into mid-note anyway.
+                    visible: !voice.recording
+                    text: emojiPanel.open ? icons.close : icons.smile
+                    font.family: icons.fontFamily
+                    font.pixelSize: 36
+                    color: emojiPanel.open || emojiArea.pressed ? "#0077A8" : "#505050"
+
+                    MouseArea {
+                        id: emojiArea
+
+                        anchors.fill: parent
+                        anchors.margins: -12
+                        onClicked: {
+                            emojiPanel.open = !emojiPanel.open;
+
+                            // Last on purpose: these two are the only calls here that
+                            // depend on TextArea exposing the platform's input-panel
+                            // methods, and a panel that opens without lowering the
+                            // keyboard still beats a button that half-works.
+                            if (emojiPanel.open)
+                                textArea.closeSoftwareInputPanel();
+                            else
+                                textArea.openSoftwareInputPanel();
+                        }
+                    }
+                }
+
                 Button {
                     id: sendButton
                     anchors {
@@ -731,11 +775,30 @@ Page {
                         name: "open"
                         // Held open while recording too. Bound to focus alone, tapping
                         // anywhere off the text area collapsed the panel mid-recording and
-                        // took the stop button with it.
-                        when: textArea.activeFocus || voice.recording
+                        // took the stop button with it. Same for the emoji panel: opening
+                        // it lowers the keyboard, and if that drops focus this row would
+                        // collapse and take Send and the button that closes the panel away.
+                        when: textArea.activeFocus || voice.recording || emojiPanel.open
                         PropertyChanges { target: controls; height: 64 }
                     }
                 ]
+            }
+
+            // Takes the keyboard's place rather than covering the chat: the keyboard has
+            // to come down for it either way, and down here picking several in a row does
+            // not hide the message being written.
+            EmojiPicker {
+                id: emojiPanel
+
+                width: parent.width
+
+                // Appended rather than inserted at the cursor: setting .text is what
+                // QML1 gives us, and that moves the cursor anyway, so put it back at
+                // the end where typing resumes.
+                onPicked: {
+                    textArea.text += unicode;
+                    textArea.cursorPosition = textArea.text.length;
+                }
             }
         }
     }

@@ -444,6 +444,40 @@ int Utils::emojiOnlySize(const QString &text) noexcept
     }
 }
 
+QVariantList Utils::emojiCategory(int category) noexcept
+{
+    MEEGRAM_SCOPE("Utils::emojiCategory");
+
+    QVariantList result;
+
+    for (const Emoji &emoji : Emoji::emojis())
+    {
+        if (emoji.category() != static_cast<Emoji::Category>(category))
+            continue;
+
+        const auto filename = emoji.filename();
+
+        // The skin-tone variants, filtered on the filename rather than by scanning
+        // the unicode for a modifier: the assets name them "base-1f3fb.png", so the
+        // dash is what tells a variant from the modifier's own emoji.
+        if (filename.contains(QLatin1String("-1f3f")))
+            continue;
+
+        // Three entries in the table have no asset behind them - the female, male and
+        // medical signs. A cell that draws nothing is worse than one emoji fewer.
+        if (!QFile::exists(QLatin1String(":/emoji/") % filename))
+            continue;
+
+        QVariantMap entry;
+        entry.insert("unicode", emoji.unicode());
+        entry.insert("filename", filename);
+
+        result.append(entry);
+    }
+
+    return result;
+}
+
 namespace {
 
 // MyDocs explicitly, not QDesktopServices::PicturesLocation - on Harmattan that
