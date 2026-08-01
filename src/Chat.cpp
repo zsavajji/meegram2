@@ -56,6 +56,11 @@ File *Chat::photo() const noexcept
     return m_file.get();
 }
 
+File *Chat::bigPhoto() const noexcept
+{
+    return m_bigFile.get();
+}
+
 const std::shared_ptr<File> &Chat::photoFile() const noexcept
 {
     return m_file;
@@ -64,6 +69,16 @@ const std::shared_ptr<File> &Chat::photoFile() const noexcept
 void Chat::adoptPhotoFile(std::shared_ptr<File> file) noexcept
 {
     m_file = std::move(file);
+}
+
+const std::shared_ptr<File> &Chat::bigPhotoFile() const noexcept
+{
+    return m_bigFile;
+}
+
+void Chat::adoptBigPhotoFile(std::shared_ptr<File> file) noexcept
+{
+    m_bigFile = std::move(file);
 }
 
 Message *Chat::lastMessage() const noexcept
@@ -126,6 +141,10 @@ void Chat::setPhoto(td::td_api::object_ptr<td::td_api::chatPhotoInfo> photo) noe
     if (photo && photo->small_)
     {
         m_file = std::make_shared<File>(std::move(photo->small_));
+
+        if (photo->big_)
+            m_bigFile = std::make_shared<File>(std::move(photo->big_));
+
         emit chatChanged();
     }
 }

@@ -112,6 +112,39 @@ QString ChatInfoFormatter::status() const noexcept
     return m_action.isEmpty() ? m_status : m_action;
 }
 
+QString ChatInfoFormatter::username() const noexcept
+{
+    const auto usernames = m_user ? m_user->activeUsernames() : (m_supergroup ? m_supergroup->activeUsernames() : QStringList());
+
+    // The first is the primary one; the rest are aliases that resolve to the same chat.
+    return usernames.isEmpty() ? QString() : QLatin1Char('@') + usernames.first();
+}
+
+QString ChatInfoFormatter::bio() const noexcept
+{
+    return m_user ? m_storageManager->userBio(m_user->id()) : QString();
+}
+
+QString ChatInfoFormatter::phoneNumber() const noexcept
+{
+    const auto number = m_user ? m_user->phoneNumber() : QString();
+
+    // ponytail: "+" and the digits as TDLib gives them, ungrouped. Grouping is per
+    // country and worth a table only if the raw form actually reads badly on device.
+    return number.isEmpty() ? number : QLatin1Char('+') + number;
+}
+
+void ChatInfoFormatter::loadProfile() noexcept
+{
+    if (!m_user)
+        return;
+
+    // StorageManager owns the request and the answer. Sending it from here would mean a
+    // callback on the TDLib worker thread holding a formatter that is destroyed the
+    // moment another chat is opened.
+    m_storageManager->loadUserFullInfo(m_user->id());
+}
+
 void ChatInfoFormatter::handleBasicGroupUpdate(qlonglong groupId) noexcept
 {
     if (!m_chat || m_chat->typeId() != groupId)
@@ -145,7 +178,16 @@ void ChatInfoFormatter::handleUserUpdate(qlonglong userId) noexcept
     {
         m_user = std::move(user);
         updateStatus();
+
+        // updateUser carries the phone number and the usernames as well as the status.
+        emit profileChanged();
     }
+}
+
+void ChatInfoFormatter::handleUserFullInfo(qlonglong userId) noexcept
+{
+    if (m_user && m_user->id() == userId)
+        emit profileChanged();
 }
 
 void ChatInfoFormatter::handleChatOnlineMemberCount(qlonglong chatId, int onlineMemberCount) noexcept
@@ -170,6 +212,7 @@ void ChatInfoFormatter::initializeMembers() noexcept
         m_user = m_storageManager->user(chatTypeId);
 
         connect(m_storageManager.get(), SIGNAL(userUpdated(qlonglong)), SLOT(handleUserUpdate(qlonglong)));
+        connect(m_storageManager.get(), SIGNAL(userFullInfoUpdated(qlonglong)), SLOT(handleUserFullInfo(qlonglong)));
         connect(m_storageManager.get(), SIGNAL(chatOnlineMemberCountUpdated(qlonglong, int)), SLOT(handleChatOnlineMemberCount(qlonglong, int)));
     }
 

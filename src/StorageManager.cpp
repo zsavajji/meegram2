@@ -1,5 +1,7 @@
 #include "StorageManager.hpp"
 
+#include "Utils.hpp"
+
 #include <algorithm>
 #include <ranges>
 #include <unordered_set>
@@ -66,6 +68,11 @@ void StorageManager::registerChatPhoto(const std::shared_ptr<Chat> &chat) noexce
     {
         chat->adoptPhotoFile(registerFile(file));
     }
+
+    if (const auto &file = chat->bigPhotoFile())
+    {
+        chat->adoptBigPhotoFile(registerFile(file));
+    }
 }
 
 std::shared_ptr<File> StorageManager::file(int fileId) const noexcept
@@ -106,6 +113,38 @@ std::shared_ptr<User> StorageManager::user(qlonglong userId) const noexcept
     }
 
     return nullptr;
+}
+
+QString StorageManager::userBio(qlonglong userId) const noexcept
+{
+    if (auto it = m_userBios.find(userId); it != m_userBios.end())
+    {
+        return it->second;
+    }
+
+    return {};
+}
+
+void StorageManager::loadUserFullInfo(qlonglong userId) noexcept
+{
+    m_client->send(td::td_api::make_object<td::td_api::getUserFullInfo>(userId), [this, userId](auto &&response) {
+        // Runs on the TDLib worker thread. Nothing but the response is touched here;
+        // the map and the signal are left to the queued call below.
+        if (response->get_id() != td::td_api::userFullInfo::ID)
+            return;
+
+        const auto *fullInfo = static_cast<const td::td_api::userFullInfo *>(response.get());
+
+        QMetaObject::invokeMethod(this, "setUserBio", Qt::QueuedConnection, Q_ARG(qlonglong, userId),
+                                  Q_ARG(QString, Utils::formattedText(fullInfo->bio_)));
+    });
+}
+
+void StorageManager::setUserBio(qlonglong userId, const QString &bio) noexcept
+{
+    m_userBios.insert_or_assign(userId, bio);
+
+    emit userFullInfoUpdated(userId);
 }
 
 qlonglong StorageManager::myId() const noexcept
@@ -280,6 +319,13 @@ void StorageManager::handleResult(td::td_api::Object *object)
                 it->second->setStatus(std::move(update->status_));
                 emit userUpdated(userId);
             }
+            break;
+        }
+        case td::td_api::updateUserFullInfo::ID: {
+            // Keeps a bio already on screen current. The profile page does not wait for
+            // this - see loadUserFullInfo for why it cannot.
+            auto update = static_cast<td::td_api::updateUserFullInfo *>(object);
+            setUserBio(update->user_id_, Utils::formattedText(update->user_full_info_->bio_));
             break;
         }
         case td::td_api::updateBasicGroup::ID: {

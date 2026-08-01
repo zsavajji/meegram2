@@ -7,6 +7,7 @@ User::User(td::td_api::object_ptr<td::td_api::user> userFullInfo, QObject *paren
     , m_lastName(QString::fromStdString(userFullInfo->last_name_))
     , m_isSupport(userFullInfo->is_support_)
     , m_type(determineType(userFullInfo->type_))
+    , m_phoneNumber(QString::fromStdString(userFullInfo->phone_number_))
 {
     if (userFullInfo->usernames_)
     {
@@ -57,6 +58,11 @@ QDateTime User::wasOnline() const
 QStringList User::activeUsernames() const
 {
     return m_activeUsernames;
+}
+
+QString User::phoneNumber() const
+{
+    return m_phoneNumber;
 }
 
 void User::setStatus(td::td_api::object_ptr<td::td_api::UserStatus> status)

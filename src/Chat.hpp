@@ -18,6 +18,10 @@ class Chat : public QObject
     Q_PROPERTY(Type type READ type CONSTANT)
     Q_PROPERTY(QString title READ title NOTIFY chatChanged)
     Q_PROPERTY(File *photo READ photo NOTIFY chatChanged)
+
+    // The 640px variant of the same photo, for the profile page. Never downloaded on its
+    // own account - the chat list and the chat header both ask for the small one.
+    Q_PROPERTY(File *bigPhoto READ bigPhoto NOTIFY chatChanged)
     Q_PROPERTY(Message *lastMessage READ lastMessage NOTIFY chatChanged)
     Q_PROPERTY(bool isMarkedAsUnread READ isMarkedAsUnread NOTIFY chatChanged)
     Q_PROPERTY(int unreadCount READ unreadCount NOTIFY chatChanged)
@@ -40,10 +44,13 @@ public:
     Type type() const noexcept;
     QString title() const noexcept;
     File *photo() const noexcept;
+    File *bigPhoto() const noexcept;
 
     // For StorageManager, so the chat's photo and its file map hold one object.
     const std::shared_ptr<File> &photoFile() const noexcept;
     void adoptPhotoFile(std::shared_ptr<File> file) noexcept;
+    const std::shared_ptr<File> &bigPhotoFile() const noexcept;
+    void adoptBigPhotoFile(std::shared_ptr<File> file) noexcept;
     Message *lastMessage() const noexcept;
     bool isMarkedAsUnread() const noexcept;
     int unreadCount() const noexcept;
@@ -91,6 +98,7 @@ private:
     // Shared, not owned: StorageManager registers this same instance in its file map
     // so updateFile mutates the object the chat exposes. See registerChatPhoto().
     std::shared_ptr<File> m_file;
+    std::shared_ptr<File> m_bigFile;
     std::unique_ptr<Message> m_lastMessage;
 
     std::vector<std::unique_ptr<ChatPosition>> m_positions;

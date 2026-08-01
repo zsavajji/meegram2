@@ -539,6 +539,18 @@ if (BUILD_HARMATTAN)
                 PATTERN "libssl.so.*"
                 PATTERN "libcrypto.so.*")
 
+    # QtMultimedia is the one Qt module the SDK sysroot has and the device image does not.
+    # Harmattan's own media apps use QtMobility's QtMultimediaKit, so libQtMultimedia.so.4
+    # is there to link against but is not on the phone, and the installed binary dies with
+    # "libQtMultimedia.so.4: cannot open shared object file".
+    #
+    # 152 KB, and the same 4.7.4 build the device runs, so it travels in the package next
+    # to OpenSSL rather than porting QAudioInput/QAudioOutput onto QtMultimediaKit's copies
+    # of the same classes. Soname only: .so.4.7 and .so.4.7.4 are hardlinked duplicates of
+    # these exact bytes, and .so is the link-time name. Its own libasound.so.2 is already
+    # on the device, which is where PulseAudio's ALSA sinks get theirs.
+    install(FILES "${QT_LIBRARY_DIR}/libQtMultimedia.so.4" DESTINATION /opt/meegram/lib)
+
     # dpkg-buildpackage reads debian/ from the build directory, so it has to be copied
     # there - and copied on every run. This used to be a configure-time file(COPY)
     # guarded by "if not exists", which meant the build tree kept the debian/ of its

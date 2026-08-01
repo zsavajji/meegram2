@@ -24,19 +24,36 @@ class ChatInfoFormatter : public QObject
     Q_PROPERTY(QString title READ title CONSTANT)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
 
+    // What the profile page shows under the photo. All three are empty when they do not
+    // apply - a group has no phone number, a user who hides theirs has none either - so
+    // the page hides a row by testing its string.
+    Q_PROPERTY(QString username READ username NOTIFY profileChanged)
+    Q_PROPERTY(QString bio READ bio NOTIFY profileChanged)
+    Q_PROPERTY(QString phoneNumber READ phoneNumber NOTIFY profileChanged)
+
 public:
     explicit ChatInfoFormatter(std::shared_ptr<Chat> chat, std::shared_ptr<Locale> locale, std::shared_ptr<StorageManager> storage);
 
     QString title() const noexcept;
     QString status() const noexcept;
 
+    QString username() const noexcept;
+    QString bio() const noexcept;
+    QString phoneNumber() const noexcept;
+
+    // Asks TDLib for the bio, which arrives as an update rather than as an answer here.
+    // Called by the profile page on the way in; everything else is already in store.
+    Q_INVOKABLE void loadProfile() noexcept;
+
 signals:
     void statusChanged();
+    void profileChanged();
 
 private slots:
     void handleBasicGroupUpdate(qlonglong groupId) noexcept;
     void handleSupergroupUpdate(qlonglong groupId) noexcept;
     void handleUserUpdate(qlonglong userId) noexcept;
+    void handleUserFullInfo(qlonglong userId) noexcept;
     void handleChatOnlineMemberCount(qlonglong chatId, int onlineMemberCount) noexcept;
 
     void handleChatAction(qlonglong chatId, qlonglong senderId, int actionType) noexcept;
