@@ -171,12 +171,31 @@ Page {
                 id: headerContent
                 anchors.fill: parent
 
+                // Paging back into history, or any later reload. The initial load is
+                // the big centred one below, which owns the empty screen - showing
+                // both at once would just be two spinners for one wait.
+                BusyIndicator {
+                    id: headerBusy
+
+                    anchors {
+                        right: parent.right
+                        rightMargin: root.platformStyle.rejectButtonLeftMargin
+                        verticalCenter: parent.verticalCenter
+                    }
+                    visible: messageModel.loading && messageModel.count > 0
+                    running: visible
+                    platformStyle: BusyIndicatorStyle { size: "medium" }
+                }
+
                 Row {
                     id: chatInfoRow
                     anchors.left: parent.left
                     anchors.leftMargin: root.platformStyle.rejectButtonLeftMargin
-                    anchors.right: parent.right
-                    anchors.rightMargin: root.platformStyle.rejectButtonLeftMargin
+                    // Stops short of the spinner's slot whether or not it is showing,
+                    // so a long title elides at a fixed width instead of jumping every
+                    // time a page of history loads.
+                    anchors.right: headerBusy.left
+                    anchors.rightMargin: 12
                     anchors.verticalCenter: parent.verticalCenter
 
                     spacing: 12
