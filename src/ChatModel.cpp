@@ -158,6 +158,34 @@ bool ChatModel::loading() const
     return m_loading;
 }
 
+QString ChatModel::filter() const
+{
+    return m_filter;
+}
+
+void ChatModel::setFilter(const QString &filter)
+{
+    const auto trimmed = filter.trimmed();
+
+    if (trimmed == m_filter)
+        return;
+
+    m_filter = trimmed;
+    emit filterChanged();
+
+    // Re-scan from storage rather than narrowing what is already here: widening or
+    // clearing the filter has to bring rows back, and storage is the only place that
+    // still knows about them.
+    populate();
+
+    // The list is paged - 25 chats a batch, more only when the user scrolls to the
+    // bottom - so an unqualified search would only ever see the first screenful.
+    // Pull the rest in while a search is running; handleChatsLoaded chains the next
+    // batch until TDLib says the list is exhausted.
+    if (!m_filter.isEmpty())
+        requestMoreChats();
+}
+
 void ChatModel::rebuildRowIndex()
 {
     m_rowById.clear();
@@ -189,6 +217,20 @@ bool ChatModel::isInList(Chat *chat) const
     return getChatPosition(chat) != nullptr;
 }
 
+bool ChatModel::matchesFilter(const std::shared_ptr<Chat> &chat) const
+{
+    if (m_filter.isEmpty())
+        return true;
+
+    // formattedRow rather than a fresh getChatTitle: the title is cached per chat id,
+    // so the second keystroke onwards costs a string compare per chat.
+    //
+    // ponytail: title only. Searching message text means a TDLib searchMessages call
+    // and a second model; add that if title search turns out not to be what people
+    // reach for here.
+    return formattedRow(chat).title.contains(m_filter, Qt::CaseInsensitive);
+}
+
 bool ChatModel::insertChatIfInList(qlonglong chatId)
 {
     if (m_rowById.contains(chatId) || m_removedChatIds.contains(chatId))
@@ -199,6 +241,11 @@ bool ChatModel::insertChatIfInList(qlonglong chatId)
         return false;
 
     if (!isInList(chat.get()))
+        return false;
+
+    // A chat arriving while a search is running only joins the list if it matches -
+    // which is also how the batches pulled in by setFilter reach the results.
+    if (!matchesFilter(chat))
         return false;
 
     // rowCount() is m_count, and m_count <= m_chats.size() always holds, so the
@@ -282,6 +329,16 @@ void ChatModel::handleChatsLoaded(bool listExhausted)
         m_loading = false;
         emit loadingChanged();
     }
+
+    // A search wants the whole list, not the first page. Chains one batch at a time
+    // until TDLib reports the list exhausted; stops as soon as the field is cleared,
+    // so the unfiltered list still pages only when the user scrolls.
+    //
+    // ponytail: unbounded - an account with thousands of chats loads all of them for
+    // one search. Cap the number of chained batches if that turns out to hurt on
+    // device; the alternative is a searchChats request and a second model.
+    if (!m_filter.isEmpty() && !m_listFullyLoaded)
+        requestMoreChats();
 }
 
 void ChatModel::populate()
@@ -291,8 +348,12 @@ void ChatModel::populate()
     beginResetModel();
 
     m_chats.clear();
-    m_formatted.clear();
     m_count = 0;
+
+    // m_formatted is deliberately kept: it is keyed by chat id and invalidated per
+    // chat on update, and a search re-populates on every keystroke - clearing it here
+    // meant re-running getChatTitle and replaceEmoji (380us a chat) for the whole
+    // list each time. clear() still wipes it on refresh.
 
     const auto &chatIds = m_storageManager->chatIds();
 
@@ -305,7 +366,7 @@ void ChatModel::populate()
         if (!chat)
             continue;
 
-        if (isInList(chat.get()))
+        if (isInList(chat.get()) && matchesFilter(chat))
         {
             m_chats.emplace_back(chat);
         }
@@ -381,13 +442,19 @@ void ChatModel::sortChats()
 
         // Chats that have left this list - deleted, left, archived - used to be kept
         // and sorted to the bottom, so a deleted chat stayed on screen until restart.
-        if (!chat || !isInList(chat.get()))
-        {
-            if (chat)
-                m_formatted.remove(chat->id());
+        if (!chat)
+            continue;
 
+        if (!isInList(chat.get()))
+        {
+            m_formatted.remove(chat->id());
             continue;
         }
+
+        // Filtered out, not gone: keep the cached title, it is what the next
+        // keystroke matches against.
+        if (!matchesFilter(chat))
+            continue;
 
         ordered.emplace_back(getChatPosition(chat.get())->order(), weakChat);
     }
