@@ -193,6 +193,8 @@ Cross-builds and installs into the sysroot:
 | OpenSSL | 3.5.7 | version + SHA256 |
 | rlottie | master | **commit SHA** (`RLOTTIE_COMMIT`) |
 | libwebp | v1.4.0 | release tag (`LIBWEBP_TAG`) |
+| libogg | v1.3.5 | release tag (`LIBOGG_TAG`) |
+| libopus | v1.4 | release tag (`OPUS_TAG`) |
 | TDLib | 1.8.66 | **commit SHA** (`TDLIB_COMMIT`) |
 
 TDLib tags almost nothing — its git tags stop at `v1.8.0` while it reports versions
@@ -219,15 +221,30 @@ same reasons as rlottie.
 
 Unlike rlottie it needs no `-DARCH=arm` equivalent: libwebp compiles its NEON paths
 from the compiler's own `__ARM_NEON__`, which this toolchain defines by default
-(`--with-fpu=neon`). It is the only dependency pinned to a **release tag** rather than
-a commit, because libwebp actually tags releases.
+(`--with-fpu=neon`).
+
+**libogg and libopus** are there for **voice notes**. TDLib accepts nothing but OggOpus
+for `inputMessageVoiceNote`, and Harmattan has neither the codec nor a GStreamer new
+enough to have gained it — opus was standardised the year after the device shipped. Both
+are static and PIC for the same reasons as rlottie, and both ship a `CMakeLists.txt`, so
+they go through the same path as libwebp rather than needing autotools cross-configuration.
+`OPUS_BUILD_PROGRAMS` and the test targets are off; nothing here runs `opus_demo`.
+
+The container muxing on top of them is hand-written in `src/OggOpus.cpp`, and
+`tools/opus_roundtrip.cpp` is its self-check — a known tone through the encoder and back
+out of the decoder. It deliberately links no Qt, so it also builds on a development
+machine that has libopus and libogg but no Qt 4:
+
+```bash
+cmake --build build --target opus_roundtrip && ./build/opus_roundtrip
+```
 
 ### What a re-run does
 
 | Stage | Re-run |
 |---|---|
 | zlib, OpenSSL | **Skipped** if `build/*/.built-version` matches the version in the script |
-| rlottie, libwebp, TDLib | **Skipped** if `build/*/.built-commit` matches the pinned commit or tag, target and LTO setting. The stamp is only written after `install` succeeds, so a failed run always rebuilds. |
+| rlottie, libwebp, libogg/libopus, TDLib | **Skipped** if `build/*/.built-commit` matches the pinned commit or tag, target and LTO setting. The stamp is only written after `install` succeeds, so a failed run always rebuilds. |
 
 Stamps mean bumping a version or commit still triggers a rebuild rather than
 silently linking against a stale library. `FORCE_REBUILD=1` forces all of them.
@@ -275,7 +292,7 @@ cmake --build build-app -- VERBOSE=1 | grep -o '\-O[0-9s]' | sort -u    # expect
 
 ::: danger Do not build the app into `build/`
 `tools/setup-dependencies.sh` owns that directory — `build/crypto`, `build/zlib`,
-`build/tdlib`, `build/generate`, `build/rlottie` and `build/libwebp` all live there, along with the
+`build/tdlib`, `build/generate`, `build/rlottie`, `build/libwebp`, `build/ogg` and `build/opus` all live there, along with the
 stamps that let re-runs skip completed work. Pointing CMake at `build/` and then
 clearing the cache with `rm -rf build` destroys every dependency build tree.
 Installed artefacts in the sysroot survive, but the trees and stamps do not.

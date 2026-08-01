@@ -28,6 +28,14 @@ readonly RLOTTIE_COMMIT="${RLOTTIE_COMMIT:-2cab35db755b0e39df40b679969495e90d39c
 # tag, unlike rlottie, so pin to that.
 readonly LIBWEBP_TAG="${LIBWEBP_TAG:-v1.4.0}"
 
+# libogg and libopus, for voice notes. TDLib accepts nothing but OggOpus for them, and
+# neither the codec nor a GStreamer new enough to have gained it is in the Harmattan
+# image - opus was standardised the year after this device shipped. Both are release
+# tags and both build with CMake, which is why they go through the same path as libwebp
+# rather than needing autotools cross-configuration. See src/OggOpus.cpp.
+readonly LIBOGG_TAG="${LIBOGG_TAG:-v1.3.5}"
+readonly OPUS_TAG="${OPUS_TAG:-v1.4}"
+
 # Parallel build jobs.
 #
 # TDLib used to build fully serial here: `cmake --build` defaults to one job with
@@ -362,6 +370,104 @@ build_webp() {
     echo "$want" > "$stamp"
 
     success "libwebp built and installed successfully."
+}
+
+# Build libogg and libopus
+#
+# Voice messages, in both directions: the encoder for what the microphone records and the
+# decoder for what arrives. Static, like everything else here, because a device from 2012
+# will never have these in its image and shipping .so files into /opt would mean an
+# rpath and a packaging step for two libraries that together come to a few hundred KB.
+build_opus() {
+    local stamp="build/opus/.built-commit"
+    local want="$LIBOGG_TAG+$OPUS_TAG:$ARGS"
+
+    if [ -z "${FORCE_REBUILD:-}" ] && [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$want" ]; then
+        warn "libogg/libopus already built and installed for $ARGS, skipping. FORCE_REBUILD=1 to redo."
+        return
+    fi
+
+    if [ -d "libogg" ]; then
+        warn "libogg checkout already exists, skipping fetch. Remove libogg/ to re-pin."
+    else
+        info "Fetching libogg $LIBOGG_TAG..."
+
+        git clone --quiet --depth=1 --branch "$LIBOGG_TAG" https://github.com/xiph/ogg libogg
+    fi
+
+    if [ -d "opus" ]; then
+        warn "opus checkout already exists, skipping fetch. Remove opus/ to re-pin."
+    else
+        info "Fetching opus $OPUS_TAG..."
+
+        git clone --quiet --depth=1 --branch "$OPUS_TAG" https://github.com/xiph/opus opus
+    fi
+
+    local ogg_root opus_root
+    ogg_root=$(realpath libogg)
+    opus_root=$(realpath opus)
+
+    # POSITION_INDEPENDENT_CODE for the same reason as rlottie and libwebp: meegram links
+    # -pie and a non-PIC static archive will not go into a PIE executable on ARM.
+    local common_options=(
+        -DCMAKE_BUILD_TYPE=MinSizeRel
+        -DCMAKE_INSTALL_PREFIX=/usr/local
+        -DBUILD_SHARED_LIBS=OFF
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+        -DBUILD_TESTING=OFF
+    )
+
+    # No docs, no extra programs, and no float-only build: the Cortex-A8 has a VFP unit so
+    # the float encoder is the right one, but opus_demo and the test vectors are not.
+    local opus_options=(
+        "${common_options[@]}"
+        -DOPUS_BUILD_PROGRAMS=OFF
+        -DOPUS_BUILD_TESTING=OFF
+        -DOPUS_BUILD_SHARED_LIBRARY=OFF
+    )
+
+    local sysroot="$SDK_PATH/Madde/sysroots/harmattan_sysroot_10.2011.34-1_slim"
+
+    for lib in ogg opus; do
+        local root options
+        if [ "$lib" = "ogg" ]; then
+            root="$ogg_root"
+            options=("${common_options[@]}")
+        else
+            root="$opus_root"
+            options=("${opus_options[@]}")
+        fi
+
+        rm -rf "build/$lib"
+        mkdir -p "build/$lib"
+
+        if [[ "$ARGS" == "harmattan" ]]; then
+            info "Configuring lib$lib for Harmattan..."
+            write_toolchain_file "$root/toolchain.cmake"
+
+            cmake -B "build/$lib" -S "$root" \
+                -DCMAKE_TOOLCHAIN_FILE="$root/toolchain.cmake" \
+                "${options[@]}"
+        else
+            info "Configuring lib$lib..."
+            cmake -B "build/$lib" -S "$root" "${options[@]}"
+        fi
+
+        info "Building lib$lib..."
+        cmake --build "build/$lib" --parallel "$JOBS"
+
+        if [[ "$ARGS" == "harmattan" ]]; then
+            info "Installing lib$lib to Harmattan SDK..."
+            DESTDIR="$sysroot" cmake --install "build/$lib"
+        else
+            cmake --install "build/$lib"
+        fi
+    done
+
+    mkdir -p build/opus
+    echo "$want" > "$stamp"
+
+    success "libogg and libopus built and installed successfully."
 }
 
 build_rlottie() {
@@ -762,6 +868,7 @@ main() {
     build_openssl
     build_rlottie
     build_webp
+    build_opus
     build_tdlib
     generate_json_client_codec
 }

@@ -80,6 +80,9 @@ MessageAudio::MessageAudio(td::td_api::object_ptr<td::td_api::messageAudio> cont
         m_title = QString::fromStdString(content->audio_->title_);
         m_performer = QString::fromStdString(content->audio_->performer_);
         m_fileName = QString::fromStdString(content->audio_->file_name_);
+
+        if (content->audio_->audio_)
+            m_file = std::make_shared<File>(std::move(content->audio_->audio_));
     }
 }
 
@@ -106,6 +109,21 @@ QString MessageAudio::performer() const
 QString MessageAudio::fileName() const
 {
     return m_fileName;
+}
+
+File *MessageAudio::file() const
+{
+    return m_file.get();
+}
+
+const std::shared_ptr<File> &MessageAudio::audioFile() const noexcept
+{
+    return m_file;
+}
+
+void MessageAudio::adoptFile(std::shared_ptr<File> file) noexcept
+{
+    m_file = std::move(file);
 }
 
 MessageDocument::MessageDocument(td::td_api::object_ptr<td::td_api::messageDocument> content, QObject *parent)
@@ -320,11 +338,41 @@ MessageVoiceNote::MessageVoiceNote(td::td_api::object_ptr<td::td_api::messageVoi
     : QObject(parent)
 {
     m_caption = QString::fromStdString(content->caption_->text_);
+
+    // Guarded the same way MessageDocument is: a message TDLib hands over without a voice
+    // part is a missing bubble, not a crash.
+    if (!content->voice_note_)
+        return;
+
+    m_duration = content->voice_note_->duration_;
+
+    if (content->voice_note_->voice_)
+        m_file = std::make_shared<File>(std::move(content->voice_note_->voice_));
 }
 
 QString MessageVoiceNote::caption() const
 {
     return m_caption;
+}
+
+File *MessageVoiceNote::file() const
+{
+    return m_file.get();
+}
+
+int MessageVoiceNote::duration() const
+{
+    return m_duration;
+}
+
+const std::shared_ptr<File> &MessageVoiceNote::voiceFile() const noexcept
+{
+    return m_file;
+}
+
+void MessageVoiceNote::adoptFile(std::shared_ptr<File> file) noexcept
+{
+    m_file = std::move(file);
 }
 
 MessageLocation::MessageLocation(td::td_api::object_ptr<td::td_api::messageLocation> content, QObject *parent)

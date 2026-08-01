@@ -74,6 +74,11 @@ public:
     // Any file, as a document - including an image, which is what "send as file" means
     // to Telegram and is why this does not sniff the type and reroute to sendPhoto.
     Q_INVOKABLE void sendDocument(const QString &filePath, const QString &caption = {}, const QString &replyToMessageId = {}) noexcept;
+    // The duration is passed in rather than read back off the file: VoiceNote counted the
+    // samples as it captured them, and re-deriving it would mean decoding what was just
+    // encoded. TDLib shows it to the recipient before the note finishes downloading.
+    Q_INVOKABLE void sendVoiceNote(const QString &filePath, int duration, const QString &caption = {},
+                                   const QString &replyToMessageId = {}) noexcept;
     Q_INVOKABLE void editMessage(const QString &messageId, const QString &text) noexcept;
 
     Q_INVOKABLE void fetchMoreBack() noexcept;
