@@ -7,9 +7,11 @@ export default defineConfig({
   cleanUrls: true,
   lastUpdated: true,
 
-  // Built into docs/.vitepress/dist; set base if this is ever served from a
-  // project subpath such as GitHub Pages at /meegram2/.
-  base: '/',
+  // Built into docs/.vitepress/dist and served from a project subpath: GitHub Pages
+  // puts a project site at <user>.github.io/<repo>/, and the repo is meegram2 under
+  // either owner. Set this back to '/' for a user/org site or a custom domain at the
+  // root - a wrong base gives a page that loads and then 404s every asset on it.
+  base: '/meegram2/',
 
   themeConfig: {
     nav: [
@@ -19,7 +21,7 @@ export default defineConfig({
       { text: 'Building', link: '/building' },
       { text: 'Troubleshooting', link: '/troubleshooting' },
       {
-        text: 'v0.2.0',
+        text: 'v0.3.0',
         items: [
           { text: 'Changelog', link: 'https://github.com/qtinsider/meegram2/blob/main/debian/changelog' },
           { text: 'Issues', link: 'https://github.com/qtinsider/meegram2/issues' },
@@ -40,6 +42,7 @@ export default defineConfig({
           { text: 'Chat list', link: '/features#chat-list' },
           { text: 'Messages', link: '/features#messages' },
           { text: 'Media', link: '/features#media' },
+          { text: 'Profile', link: '/features#profile' },
           { text: 'Presence', link: '/features#presence' },
           { text: 'Notifications', link: '/features#notifications' },
           { text: 'Not implemented', link: '/features#not-implemented' },
