@@ -311,7 +311,12 @@ void ChatModel::handleChatsLoaded(bool listExhausted)
     // Only believe it once the model holds something; otherwise retry, which is what
     // the old 500ms loop did implicitly. Bounded, so an account with no chats at all
     // stops asking instead of polling forever.
-    if (listExhausted && m_chats.empty() && m_emptyRetries < MaxEmptyRetries)
+    // m_filter.isEmpty() because m_chats is the filtered list: without it, "the search
+    // matched nothing" is indistinguishable from "TDLib knows of no chats yet" and a
+    // no-result search took the cold-cache retry path - ten 500ms retries holding
+    // m_loading, so the view showed a spinner for five seconds instead of NoResult.
+    // The retry exists for a cold cache, which is an unfiltered-list condition.
+    if (listExhausted && m_chats.empty() && m_filter.isEmpty() && m_emptyRetries < MaxEmptyRetries)
     {
         ++m_emptyRetries;
         m_retryTimer.start();
@@ -556,12 +561,15 @@ void ChatModel::handleChatItem(qlonglong chatId)
         return;
     }
 
+    // Whatever changed, the cached formatting for this chat is now stale. Invalidated
+    // before the visibility check, not after: a chat filtered out by a search is not in
+    // m_rowById, and populate() no longer clears m_formatted, so invalidating only for
+    // visible rows left the stale entry to be shown when the search was cleared.
+    m_formatted.remove(chatId);
+
     const auto it = m_rowById.constFind(chatId);
     if (it == m_rowById.constEnd())
         return;
-
-    // Whatever changed, the cached formatting for this chat is now stale.
-    m_formatted.remove(chatId);
 
     const auto modelIndex = createIndex(it.value(), 0);
     emit dataChanged(modelIndex, modelIndex);
