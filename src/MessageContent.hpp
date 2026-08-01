@@ -54,6 +54,11 @@ class MessageAudio : public QObject, public MessageContent
     Q_PROPERTY(QString performer READ performer CONSTANT)
     Q_PROPERTY(QString fileName READ fileName CONSTANT)
 
+    // The track itself. Discarded, so an audio message had nothing to download - which is
+    // why it renders through the document delegate: playing it is a job for the platform's
+    // own mp3/AAC decoding, but saving it only ever needed the file.
+    Q_PROPERTY(File *file READ file CONSTANT)
+
 public:
     explicit MessageAudio(td::td_api::object_ptr<td::td_api::messageAudio> content, QObject *parent = nullptr);
 
@@ -62,6 +67,11 @@ public:
     QString title() const;
     QString performer() const;
     QString fileName() const;
+    File *file() const;
+
+    // Same canonical-instance dance as MessageDocument; see the note there.
+    const std::shared_ptr<File> &audioFile() const noexcept;
+    void adoptFile(std::shared_ptr<File> file) noexcept;
 
 private:
     QString m_caption;
@@ -69,6 +79,8 @@ private:
     QString m_title;
     QString m_performer;
     QString m_fileName;
+
+    std::shared_ptr<File> m_file;
 };
 
 class MessageDocument : public QObject, public MessageContent
@@ -209,13 +221,27 @@ class MessageVoiceNote : public QObject, public MessageContent
     Q_OBJECT
     Q_PROPERTY(QString caption READ caption CONSTANT)
 
+    // The recording itself, and how long it runs. Both were discarded, so a voice note
+    // had nothing to download and nothing to say about itself.
+    Q_PROPERTY(File *file READ file CONSTANT)
+    Q_PROPERTY(int duration READ duration CONSTANT)
+
 public:
     explicit MessageVoiceNote(td::td_api::object_ptr<td::td_api::messageVoiceNote> content, QObject *parent = nullptr);
 
     QString caption() const;
+    File *file() const;
+    int duration() const;
+
+    // Same canonical-instance dance as MessageDocument; see the note there.
+    const std::shared_ptr<File> &voiceFile() const noexcept;
+    void adoptFile(std::shared_ptr<File> file) noexcept;
 
 private:
     QString m_caption;
+    int m_duration{};
+
+    std::shared_ptr<File> m_file;
 };
 
 class MessageLocation : public QObject, public MessageContent

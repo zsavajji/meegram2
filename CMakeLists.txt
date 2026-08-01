@@ -23,7 +23,14 @@ find_package(Td REQUIRED)
 find_package(rlottie REQUIRED)
 # Static stickers. Qt 4.7 has no WebP handler; see src/StickerProvider.cpp.
 find_package(WebP REQUIRED)
-find_package(Qt4 4.7.4 COMPONENTS QtCore QtDBus QtGui QtOpenGL QtSvg QtXml QtDeclarative REQUIRED)
+# Voice notes. TDLib takes nothing but OggOpus for them, and this device has neither the
+# codec nor a GStreamer new enough to have gained it; see src/OggOpus.cpp.
+find_package(Ogg REQUIRED)
+find_package(Opus REQUIRED)
+# QtMultimedia for QAudioInput/QAudioOutput. Qt's own low-level audio rather than
+# QtMobility's QtMultimediaKit: the same classes, but no extra module and the code builds
+# unchanged against a desktop Qt 4.
+find_package(Qt4 4.7.4 COMPONENTS QtCore QtDBus QtGui QtMultimedia QtOpenGL QtSvg QtXml QtDeclarative REQUIRED)
 find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
@@ -128,6 +135,7 @@ set(SRC_FILES
     src/MessageContent.cpp
     src/MessageModel.cpp
     src/MessageService.cpp
+    src/OggOpus.cpp
     src/PluralRules.cpp
     src/QrCodeItem.cpp
     src/Settings.cpp
@@ -137,6 +145,7 @@ set(SRC_FILES
     src/Supergroup.cpp
     src/User.cpp
     src/Utils.cpp
+    src/VoiceNote.cpp
 )
 
 set(HEADER_FILES
@@ -161,6 +170,7 @@ set(HEADER_FILES
     src/MessageContent.hpp
     src/MessageModel.hpp
     src/MessageService.hpp
+    src/OggOpus.hpp
     ${MEEGRAM_CLIENT_HEADERS}
     src/PluralRules.hpp
     src/QrCodeItem.hpp
@@ -172,6 +182,7 @@ set(HEADER_FILES
     src/SupergroupFullInfo.hpp
     src/User.hpp
     src/Utils.hpp
+    src/VoiceNote.hpp
 )
 
 set(QRC_FILES
@@ -217,16 +228,33 @@ target_link_libraries(meegram PRIVATE
     Td::TdStatic
     rlottie::rlottie
     WebP::webpdecoder
+    Opus::opus
+    Ogg::ogg
     Qt4::QtCore
     Qt4::QtDBus
     Qt4::QtDeclarative
     Qt4::QtGui
+    Qt4::QtMultimedia
     Qt4::QtOpenGL
     Qt4::QtSvg
     Qt4::QtXml
     ZLIB::ZLIB
     Threads::Threads
 )
+
+# The codec's self-check: a known tone through the encoder and back out of the decoder.
+# Not wired into the app - build and run it after touching src/OggOpus.cpp, which is the
+# one place here that hand-writes a file format. See tools/opus_roundtrip.cpp.
+#
+# Deliberately free of Qt, so it also builds on a development machine that has libopus and
+# libogg but no Qt 4 - which is most of them.
+add_executable(opus_roundtrip EXCLUDE_FROM_ALL tools/opus_roundtrip.cpp src/OggOpus.cpp)
+target_include_directories(opus_roundtrip PRIVATE src)
+target_link_libraries(opus_roundtrip PRIVATE Opus::opus Ogg::ogg)
+
+# The whole file is assertions, and CMAKE_CXX_FLAGS_RELEASE carries -DNDEBUG. Without this
+# the check compiles to a program that prints OK and tests nothing.
+target_compile_options(opus_roundtrip PRIVATE -UNDEBUG)
 
 if (MEEGRAM_JSON_TRANSPORT)
     target_compile_definitions(meegram PRIVATE MEEGRAM_JSON_TRANSPORT)

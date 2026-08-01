@@ -33,6 +33,7 @@
 #include "Message.hpp"
 #include "MessageService.hpp"
 #include "QrCodeItem.hpp"
+#include "VoiceNote.hpp"
 #include "ScopeTimer.hpp"
 #include "Settings.hpp"
 #include "StickerProvider.hpp"
@@ -185,6 +186,7 @@ Q_DECL_EXPORT int main(int argc, char *argv[])
 
     qmlRegisterType<LottieAnimation>("MyComponent", 1, 0, "LottieAnimation");
     qmlRegisterType<QrCodeItem>("MyComponent", 1, 0, "QrCode");
+    qmlRegisterType<VoiceNote>("MyComponent", 1, 0, "VoiceNote");
 
     qmlRegisterUncreatableType<Client>("MyComponent", 1, 0, "Client", "Client cannot be created from QML.");
     qmlRegisterUncreatableType<Authorization>("MyComponent", 1, 0, "Authorization", "Authorization cannot be created from QML.");

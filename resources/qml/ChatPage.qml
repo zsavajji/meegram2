@@ -622,7 +622,10 @@ Page {
                         leftMargin: 24
                         verticalCenter: parent.verticalCenter
                     }
-                    text: icons.attach
+                    // Doubles as discard while a note is being recorded. The attach menu
+                    // is not reachable mid-recording anyway, and a recording with no way
+                    // to throw it away is one you have to send by mistake.
+                    text: voice.recording ? icons.close : icons.attach
                     font.family: icons.fontFamily
                     font.pixelSize: 36
                     color: attachArea.pressed ? "#0077A8" : "#505050"
@@ -632,8 +635,58 @@ Page {
 
                         anchors.fill: parent
                         anchors.margins: -12
-                        onClicked: attachMenu.open()
+                        onClicked: {
+                            if (voice.recording)
+                                voice.cancelRecording();
+                            else
+                                attachMenu.open();
+                        }
                     }
+                }
+
+                Label {
+                    id: recordButton
+
+                    anchors {
+                        left: attachButton.right
+                        leftMargin: 36
+                        verticalCenter: parent.verticalCenter
+                    }
+                    // Tap to start, tap to send - not hold-to-record. Holding needs the
+                    // press to survive the notification banner, the lock button and every
+                    // other thing this device does mid-gesture, and losing the recording
+                    // to any of them is worse than one extra tap.
+                    text: voice.recording ? icons.stop : icons.microphone
+                    font.family: icons.fontFamily
+                    font.pixelSize: 36
+                    color: voice.recording ? "#d14836" : (recordArea.pressed ? "#0077A8" : "#505050")
+
+                    MouseArea {
+                        id: recordArea
+
+                        anchors.fill: parent
+                        anchors.margins: -12
+                        onClicked: {
+                            if (voice.recording)
+                                voice.stopRecording();
+                            else
+                                voice.startRecording();
+                        }
+                    }
+                }
+
+                Label {
+                    anchors {
+                        left: recordButton.right
+                        leftMargin: 16
+                        verticalCenter: parent.verticalCenter
+                    }
+                    visible: voice.recording
+                    // formatTime returns nothing for zero, and a blank label for the first
+                    // second reads as a recorder that did not start.
+                    text: voice.duration > 0 ? utils.formatTime(voice.duration) : "0s"
+                    color: "#d14836"
+                    font.pixelSize: 22
                 }
 
                 Button {
@@ -676,12 +729,33 @@ Page {
                 states: [
                     State {
                         name: "open"
-                        when: textArea.activeFocus
+                        // Held open while recording too. Bound to focus alone, tapping
+                        // anywhere off the text area collapsed the panel mid-recording and
+                        // took the stop button with it.
+                        when: textArea.activeFocus || voice.recording
                         PropertyChanges { target: controls; height: 64 }
                     }
                 ]
             }
         }
+    }
+
+    // Microphone and speaker, one per page. Shared by the composer and every bubble, so
+    // starting one note stops whichever was playing without any bookkeeping.
+    VoiceNote {
+        id: voice
+
+        onRecorded: {
+            // Same caption-rides-along behaviour as sendPhoto, and the same follow flag:
+            // your own message is worth jumping to.
+            messageModel.sendVoiceNote(path, duration, textArea.text, composeState.replyId);
+
+            textArea.text = "";
+            composeState.clear();
+            listView.followLast = true;
+        }
+
+        onError: appWindow.showInfoBanner(message)
     }
 
     // Harmattan action menu, raised by a long press on a bubble. Items that cannot

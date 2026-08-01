@@ -397,6 +397,127 @@ Item {
     }
 
     Component {
+        id: voiceNoteMessageComponent
+
+        MessageBubble {
+            // The one delegate whose file is fetched on sight rather than on tap. A voice
+            // note is a few KB and the whole point of it is that you press play once, not
+            // once to download and again to hear it.
+            Component.onCompleted: {
+                var file = model.content.file;
+
+                if (file && file.canBeDownloaded && !file.isDownloadingCompleted && !file.isDownloadingActive)
+                    appManager.downloadFile(file.id, 1, 0, 0, false);
+            }
+
+            onClicked: {
+                var file = model.content.file;
+
+                if (!file || !file.isDownloadingCompleted)
+                    return;
+
+                // Same object drives every bubble, so starting one note is what stops
+                // whichever was already playing.
+                if (voice.playing && voice.source === file.localPath)
+                    voice.stop();
+                else
+                    voice.play(file.localPath);
+            }
+
+            onPressAndHold: menuTarget.open(model.id, model.sender, model.content.caption, model.isOutgoing,
+                                            model.content.file)
+
+            childrenWidth: voiceColumn.width
+
+            content: Column {
+                id: voiceColumn
+
+                property bool ready: model.content.file && model.content.file.isDownloadingCompleted
+                property bool active: ready && voice.playing && voice.source === model.content.file.localPath
+
+                width: isPortrait ? 380 : 754
+                spacing: 6
+
+                anchors {
+                    left: parent.left
+                    leftMargin: model.isOutgoing ? listView.width - width - 20 : 20
+                }
+
+                Row {
+                    width: parent.width
+                    spacing: 12
+
+                    Rectangle {
+                        id: voiceIcon
+
+                        width: 60
+                        height: 60
+                        radius: 30
+                        color: model.isOutgoing ? "#40ffffff" : "#0077A8"
+
+                        Label {
+                            anchors.centerIn: parent
+                            visible: !voiceIndicator.running
+                            // Download, then play, then pause. Three states, because the
+                            // first tap on a note that has not arrived would otherwise
+                            // look like a play button that does nothing.
+                            text: !voiceColumn.ready ? icons.download : voiceColumn.active ? icons.pause : icons.play
+                            font.family: icons.fontFamily
+                            font.pixelSize: 28
+                            color: "white"
+                        }
+
+                        BusyIndicator {
+                            id: voiceIndicator
+
+                            anchors.centerIn: parent
+                            running: model.content.file && model.content.file.isDownloadingActive
+                            visible: running
+                        }
+                    }
+
+                    Column {
+                        width: parent.width - voiceIcon.width - parent.spacing
+                        spacing: 2
+
+                        Label {
+                            width: parent.width
+                            text: qsTr("AttachAudio")
+                            color: model.isOutgoing ? "white" : "black"
+                            font.pixelSize: 23
+                        }
+
+                        Label {
+                            width: parent.width
+                            // Duration comes off the message, not the file, so it reads
+                            // right before the note has finished downloading.
+                            text: utils.formatTime(model.content.duration)
+                            color: model.isOutgoing ? "white" : "#505050"
+                            opacity: model.isOutgoing ? 0.75 : 1.0
+                            font.pixelSize: 18
+                            font.weight: Font.Light
+                        }
+                    }
+                }
+
+                Label {
+                    property string html: utils.replaceEmoji(model.content.caption)
+
+                    width: parent.width
+                    visible: text !== ""
+                    textFormat: /[<&\n\r\t]|\s\s/.test(html) ? Text.RichText : Text.PlainText
+                    text: html
+                    color: model.isOutgoing ? "white" : "black"
+                    wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                    font.pixelSize: 23
+                    horizontalAlignment: model.isOutgoing ? Text.AlignRight : Text.AlignLeft
+                    onLinkActivated: Qt.openUrlExternally(link)
+                }
+            }
+        }
+    }
+
+    Component {
         id: notSupportedMessageComponent
 
         MessageBubble {
@@ -440,7 +561,15 @@ Item {
             case "messageSticker":
                 return stickerMessageComponent;
             case "messageDocument":
+            // Through the document delegate rather than one of its own. Playing an mp3 is
+            // the platform's job - openFile hands it to whatever Harmattan has registered
+            // for the type - and downloading and saving is all the rest of that bubble
+            // does. It renders under the sender's filename, which is what an audio file
+            // has and a voice note does not.
+            case "messageAudio":
                 return documentMessageComponent;
+            case "messageVoiceNote":
+                return voiceNoteMessageComponent;
             default:
                 return notSupportedMessageComponent;
             }

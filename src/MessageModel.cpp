@@ -486,6 +486,21 @@ void MessageModel::sendDocument(const QString &filePath, const QString &caption,
     send(std::move(content), toId(replyToMessageId));
 }
 
+void MessageModel::sendVoiceNote(const QString &filePath, int duration, const QString &caption, const QString &replyToMessageId) noexcept
+{
+    auto content = td::td_api::make_object<td::td_api::inputMessageVoiceNote>();
+
+    content->voice_note_ = td::td_api::make_object<td::td_api::inputFileLocal>(filePath.toStdString());
+    content->duration_ = duration;
+
+    // waveform_ left empty, which TDLib accepts. It is the little bar chart other clients
+    // draw behind the play button, and this one draws no waveform to fill in.
+    content->caption_ = td::td_api::make_object<td::td_api::formattedText>();
+    content->caption_->text_ = caption.toStdString();
+
+    send(std::move(content), toId(replyToMessageId));
+}
+
 void MessageModel::fetchMoreBack() noexcept
 {
     if (m_backFetching || m_messages.empty())
@@ -569,6 +584,16 @@ void MessageModel::linkContentFile(Message *message) noexcept
         case td::td_api::messageDocument::ID: {
             auto *document = static_cast<MessageDocument *>(message->content());
             document->adoptFile(m_storage->registerFile(document->documentFile()));
+            break;
+        }
+        case td::td_api::messageAudio::ID: {
+            auto *audio = static_cast<MessageAudio *>(message->content());
+            audio->adoptFile(m_storage->registerFile(audio->audioFile()));
+            break;
+        }
+        case td::td_api::messageVoiceNote::ID: {
+            auto *voiceNote = static_cast<MessageVoiceNote *>(message->content());
+            voiceNote->adoptFile(m_storage->registerFile(voiceNote->voiceFile()));
             break;
         }
         default:
