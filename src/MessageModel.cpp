@@ -469,6 +469,23 @@ void MessageModel::sendPhoto(const QString &filePath, const QString &caption, co
     send(std::move(content), toId(replyToMessageId));
 }
 
+void MessageModel::sendDocument(const QString &filePath, const QString &caption, const QString &replyToMessageId) noexcept
+{
+    // No thumbnail and content-type detection left on: TDLib sniffs the mime type from
+    // the file itself, which is the whole point of picking an arbitrary file.
+    auto document = td::td_api::make_object<td::td_api::inputDocument>();
+
+    document->document_ = td::td_api::make_object<td::td_api::inputFileLocal>(filePath.toStdString());
+
+    auto content = td::td_api::make_object<td::td_api::inputMessageDocument>();
+
+    content->document_ = std::move(document);
+    content->caption_ = td::td_api::make_object<td::td_api::formattedText>();
+    content->caption_->text_ = caption.toStdString();
+
+    send(std::move(content), toId(replyToMessageId));
+}
+
 void MessageModel::fetchMoreBack() noexcept
 {
     if (m_backFetching || m_messages.empty())
@@ -547,6 +564,11 @@ void MessageModel::linkContentFile(Message *message) noexcept
         case td::td_api::messageSticker::ID: {
             auto *sticker = static_cast<MessageSticker *>(message->content());
             sticker->adoptFile(m_storage->registerFile(sticker->stickerFile()));
+            break;
+        }
+        case td::td_api::messageDocument::ID: {
+            auto *document = static_cast<MessageDocument *>(message->content());
+            document->adoptFile(m_storage->registerFile(document->documentFile()));
             break;
         }
         default:

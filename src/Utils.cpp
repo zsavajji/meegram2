@@ -12,6 +12,7 @@
 
 #include <QApplication>
 #include <QClipboard>
+#include <QDesktopServices>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -443,20 +444,27 @@ int Utils::emojiOnlySize(const QString &text) noexcept
     }
 }
 
-bool Utils::saveToGallery(const QString &localPath) noexcept
+namespace {
+
+// MyDocs explicitly, not QDesktopServices::PicturesLocation - on Harmattan that
+// resolves to $HOME/Pictures, which is outside MyDocs and so not indexed by
+// Tracker. The file would be written and simply never appear in the Gallery.
+//
+// Everything lands under MyDocs/meegram rather than loose in the stock folders, so
+// what this app saved stays identifiable and removable in one go. Still inside
+// MyDocs, so Tracker indexes it and the Gallery picks the photos up. mkpath builds
+// the whole chain, so the meegram folder existing is not something to check first.
+bool saveInto(const QString &localPath, const QString &folder, const QString &fileName) noexcept
 {
-    if (localPath.isEmpty() || !QFile::exists(localPath))
+    if (localPath.isEmpty() || fileName.isEmpty() || !QFile::exists(localPath))
         return false;
 
-    // MyDocs explicitly, not QDesktopServices::PicturesLocation - on Harmattan that
-    // resolves to $HOME/Pictures, which is outside MyDocs and so not indexed by
-    // Tracker. The file would be written and simply never appear in the Gallery.
-    const auto directory = QDir::homePath() + QLatin1String("/MyDocs/Pictures");
+    const auto directory = QDir::homePath() + QLatin1String("/MyDocs/meegram/") + folder;
 
     if (!QDir().mkpath(directory))
         return false;
 
-    const auto destination = directory + QLatin1Char('/') + QFileInfo(localPath).fileName();
+    const auto destination = directory + QLatin1Char('/') + fileName;
 
     // TDLib names its local copy after the file id, so a file already sitting there
     // under this name is the same image saved earlier. QFile::copy refuses to
@@ -465,6 +473,41 @@ bool Utils::saveToGallery(const QString &localPath) noexcept
         return true;
 
     return QFile::copy(localPath, destination);
+}
+
+}  // namespace
+
+bool Utils::saveToGallery(const QString &localPath) noexcept
+{
+    return saveInto(localPath, QLatin1String("Pictures"), QFileInfo(localPath).fileName());
+}
+
+bool Utils::saveDocument(const QString &localPath, const QString &fileName) noexcept
+{
+    // The sender chooses file_name_, so this is untrusted input being used to build a
+    // local path. QFileInfo::fileName() drops any directory part, which is what stops
+    // a name like "../../.profile" from escaping the folder; "." and ".." survive that
+    // and would resolve to a directory, so they are rejected too - saveInto would
+    // otherwise find the directory already there and report a save that never
+    // happened. Falling back to TDLib's cache name is always safe: it is a file id
+    // this app generated, and it also covers a sender who set no name at all.
+    auto name = QFileInfo(fileName).fileName();
+
+    if (name.isEmpty() || name == QLatin1String(".") || name == QLatin1String(".."))
+        name = QFileInfo(localPath).fileName();
+
+    return saveInto(localPath, QLatin1String("Downloads"), name);
+}
+
+bool Utils::openFile(const QString &localPath) noexcept
+{
+    if (localPath.isEmpty() || !QFile::exists(localPath))
+        return false;
+
+    // fromLocalFile rather than pasting "file://" onto the path: a name with a space
+    // or a '#' in it has to be percent-encoded, and getting that wrong is the
+    // difference between the file opening and nothing happening at all.
+    return QDesktopServices::openUrl(QUrl::fromLocalFile(localPath));
 }
 
 void Utils::copyToClipboard(const QString &text) noexcept
@@ -481,6 +524,16 @@ QString Utils::toLocalFile(const QString &url) noexcept
         return url;
 
     return parsed.toLocalFile();
+}
+
+QString Utils::toFileUrl(const QString &path) noexcept
+{
+    return QUrl::fromLocalFile(path).toString();
+}
+
+QString Utils::documentsPath() noexcept
+{
+    return QDir::homePath() + QLatin1String("/MyDocs");
 }
 
 QString Utils::getAudioTitle(MessageAudio *audio) noexcept

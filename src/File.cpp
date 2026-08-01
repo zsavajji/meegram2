@@ -2,6 +2,32 @@
 
 #include "ScopeTimer.hpp"
 
+namespace {
+
+// Qt 4.7 has no QLocale::formattedDataSize, and this is the only caller.
+QString formatSize(qint64 bytes) noexcept
+{
+    if (bytes <= 0)
+        return QString();
+
+    static const char *const Units[] = {"B", "KB", "MB", "GB"};
+
+    double value = static_cast<double>(bytes);
+    int unit = 0;
+
+    while (value >= 1024.0 && unit < 3)
+    {
+        value /= 1024.0;
+        ++unit;
+    }
+
+    // Whole bytes with a decimal reads as nonsense ("512.0 B"), so only scaled units
+    // get one.
+    return QString::number(value, 'f', unit == 0 ? 0 : 1) + QLatin1Char(' ') + QLatin1String(Units[unit]);
+}
+
+}  // namespace
+
 File::File(td::td_api::object_ptr<td::td_api::file> file, QObject *parent)
     : QObject(parent)
     , m_file(std::move(file))
@@ -17,6 +43,11 @@ int File::id() const
 QString File::localPath() const
 {
     return m_localPath;
+}
+
+QString File::size() const
+{
+    return m_size;
 }
 
 bool File::canBeDownloaded() const
@@ -68,6 +99,15 @@ bool File::updateFileProperties()
     bool changed = m_id != m_file->id_;
 
     m_id = m_file->id_;
+
+    // Total size, not downloaded size - it does not move as chunks land, so putting it
+    // in the guard costs at most one extra notification (when an expected size is
+    // replaced by the real one) rather than one per packet.
+    const auto size = formatSize(m_file->size_ > 0 ? m_file->size_ : m_file->expected_size_);
+
+    changed = changed || m_size != size;
+
+    m_size = size;
 
     // Same guard as before: a file with no local part leaves the download state
     // standing rather than clearing it.

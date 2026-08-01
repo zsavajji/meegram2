@@ -14,6 +14,11 @@ class File : public QObject
 
     Q_PROPERTY(QString localPath READ localPath NOTIFY fileChanged)
 
+    // Already formatted ("1.4 MB"), not a byte count: td_api sizes are int53 and a
+    // qlonglong crossing into QML1 comes out corrupted on this device. Nothing needs
+    // the number anyway - it is only ever shown under a filename.
+    Q_PROPERTY(QString size READ size NOTIFY fileChanged)
+
     Q_PROPERTY(bool canBeDownloaded READ canBeDownloaded NOTIFY fileChanged)
     Q_PROPERTY(bool isDownloadingActive READ isDownloadingActive NOTIFY fileChanged)
     Q_PROPERTY(bool isDownloadingCompleted READ isDownloadingCompleted NOTIFY fileChanged)
@@ -24,6 +29,8 @@ public:
     int id() const;
 
     QString localPath() const;
+
+    QString size() const;
 
     bool canBeDownloaded() const;
     bool isDownloadingActive() const;
@@ -44,6 +51,8 @@ private:
     int m_id{};
 
     QString m_localPath;
+
+    QString m_size;
 
     bool m_canBeDownloaded{};
     bool m_isDownloadingActive{};

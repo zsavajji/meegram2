@@ -77,15 +77,26 @@ class MessageDocument : public QObject, public MessageContent
     Q_PROPERTY(QString caption READ caption CONSTANT)
     Q_PROPERTY(QString fileName READ fileName CONSTANT)
 
+    // The document itself. Was discarded, so a file message had nothing to download
+    // and nothing to open.
+    Q_PROPERTY(File *file READ file CONSTANT)
+
 public:
     explicit MessageDocument(td::td_api::object_ptr<td::td_api::messageDocument> content, QObject *parent = nullptr);
 
     QString caption() const;
     QString fileName() const;
+    File *file() const;
+
+    // Same canonical-instance dance as MessagePhoto; see the note there.
+    const std::shared_ptr<File> &documentFile() const noexcept;
+    void adoptFile(std::shared_ptr<File> file) noexcept;
 
 private:
     QString m_caption;
     QString m_fileName;
+
+    std::shared_ptr<File> m_file;
 };
 
 class MessagePhoto : public QObject, public MessageContent

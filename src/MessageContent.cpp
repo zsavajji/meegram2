@@ -112,7 +112,16 @@ MessageDocument::MessageDocument(td::td_api::object_ptr<td::td_api::messageDocum
     : QObject(parent)
 {
     m_caption = QString::fromStdString(content->caption_->text_);
+
+    // Was dereferenced unguarded, which is a crash rather than a missing filename on
+    // any message TDLib hands over without a document part.
+    if (!content->document_)
+        return;
+
     m_fileName = QString::fromStdString(content->document_->file_name_);
+
+    if (content->document_->document_)
+        m_file = std::make_shared<File>(std::move(content->document_->document_));
 }
 
 QString MessageDocument::caption() const
@@ -123,6 +132,21 @@ QString MessageDocument::caption() const
 QString MessageDocument::fileName() const
 {
     return m_fileName;
+}
+
+File *MessageDocument::file() const
+{
+    return m_file.get();
+}
+
+const std::shared_ptr<File> &MessageDocument::documentFile() const noexcept
+{
+    return m_file;
+}
+
+void MessageDocument::adoptFile(std::shared_ptr<File> file) noexcept
+{
+    m_file = std::move(file);
 }
 
 MessagePhoto::MessagePhoto(td::td_api::object_ptr<td::td_api::messagePhoto> content, QObject *parent)

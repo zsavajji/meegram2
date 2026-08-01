@@ -71,6 +71,9 @@ public:
 
     Q_INVOKABLE void sendMessage(const QString &message, const QString &replyToMessageId = {}) noexcept;
     Q_INVOKABLE void sendPhoto(const QString &filePath, const QString &caption = {}, const QString &replyToMessageId = {}) noexcept;
+    // Any file, as a document - including an image, which is what "send as file" means
+    // to Telegram and is why this does not sniff the type and reroute to sendPhoto.
+    Q_INVOKABLE void sendDocument(const QString &filePath, const QString &caption = {}, const QString &replyToMessageId = {}) noexcept;
     Q_INVOKABLE void editMessage(const QString &messageId, const QString &text) noexcept;
 
     Q_INVOKABLE void fetchMoreBack() noexcept;

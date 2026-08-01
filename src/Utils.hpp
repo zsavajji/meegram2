@@ -48,10 +48,29 @@ public:
     // clearing its cache and shows up in the Gallery. False if it could not be written.
     Q_INVOKABLE static bool saveToGallery(const QString &localPath) noexcept;
 
+    // The same, into MyDocs/meegram/Downloads and under the name the sender gave the
+    // file - TDLib's cache name is a file id and means nothing to the user. No default
+    // argument on purpose; see the note on replaceEmojiSized above.
+    Q_INVOKABLE static bool saveDocument(const QString &localPath, const QString &fileName) noexcept;
+
+    // Hands a downloaded file to whatever Harmattan has registered for its type.
+    // False when there is nothing to open it with, so the caller can say so.
+    Q_INVOKABLE static bool openFile(const QString &localPath) noexcept;
+
     // The gallery hands out file:// URLs and TDLib wants a filesystem path. Goes
     // through QUrl rather than stripping the scheme, so percent-encoded characters
     // in a filename survive.
     Q_INVOKABLE static QString toLocalFile(const QString &url) noexcept;
+
+    // The mirror of toLocalFile, for handing a path to anything taking a url -
+    // FolderListModel.folder in particular. Percent-encodes, so a directory with a
+    // space in its name is still navigable.
+    Q_INVOKABLE static QString toFileUrl(const QString &path) noexcept;
+
+    // MyDocs, the user-visible storage the file picker browses - all of it, not just
+    // the meegram folder saves go into. The one place on Harmattan that Tracker
+    // indexes and the stock apps look at.
+    Q_INVOKABLE static QString documentsPath() noexcept;
 
     static QString getAudioTitle(MessageAudio *audio) noexcept;
     static QString getCallContent(MessageCall *call, bool isOutgoing) noexcept;

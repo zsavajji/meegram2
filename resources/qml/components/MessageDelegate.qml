@@ -271,6 +271,132 @@ Item {
     }
 
     Component {
+        id: documentMessageComponent
+
+        MessageBubble {
+            // Deliberately not fetched on sight the way a photo is: a document has no
+            // size ceiling and this is a metered radio, so the first tap starts the
+            // download and the next one opens it.
+            onClicked: {
+                var file = model.content.file;
+
+                if (!file)
+                    return;
+
+                if (file.isDownloadingCompleted) {
+                    // False means Harmattan has nothing registered for the type. Saying
+                    // so beats a tap that looks like it did nothing.
+                    if (!utils.openFile(file.localPath))
+                        appWindow.showInfoBanner(qsTr("ErrorOccurred"));
+                } else if (file.canBeDownloaded && !file.isDownloadingActive) {
+                    appManager.downloadFile(file.id, 1, 0, 0, false);
+                }
+            }
+
+            // The file is passed with its name: unlike a photo, it has to be saved
+            // under the name the sender gave it rather than TDLib's cache name.
+            onPressAndHold: menuTarget.open(model.id, model.sender, model.content.caption, model.isOutgoing,
+                                            model.content.file, model.content.fileName)
+
+            childrenWidth: documentColumn.width
+
+            content: Column {
+                id: documentColumn
+
+                // Full width regardless of the filename, which is how Telegram draws a
+                // file row and saves measuring the text to size the bubble.
+                width: isPortrait ? 380 : 754
+                spacing: 6
+
+                anchors {
+                    left: parent.left
+                    // Same computed offset as the photo delegate: fixed-width content
+                    // cannot lean on AlignRight to sit on the outgoing side.
+                    leftMargin: model.isOutgoing ? listView.width - width - 20 : 20
+                }
+
+                Row {
+                    width: parent.width
+                    spacing: 12
+
+                    Rectangle {
+                        id: fileIcon
+
+                        property bool done: model.content.file && model.content.file.isDownloadingCompleted
+
+                        width: 60
+                        height: 60
+                        radius: 30
+                        color: model.isOutgoing ? "#40ffffff" : "#0077A8"
+
+                        Label {
+                            anchors.centerIn: parent
+                            // The spinner replaces the glyph while it runs rather than
+                            // drawing on top of it.
+                            visible: !downloadIndicator.running
+                            text: fileIcon.done ? icons.document : icons.download
+                            font.family: icons.fontFamily
+                            font.pixelSize: 28
+                            color: "white"
+                        }
+
+                        BusyIndicator {
+                            id: downloadIndicator
+
+                            anchors.centerIn: parent
+                            running: model.content.file && model.content.file.isDownloadingActive
+                            visible: running
+                        }
+                    }
+
+                    Column {
+                        width: parent.width - fileIcon.width - parent.spacing
+                        spacing: 2
+
+                        Label {
+                            width: parent.width
+                            // ElideMiddle, not ElideRight: the extension is the part
+                            // that says what the file actually is.
+                            elide: Text.ElideMiddle
+                            maximumLineCount: 1
+                            text: model.content.fileName !== "" ? model.content.fileName : qsTr("AttachDocument")
+                            color: model.isOutgoing ? "white" : "black"
+                            font.pixelSize: 23
+                        }
+
+                        Label {
+                            width: parent.width
+                            visible: text !== ""
+                            // Already formatted by File::size - td_api sizes are int53
+                            // and must not cross into QML1 as numbers.
+                            text: model.content.file ? model.content.file.size : ""
+                            color: model.isOutgoing ? "white" : "#505050"
+                            opacity: model.isOutgoing ? 0.75 : 1.0
+                            font.pixelSize: 18
+                            font.weight: Font.Light
+                        }
+                    }
+                }
+
+                Label {
+                    // Same plain-text fast path as the other bubbles.
+                    property string html: utils.replaceEmoji(model.content.caption)
+
+                    width: parent.width
+                    visible: text !== ""
+                    textFormat: /[<&\n\r\t]|\s\s/.test(html) ? Text.RichText : Text.PlainText
+                    text: html
+                    color: model.isOutgoing ? "white" : "black"
+                    wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                    font.pixelSize: 23
+                    horizontalAlignment: model.isOutgoing ? Text.AlignRight : Text.AlignLeft
+                    onLinkActivated: Qt.openUrlExternally(link)
+                }
+            }
+        }
+    }
+
+    Component {
         id: notSupportedMessageComponent
 
         MessageBubble {
@@ -313,6 +439,8 @@ Item {
                 return photoMessageComponent;
             case "messageSticker":
                 return stickerMessageComponent;
+            case "messageDocument":
+                return documentMessageComponent;
             default:
                 return notSupportedMessageComponent;
             }

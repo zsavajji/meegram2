@@ -68,13 +68,18 @@ Page {
         // initialised to null reads back as undefined.
         property QtObject saveFile: null
 
-        function open(id, sender, text, outgoing, file) {
+        // The name a document has to be saved under. Empty for a photo, whose TDLib
+        // cache name is as good as any, and which goes to the gallery instead.
+        property string saveName: ""
+
+        function open(id, sender, text, outgoing, file, name) {
             messageId = id;
             menuTarget.sender = sender;
             menuTarget.text = text;
             isOutgoing = outgoing;
             // Callers with nothing to save omit the argument entirely.
             saveFile = file || null;
+            saveName = name || "";
             messageMenu.open();
         }
     }
@@ -83,16 +88,37 @@ Page {
     // downloaded. Null once the save has gone through or when none is pending.
     property QtObject pendingSave: null
 
-    function saveOriginal(file) {
+    // The name the pending save has to land under; see menuTarget.saveName.
+    property string pendingSaveName: ""
+
+    // One place decides where a file goes and what the banner says, so the save that
+    // happens immediately and the one that waits for a download cannot drift apart.
+    function commitSave(file, name) {
+        var saved = name !== "" ? utils.saveDocument(file.localPath, name) : utils.saveToGallery(file.localPath);
+
+        if (!saved) {
+            appWindow.showInfoBanner(qsTr("ErrorOccurred"));
+            return;
+        }
+
+        // ponytail: SavedToDownloads is a real language-pack key but an unusual one, so
+        // it may fall back to showing its own name. Swap it if that turns up on device.
+        appWindow.showInfoBanner(name !== "" ? qsTr("SavedToDownloads") : qsTr("PhotoSavedHint"));
+    }
+
+    function saveOriginal(file, name) {
         if (!file)
             return;
 
+        name = name || "";
+
         if (file.isDownloadingCompleted) {
-            appWindow.showInfoBanner(utils.saveToGallery(file.localPath) ? qsTr("PhotoSavedHint") : qsTr("ErrorOccurred"));
+            commitSave(file, name);
             return;
         }
 
         pendingSave = file;
+        pendingSaveName = name;
         appWindow.showInfoBanner(qsTr("Loading"));
 
         if (file.canBeDownloaded && !file.isDownloadingActive)
@@ -107,8 +133,10 @@ Page {
             // has to be checked rather than assumed.
             if (pendingSave && pendingSave.isDownloadingCompleted) {
                 var file = pendingSave;
+                var name = pendingSaveName;
                 pendingSave = null;
-                appWindow.showInfoBanner(utils.saveToGallery(file.localPath) ? qsTr("PhotoSavedHint") : qsTr("ErrorOccurred"));
+                pendingSaveName = "";
+                commitSave(file, name);
             }
         }
     }
@@ -571,7 +599,7 @@ Page {
 
                         anchors.fill: parent
                         anchors.margins: -12
-                        onClicked: root.openPhotoPicker()
+                        onClicked: attachMenu.open()
                     }
                 }
 
@@ -652,7 +680,7 @@ Page {
             MenuItem {
                 text: qsTr("Save")
                 visible: menuTarget.saveFile !== null
-                onClicked: root.saveOriginal(menuTarget.saveFile)
+                onClicked: root.saveOriginal(menuTarget.saveFile, menuTarget.saveName)
             }
 
             MenuItem {
@@ -674,6 +702,25 @@ Page {
                     deleteDialog.revoke = true;
                     deleteDialog.open();
                 }
+            }
+        }
+    }
+
+    // Two pickers because the two send paths are genuinely different: a photo goes
+    // through the Tracker-backed gallery and is sent compressed as a photo, anything
+    // else is browsed on disk and sent as a document with its type intact.
+    ContextMenu {
+        id: attachMenu
+
+        MenuLayout {
+            MenuItem {
+                text: qsTr("AttachPhoto")
+                onClicked: root.openPhotoPicker()
+            }
+
+            MenuItem {
+                text: qsTr("AttachDocument")
+                onClicked: root.openFilePicker()
             }
         }
     }
@@ -726,6 +773,39 @@ Page {
         // Whatever is in the composer rides along as the caption, which is how
         // Telegram behaves and costs nothing here.
         messageModel.sendPhoto(path, textArea.text, composeState.replyId);
+
+        textArea.text = "";
+        composeState.clear();
+        listView.followLast = true;
+
+        pageStack.pop();
+    }
+
+    // Built and kept the same way the photo picker is, and for the same reasons - see
+    // the note above. Qt.labs.folderlistmodel ships in the Harmattan 1.2 sysroot, but
+    // the status check costs nothing and keeps a missing import from being a dead
+    // button.
+    property QtObject filePicker: null
+
+    function openFilePicker() {
+        if (!filePicker) {
+            var component = Qt.createComponent("FilePickerPage.qml");
+
+            if (component.status !== Component.Ready) {
+                console.debug("File picker unavailable:", component.errorString());
+                appWindow.showInfoBanner(qsTr("ErrorOccurred"));
+                return;
+            }
+
+            filePicker = component.createObject(root);
+            filePicker.fileSelected.connect(sendDocument);
+        }
+
+        pageStack.push(filePicker);
+    }
+
+    function sendDocument(path) {
+        messageModel.sendDocument(path, textArea.text, composeState.replyId);
 
         textArea.text = "";
         composeState.clear();
