@@ -246,6 +246,68 @@ machine that has libopus and libogg but no Qt 4:
 cmake --build build --target opus_roundtrip && ./build/opus_roundtrip
 ```
 
+### Source patches
+
+Three of these dependencies are **edited in place** after checkout. The edits live in
+`tools/setup-dependencies.sh`, not in a `patches/` directory and not as commits on a
+fork — `td/`, `rlottie/` and `libwebp/` are working trees the script owns, and it
+re-applies everything on every run.
+
+::: tip Re-adding them is just re-running the script
+```bash
+./tools/setup-dependencies.sh harmattan "$QT_SDK_PATH"
+```
+Every patch below is **idempotent** — it detects its own output and reports "already
+applied" rather than failing — so this is safe on an existing tree. To start clean,
+`rm -rf td rlottie` first; the script re-fetches at the pinned commit.
+:::
+
+| Dependency | File | Change | Applied by |
+|---|---|---|---|
+| rlottie | `src/vector/vmatrix.cpp`, `src/lottie/lottieparser.cpp` | `std::lround` → `lround` (12 call sites) | `build_rlottie()` |
+| TDLib | `tdutils/td/utils/port/config.h` | `TD_HAS_MMSG 1` → `0` | `build_tdlib()`, **harmattan only** |
+| TDLib | `td/tl/tl_json.h` | Adds `struct JsonVectorBytes` + its `to_json` | `patch_td_json_vector_bytes()` |
+| TDLib | `td/generate/tl_json_converter.cpp` | Emits `JsonVectorBytes{...}` instead of the literal `"UNSUPPORTED STORED VECTOR OF BYTES"` | `patch_td_json_vector_bytes()` |
+
+**`std::lround` does not exist against this sysroot.** libstdc++ leaves the entire C99
+math block out of namespace `std` because the Harmattan glibc lacks the `long double`
+variants. `::lround` is declared and works, so the call sites are rewritten.
+
+::: warning Do not "fix" this with `_GLIBCXX_USE_C99_MATH_FUNCS`
+That guard also covers the long double variants, and this glibc does not declare
+`acoshl`/`asinhl`/… at all — on ARM EABI `long double` is `double`, and old glibc gates
+them behind `__NO_LONG_DOUBLE_MATH`. Forcing it just moves the failure to
+`'acoshl' has not been declared in '::'`. libstdc++'s probe is right. There is a note
+to this effect in `write_toolchain_file()`; leave it there.
+:::
+
+**`TD_HAS_MMSG`** — the N9's kernel predates `recvmmsg`/`sendmmsg`. This is the only
+patch that is target-specific: a `simulator` build skips it.
+
+**`JsonVectorBytes`** — TDLib's JSON converter never implemented `to_json` for
+`vector<bytes>`; it emits a literal placeholder string that is not valid C++. Upstream
+never trips it because server mode only emits `to_json` for Objects, and no Object has
+such a field. **Client** mode emits `to_json` for queries, and two of those do —
+`inputPassportElementErrorSourceFiles` and `…TranslationFiles`, both `file_hashes`. The
+client-direction codec is what `-DMEEGRAM_JSON_TRANSPORT` needs, so generating it
+requires implementing the missing case. Not target-specific: this is about what *we*
+generate, not what the device can run.
+
+::: warning These fail loudly, on purpose
+Each patch checks for its anchor and `exit 1`s with "the patch needs revisiting" if
+upstream has moved it. `sed` exits 0 on no match, and a silent miss here surfaces much
+later as `'UNSUPPORTED' was not declared in this scope` in a generated file, or as a
+binary that builds fine and dies on the device. If you bump `TDLIB_COMMIT` or
+`RLOTTIE_COMMIT` and the script stops here, that is the guard working.
+:::
+
+::: info Why `git status` always shows these dirty
+`td`, `rlottie` and `libwebp` are gitlink entries (mode `160000`) in the index but have
+no `.gitmodules` record, so `git status` reports them as modified submodules with
+untracked content forever. That untracked content is the script's generated
+`toolchain.cmake` plus the patches above. Nothing is wrong; there is nothing to commit.
+:::
+
 ### What a re-run does
 
 | Stage | Re-run |
@@ -458,7 +520,7 @@ copies with plain `cp`, so the unversioned `.so` files are full duplicates.
 ### Verify before touching the device
 
 ```bash
-dpkg-deb -c meegram_0.2.1_armel.deb | grep opt/meegram
+dpkg-deb -c meegram_0.3.0_armel.deb | grep opt/meegram
 arm-none-linux-gnueabi-readelf -d build-app/debian/meegram/opt/meegram/bin/meegram | grep RPATH
 ```
 
@@ -469,8 +531,8 @@ is simply refused by the device.
 ### Install
 
 ```bash
-scp meegram_0.2.1_armel.deb user@<n9>:/tmp/
-ssh user@<n9> 'dpkg -i /tmp/meegram_0.2.1_armel.deb'
+scp meegram_0.3.0_armel.deb user@<n9>:/tmp/
+ssh user@<n9> 'dpkg -i /tmp/meegram_0.3.0_armel.deb'
 ```
 
 Run it over SSH the first time rather than from the launcher — `invoker` swallows

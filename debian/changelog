@@ -1,3 +1,39 @@
+meegram (0.3.0) unstable; urgency=low
+
+  * Voice notes. Tap the microphone to start, tap again to send; the attach button
+    becomes discard while it records, and a counter runs beside it. They play back in
+    the app, in the bubble. Recorded, encoded and decoded in-process as OggOpus, which
+    neither the device image nor its GStreamer 0.10 has.
+  * Video and GIF messages show as a bubble with the still and a badge giving the
+    runtime and the size — "GIF" in place of the runtime for an animation. Only the
+    still is fetched on sight; the first tap downloads the video and the second hands
+    it to whatever Harmattan has registered for the type. Nothing plays in the chat.
+  * Documents, sent from a file picker over MyDocs and received with their name and
+    size. Not downloaded on sight: the first tap fetches, the second opens it in
+    whatever the device has for the type, and long press saves it under the sender's
+    filename into MyDocs/meegram/Downloads. Audio messages render the same way.
+  * An emoji picker under the message field, across seven category tabs.
+  * A profile page from the chat header: the large photo, username, bio and phone
+    number, for the person or group you are talking to.
+  * Delivery state on outgoing messages: a clock while sending, a tick once the
+    server has it, a green one once it has been read, and a marker when it failed.
+  * Search over the chat list, matching titles as you type. It pulls the rest of the
+    list in while a search is running, since the list otherwise pages by the screenful.
+  * Sending a message no longer left a duplicate of it behind once the server
+    acknowledged it under its real id.
+  * A chat whose first page of history was shorter than the screen no longer stops
+    paging altogether — there was nothing to flick, so nothing asked for more, and it
+    stayed that way until the chat was closed and reopened.
+  * A search matching nothing now says so instead of showing a spinner for five
+    seconds, and a row updated while filtered out no longer comes back stale when the
+    search is cleared.
+  * Build: opus is built fixed-point for the device, with its ARM intrinsics off —
+    opus's CMake build advertises a NEON kernel it never assembles, so linking failed
+    on an undefined celt_pitch_xcorr_neon. libogg and opus also needed a policy
+    minimum to configure under CMake 4.
+
+ -- Andrea Faggin <blackbird5308@gmail.com>  Sat, 01 Aug 2026 16:00:00 +0100
+
 meegram (0.2.1) unstable; urgency=low
 
   * Notifications now come from meegramd, a resident daemon that owns the TDLib

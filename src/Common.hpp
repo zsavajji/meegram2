@@ -27,7 +27,7 @@ inline qlonglong toId(const QString &value) noexcept
 }
 
 constexpr auto AppName = "MeeGram";
-constexpr auto AppVersion = "0.2.1";
+constexpr auto AppVersion = "0.3.0";
 
 constexpr auto ApiId = 142713;
 constexpr auto ApiHash = "9e9e687a70150c6436afe3a2b6bfd7d7";
