@@ -409,8 +409,14 @@ build_opus() {
 
     # POSITION_INDEPENDENT_CODE for the same reason as rlottie and libwebp: meegram links
     # -pie and a non-PIC static archive will not go into a PIE executable on ARM.
+    #
+    # CMAKE_POLICY_VERSION_MINIMUM for the same reason as rlottie: libogg 1.3.5 declares
+    # cmake_minimum_required(VERSION 3.0) and opus 1.4 declares 3.1, and CMake 4.x removed
+    # compatibility below 3.5, so both fail to configure outright without it. Harmless on
+    # older CMake, which just reports it as an unused variable.
     local common_options=(
         -DCMAKE_BUILD_TYPE=MinSizeRel
+        -DCMAKE_POLICY_VERSION_MINIMUM=3.5
         -DCMAKE_INSTALL_PREFIX=/usr/local
         -DBUILD_SHARED_LIBS=OFF
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON
