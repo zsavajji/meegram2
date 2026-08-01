@@ -270,6 +270,190 @@ Item {
         }
     }
 
+    // Video and GIF both. A GIF is a soundless mp4 as far as TDLib and the system player
+    // are concerned, and MessageAnimation exposes the same properties as MessageVideo, so
+    // the two bubbles differ by the word on the badge and nothing else.
+    Component {
+        id: videoMessageComponent
+
+        MessageBubble {
+            // Two taps, like the document delegate and unlike the photo one: a video has
+            // no size ceiling and this is a metered radio, so the first tap starts the
+            // download and the second hands the finished file to the system player.
+            // Nothing here decodes video - an SGX530 playing H.264 inside a QML scene is
+            // not a fight worth picking when Harmattan ships a player already.
+            onClicked: {
+                var file = model.content.file;
+
+                if (!file)
+                    return;
+
+                if (file.isDownloadingCompleted) {
+                    // False means nothing is registered for the type, same as a document.
+                    if (!utils.openFile(file.localPath))
+                        appWindow.showInfoBanner(qsTr("ErrorOccurred"));
+                } else if (file.canBeDownloaded && !file.isDownloadingActive) {
+                    appManager.downloadFile(file.id, 1, 0, 0, false);
+                }
+            }
+
+            // With the filename, like a document: a video has one the sender chose, and
+            // saving under TDLib's cache name would lose it.
+            onPressAndHold: menuTarget.open(model.id, model.sender, model.content.caption, model.isOutgoing,
+                                            model.content.file, model.content.fileName)
+
+            childrenWidth: videoColumn.width
+
+            content: Column {
+                id: videoColumn
+
+                property int maxWidth: isPortrait ? 380 : 754
+
+                width: Math.min(model.content.width > 0 ? model.content.width : maxWidth, maxWidth)
+                spacing: 6
+
+                anchors {
+                    left: parent.left
+                    // Computed offset, same as the photo delegate: fixed-width content
+                    // cannot lean on AlignRight to sit on the outgoing side.
+                    leftMargin: model.isOutgoing ? listView.width - width - 20 : 20
+                }
+
+                Item {
+                    id: videoFrame
+
+                    width: parent.width
+                    // From the metadata, so the bubble does not resize under the user when
+                    // the still lands. 4:3 for a video that reports no dimensions.
+                    height: model.content.width > 0 && model.content.height > 0
+                                ? width * model.content.height / model.content.width
+                                : width * 3 / 4
+
+                    Rectangle {
+                        anchors.fill: parent
+                        color: "#30000000"
+                        visible: !thumbnailImage.ready
+                    }
+
+                    Image {
+                        id: thumbnailImage
+
+                        property bool ready: model.content.thumbnailFile && model.content.thumbnailFile.isDownloadingCompleted
+
+                        anchors.fill: parent
+                        // Decode at display size; the N9 has no memory for a pixmap it
+                        // would only scale down. Both dimensions, because that is what
+                        // makes StickerProvider scale during the decode rather than
+                        // expand the still and hand it back to be scaled down here.
+                        sourceSize.width: width
+                        sourceSize.height: height
+                        asynchronous: true
+                        smooth: true
+                        fillMode: Image.PreserveAspectFit
+                        // webp goes through StickerProvider and libwebp, the same path a
+                        // webp sticker takes - the provider decodes any webp by path and
+                        // is only called "sticker" because stickers got there first. jpeg
+                        // and png QML loads itself. Its cache was widened to 8 MB to hold
+                        // stills this size; see the note on MaxCachedImageKb.
+                        source: !ready
+                                    ? ""
+                                    : model.content.thumbnailFormat === "webp"
+                                        ? "image://sticker/" + model.content.thumbnailFile.localPath
+                                        : "file://" + model.content.thumbnailFile.localPath
+                    }
+
+                    Rectangle {
+                        width: 80
+                        height: 80
+                        radius: 40
+                        anchors.centerIn: parent
+                        // Reads over any still, however bright.
+                        color: "#80000000"
+
+                        Label {
+                            anchors.centerIn: parent
+                            // Download, then play. Two states for two taps, so the first
+                            // one does not look like a play button that did nothing. The
+                            // spinner replaces the glyph rather than drawing over it.
+                            visible: !videoIndicator.running
+                            text: model.content.file && model.content.file.isDownloadingCompleted ? icons.largeplay : icons.download
+                            font.family: icons.fontFamily
+                            font.pixelSize: 40
+                            color: "white"
+                        }
+
+                        BusyIndicator {
+                            id: videoIndicator
+
+                            anchors.centerIn: parent
+                            running: model.content.file && model.content.file.isDownloadingActive
+                            visible: running
+                        }
+                    }
+
+                    Rectangle {
+                        anchors { left: parent.left; top: parent.top; margins: 6 }
+                        width: videoInfo.paintedWidth + 12
+                        height: videoInfo.paintedHeight + 6
+                        radius: 4
+                        color: "#80000000"
+                        visible: videoInfo.text !== ""
+
+                        Label {
+                            id: videoInfo
+
+                            // Both come off the message rather than the file, so the badge
+                            // reads right before anything has been downloaded. size is
+                            // pre-formatted by File - td_api sizes are int53 and must not
+                            // cross into QML1 as numbers. formatTime gives back nothing for
+                            // a zero duration, so the separator is conditional on having
+                            // two halves to separate.
+                            //
+                            // GIF in place of the runtime, which is how Telegram marks one
+                            // and is the only thing distinguishing the two bubbles. A GIF
+                            // usually reports a couple of seconds, which says nothing
+                            // useful about it.
+                            property string duration: model.contentType === "messageAnimation"
+                                                          ? "GIF"
+                                                          : utils.formatTime(model.content.duration)
+                            property string size: model.content.file ? model.content.file.size : ""
+
+                            anchors.centerIn: parent
+                            text: duration !== "" && size !== "" ? duration + " - " + size : duration + size
+                            color: "white"
+                            font.pixelSize: 18
+                            font.weight: Font.Light
+                        }
+                    }
+                }
+
+                Label {
+                    // Same plain-text fast path as the other bubbles.
+                    property string html: utils.replaceEmoji(model.content.caption)
+
+                    width: parent.width
+                    visible: text !== ""
+                    textFormat: /[<&\n\r\t]|\s\s/.test(html) ? Text.RichText : Text.PlainText
+                    text: html
+                    color: model.isOutgoing ? "white" : "black"
+                    wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                    font.pixelSize: 23
+                    horizontalAlignment: model.isOutgoing ? Text.AlignRight : Text.AlignLeft
+                    onLinkActivated: Qt.openUrlExternally(link)
+                }
+            }
+
+            // Only the still is fetched on sight - it is a few KB, and without it the
+            // bubble is an empty grey box. The video itself waits for a tap.
+            Component.onCompleted: {
+                var thumbnail = model.content.thumbnailFile;
+
+                if (thumbnail && thumbnail.canBeDownloaded && !thumbnail.isDownloadingActive && !thumbnail.isDownloadingCompleted)
+                    appManager.downloadFile(thumbnail.id, 1, 0, 0, false);
+            }
+        }
+    }
+
     Component {
         id: documentMessageComponent
 
@@ -558,6 +742,11 @@ Item {
                 return textMessageComponent;
             case "messagePhoto":
                 return photoMessageComponent;
+            case "messageVideo":
+            // Through the video delegate: a GIF is a soundless mp4, so it downloads and
+            // opens exactly the same way and only wants a different badge.
+            case "messageAnimation":
+                return videoMessageComponent;
             case "messageSticker":
                 return stickerMessageComponent;
             case "messageDocument":

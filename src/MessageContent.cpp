@@ -39,6 +39,32 @@ td::td_api::photoSize *pickPhotoSize(std::vector<td::td_api::object_ptr<td::td_a
     return best;
 }
 
+// Which thumbnail formats there is something here to draw with, as the lowercase string
+// the delegate switches on - same vocabulary as MessageSticker::format. QML decodes jpeg
+// and png itself; webp goes through StickerProvider and libwebp, which is a general webp
+// decoder keyed by path and only called "sticker" because stickers got there first.
+//
+// Empty for anything else, which in practice means TDLib's animated mpeg4 preview: that
+// is video, and not decoding video in-process is the whole point of these two bubbles.
+// The caller leaves the file null on empty, so nothing is downloaded to draw nothing.
+QString decodableThumbnailFormat(const td::td_api::thumbnail &thumbnail)
+{
+    if (!thumbnail.format_)
+        return {};
+
+    switch (thumbnail.format_->get_id())
+    {
+        case td::td_api::thumbnailFormatJpeg::ID:
+            return QLatin1String("jpeg");
+        case td::td_api::thumbnailFormatPng::ID:
+            return QLatin1String("png");
+        case td::td_api::thumbnailFormatWebp::ID:
+            return QLatin1String("webp");
+        default:
+            return {};
+    }
+}
+
 }  // namespace
 
 MessageText::MessageText(td::td_api::object_ptr<td::td_api::messageText> content, QObject *parent)
@@ -62,11 +88,89 @@ MessageAnimation::MessageAnimation(td::td_api::object_ptr<td::td_api::messageAni
     : QObject(parent)
 {
     m_caption = QString::fromStdString(content->caption_->text_);
+
+    // Guarded the same way MessageDocument is: a message TDLib hands over without an
+    // animation part is a bubble with no still, not a crash.
+    if (!content->animation_)
+        return;
+
+    auto &animation = content->animation_;
+
+    m_width = animation->width_;
+    m_height = animation->height_;
+    m_duration = animation->duration_;
+    m_fileName = QString::fromStdString(animation->file_name_);
+
+    if (animation->animation_)
+        m_file = std::make_shared<File>(std::move(animation->animation_));
+
+    if (animation->thumbnail_ && animation->thumbnail_->file_)
+    {
+        m_thumbnailFormat = decodableThumbnailFormat(*animation->thumbnail_);
+
+        if (!m_thumbnailFormat.isEmpty())
+            m_thumbnailFile = std::make_shared<File>(std::move(animation->thumbnail_->file_));
+    }
 }
 
 QString MessageAnimation::caption() const
 {
     return m_caption;
+}
+
+File *MessageAnimation::file() const
+{
+    return m_file.get();
+}
+
+File *MessageAnimation::thumbnailFile() const
+{
+    return m_thumbnailFile.get();
+}
+
+QString MessageAnimation::thumbnailFormat() const
+{
+    return m_thumbnailFormat;
+}
+
+int MessageAnimation::width() const
+{
+    return m_width;
+}
+
+int MessageAnimation::height() const
+{
+    return m_height;
+}
+
+int MessageAnimation::duration() const
+{
+    return m_duration;
+}
+
+QString MessageAnimation::fileName() const
+{
+    return m_fileName;
+}
+
+const std::shared_ptr<File> &MessageAnimation::animationFile() const noexcept
+{
+    return m_file;
+}
+
+void MessageAnimation::adoptFile(std::shared_ptr<File> file) noexcept
+{
+    m_file = std::move(file);
+}
+
+const std::shared_ptr<File> &MessageAnimation::animationThumbnailFile() const noexcept
+{
+    return m_thumbnailFile;
+}
+
+void MessageAnimation::adoptThumbnailFile(std::shared_ptr<File> file) noexcept
+{
+    m_thumbnailFile = std::move(file);
 }
 
 MessageAudio::MessageAudio(td::td_api::object_ptr<td::td_api::messageAudio> content, QObject *parent)
@@ -321,11 +425,89 @@ MessageVideo::MessageVideo(td::td_api::object_ptr<td::td_api::messageVideo> cont
     : QObject(parent)
 {
     m_caption = QString::fromStdString(content->caption_->text_);
+
+    // Guarded the same way MessageDocument is: a message TDLib hands over without a
+    // video part is a bubble with no still, not a crash.
+    if (!content->video_)
+        return;
+
+    auto &video = content->video_;
+
+    m_width = video->width_;
+    m_height = video->height_;
+    m_duration = video->duration_;
+    m_fileName = QString::fromStdString(video->file_name_);
+
+    if (video->video_)
+        m_file = std::make_shared<File>(std::move(video->video_));
+
+    if (video->thumbnail_ && video->thumbnail_->file_)
+    {
+        m_thumbnailFormat = decodableThumbnailFormat(*video->thumbnail_);
+
+        if (!m_thumbnailFormat.isEmpty())
+            m_thumbnailFile = std::make_shared<File>(std::move(video->thumbnail_->file_));
+    }
 }
 
 QString MessageVideo::caption() const
 {
     return m_caption;
+}
+
+File *MessageVideo::file() const
+{
+    return m_file.get();
+}
+
+File *MessageVideo::thumbnailFile() const
+{
+    return m_thumbnailFile.get();
+}
+
+QString MessageVideo::thumbnailFormat() const
+{
+    return m_thumbnailFormat;
+}
+
+int MessageVideo::width() const
+{
+    return m_width;
+}
+
+int MessageVideo::height() const
+{
+    return m_height;
+}
+
+int MessageVideo::duration() const
+{
+    return m_duration;
+}
+
+QString MessageVideo::fileName() const
+{
+    return m_fileName;
+}
+
+const std::shared_ptr<File> &MessageVideo::videoFile() const noexcept
+{
+    return m_file;
+}
+
+void MessageVideo::adoptFile(std::shared_ptr<File> file) noexcept
+{
+    m_file = std::move(file);
+}
+
+const std::shared_ptr<File> &MessageVideo::videoThumbnailFile() const noexcept
+{
+    return m_thumbnailFile;
+}
+
+void MessageVideo::adoptThumbnailFile(std::shared_ptr<File> file) noexcept
+{
+    m_thumbnailFile = std::move(file);
 }
 
 MessageVideoNote::MessageVideoNote(td::td_api::object_ptr<td::td_api::messageVideoNote> content, QObject *parent)

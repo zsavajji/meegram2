@@ -596,6 +596,20 @@ void MessageModel::linkContentFile(Message *message) noexcept
             voiceNote->adoptFile(m_storage->registerFile(voiceNote->voiceFile()));
             break;
         }
+        case td::td_api::messageVideo::ID: {
+            auto *video = static_cast<MessageVideo *>(message->content());
+            video->adoptFile(m_storage->registerFile(video->videoFile()));
+            // The still too, or its download would never reach the object the
+            // placeholder is bound to and the bubble would sit on the scrim forever.
+            video->adoptThumbnailFile(m_storage->registerFile(video->videoThumbnailFile()));
+            break;
+        }
+        case td::td_api::messageAnimation::ID: {
+            auto *animation = static_cast<MessageAnimation *>(message->content());
+            animation->adoptFile(m_storage->registerFile(animation->animationFile()));
+            animation->adoptThumbnailFile(m_storage->registerFile(animation->animationThumbnailFile()));
+            break;
+        }
         default:
             break;
     }
