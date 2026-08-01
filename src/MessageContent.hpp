@@ -31,18 +31,55 @@ private:
     QString m_formattedText;
 };
 
+// A GIF, which TDLib carries as a soundless mp4. Deliberately the same property set as
+// MessageVideo, down to the names: the two bubbles differ only by the word on the badge,
+// so one delegate renders both and there is no second copy to keep in step.
 class MessageAnimation : public QObject, public MessageContent
 {
     Q_OBJECT
     Q_PROPERTY(QString caption READ caption CONSTANT)
+
+    Q_PROPERTY(File *file READ file CONSTANT)
+    Q_PROPERTY(File *thumbnailFile READ thumbnailFile CONSTANT)
+    Q_PROPERTY(QString thumbnailFormat READ thumbnailFormat CONSTANT)
+
+    Q_PROPERTY(int width READ width CONSTANT)
+    Q_PROPERTY(int height READ height CONSTANT)
+    Q_PROPERTY(int duration READ duration CONSTANT)
+    Q_PROPERTY(QString fileName READ fileName CONSTANT)
 
 public:
     explicit MessageAnimation(td::td_api::object_ptr<td::td_api::messageAnimation> content, QObject *parent = nullptr);
 
     QString caption() const;
 
+    File *file() const;
+    File *thumbnailFile() const;
+    QString thumbnailFormat() const;
+
+    int width() const;
+    int height() const;
+    int duration() const;
+    QString fileName() const;
+
+    // Same canonical-instance dance as MessagePhoto; see the note there.
+    const std::shared_ptr<File> &animationFile() const noexcept;
+    void adoptFile(std::shared_ptr<File> file) noexcept;
+
+    const std::shared_ptr<File> &animationThumbnailFile() const noexcept;
+    void adoptThumbnailFile(std::shared_ptr<File> file) noexcept;
+
 private:
     QString m_caption;
+    QString m_fileName;
+    QString m_thumbnailFormat;
+
+    int m_width{0};
+    int m_height{0};
+    int m_duration{0};
+
+    std::shared_ptr<File> m_file;
+    std::shared_ptr<File> m_thumbnailFile;
 };
 
 class MessageAudio : public QObject, public MessageContent
@@ -199,13 +236,58 @@ class MessageVideo : public QObject, public MessageContent
     Q_OBJECT
     Q_PROPERTY(QString caption READ caption CONSTANT)
 
+    // The video itself. Fetched on tap rather than on sight: it is the one attachment
+    // with no size ceiling, and nothing here plays it anyway - openFile hands the
+    // finished file to whatever Harmattan has registered for the type.
+    Q_PROPERTY(File *file READ file CONSTANT)
+
+    // The still Telegram ships beside it, which is all the bubble ever draws. Null when
+    // the thumbnail is a format nothing here decodes; see the constructor.
+    Q_PROPERTY(File *thumbnailFile READ thumbnailFile CONSTANT)
+
+    // "jpeg", "png" or "webp". The delegate picks how to load from this, the same way
+    // the sticker delegate uses MessageSticker::format: webp has to go through
+    // StickerProvider, the other two QML decodes itself.
+    Q_PROPERTY(QString thumbnailFormat READ thumbnailFormat CONSTANT)
+
+    Q_PROPERTY(int width READ width CONSTANT)
+    Q_PROPERTY(int height READ height CONSTANT)
+    Q_PROPERTY(int duration READ duration CONSTANT)
+    Q_PROPERTY(QString fileName READ fileName CONSTANT)
+
 public:
     explicit MessageVideo(td::td_api::object_ptr<td::td_api::messageVideo> content, QObject *parent = nullptr);
 
     QString caption() const;
 
+    File *file() const;
+    File *thumbnailFile() const;
+    QString thumbnailFormat() const;
+
+    int width() const;
+    int height() const;
+    int duration() const;
+    QString fileName() const;
+
+    // Same canonical-instance dance as MessagePhoto; see the note there. Both files
+    // need it: the still drives the placeholder and the video drives the spinner.
+    const std::shared_ptr<File> &videoFile() const noexcept;
+    void adoptFile(std::shared_ptr<File> file) noexcept;
+
+    const std::shared_ptr<File> &videoThumbnailFile() const noexcept;
+    void adoptThumbnailFile(std::shared_ptr<File> file) noexcept;
+
 private:
     QString m_caption;
+    QString m_fileName;
+    QString m_thumbnailFormat;
+
+    int m_width{0};
+    int m_height{0};
+    int m_duration{0};
+
+    std::shared_ptr<File> m_file;
+    std::shared_ptr<File> m_thumbnailFile;
 };
 
 class MessageVideoNote : public QObject, public MessageContent

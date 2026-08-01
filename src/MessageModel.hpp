@@ -47,7 +47,10 @@ public:
         ServiceMessageRole,
         SectionRole,
         ReplyToSenderRole,
-        ReplyToTextRole
+        ReplyToTextRole,
+        // Delivery state of an outgoing message, for the tick on the bubble. Empty for
+        // anything incoming.
+        SendStateRole
     };
 
     int rowCount(const QModelIndex &parent = QModelIndex()) const override;
@@ -117,6 +120,13 @@ private slots:
 
 private:
     void handleNewMessage(td::td_api::object_ptr<td::td_api::message> &&message) noexcept;
+    // The sent-message swap: the temporary id updateNewMessage delivered is replaced by
+    // the real one. Both the succeeded and the failed update carry it, and both retire
+    // the same pending row.
+    void handleMessageSendCompleted(td::td_api::object_ptr<td::td_api::message> &&message, qlonglong oldMessageId) noexcept;
+    // Only repaints the ticks: the value itself lives on the Chat, which StorageManager
+    // has already updated by the time this runs.
+    void handleChatReadOutbox(qlonglong chatId, qlonglong lastReadOutboxMessageId) noexcept;
     void handleMessageContent(qlonglong chatId, qlonglong messageId, td::td_api::object_ptr<td::td_api::MessageContent> &&newContent) noexcept;
     void handleMessageEdited(qlonglong chatId, qlonglong messageId, int editDate, td::td_api::object_ptr<td::td_api::ReplyMarkup> &&replyMarkup) noexcept;
     void handleDeleteMessages(qlonglong chatId, std::vector<int64_t> &&messageIds, bool isPermanent, bool fromCache) noexcept;
@@ -140,6 +150,11 @@ private:
     // which is what the delegate tests to decide whether to show a quote block.
     QString replyToSender(const Message *message) const noexcept;
     QString replyToText(const Message *message) const noexcept;
+
+    // "sending" / "failed" / "sent" / "read". Deliberately not part of FormattedRow: it
+    // is the one value here that changes without the message changing, when the other
+    // side reads the chat.
+    QString sendState(const Message *message) const noexcept;
 
     // The roles whose values cost a date format, a storage lookup or a content
     // preview. QML1 has no per-row role cache, so a bubble reading six properties

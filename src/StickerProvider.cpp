@@ -9,15 +9,21 @@
 
 namespace {
 
-// Stickers are nominally 512x512, which is 1 MB each as ARGB32. The delegate draws
-// them around 180px, so a byte budget rather than a count: this is roughly a dozen
-// stickers at display size, and it cannot be blown open by one large one.
-constexpr int MaxCachedStickerKb = 1536;
+// A byte budget rather than a count, because what goes in here varies by an order of
+// magnitude: a sticker drawn at 180px is ~130 KB as ARGB32, while a webp video or GIF
+// still drawn full width is ~420 KB in portrait and ~1.7 MB in landscape.
+//
+// 8 MB, up from 1.5. The old budget predates the media bubbles and was sized for
+// stickers alone: a landscape still exceeded it outright, and QCache drops anything
+// costing more than its maximum instead of making room - so the one image most worth
+// keeping was the one that never got cached at all. Every still fits now, with room
+// left for the stickers they used to evict.
+constexpr int MaxCachedImageKb = 8192;
 
 QCache<QString, QImage> &stickerCache()
 {
-    // cost() is in KB, matching MaxCachedStickerKb.
-    static QCache<QString, QImage> cache(MaxCachedStickerKb);
+    // cost() is in KB, matching MaxCachedImageKb.
+    static QCache<QString, QImage> cache(MaxCachedImageKb);
     return cache;
 }
 

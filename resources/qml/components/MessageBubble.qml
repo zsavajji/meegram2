@@ -29,7 +29,8 @@ Item {
         // The quote block has to widen the bubble too, or a short message replying
         // to a long one would have its quote clipped. 11 = accent bar + its margin.
         width: Math.max(childrenWidth,
-                        messageDate.paintedWidth + (model.isOutgoing ? 0 : 28),
+                        messageDate.paintedWidth + (sendStateIcon.visible ? sendStateIcon.paintedWidth + 6 : 0)
+                            + (model.isOutgoing ? 0 : 28),
                         senderLabel.paintedWidth,
                         replyBlock.visible ? replySender.paintedWidth + 11 : 0,
                         replyBlock.visible ? replyText.paintedWidth + 11 : 0) + 26
@@ -158,7 +159,10 @@ Item {
     Label {
         id: messageDate
 
-        width: parent.width -100
+        // The date is right-aligned inside a label that spans the bubble, so the tick
+        // cannot simply sit after the text - it has to come off the label's own right
+        // edge, and that edge moves left to make room for it.
+        width: parent.width - 100 - (sendStateIcon.visible ? sendStateIcon.paintedWidth + 6 : 0)
         anchors {
             left: parent.left
             leftMargin: isOutgoing ? 80 : 20
@@ -170,6 +174,30 @@ Item {
         font.pixelSize: 16
         font.weight: Font.Light
         horizontalAlignment: model.isOutgoing ? Text.AlignRight : Text.AlignLeft
+    }
+
+    // Delivery state, outgoing messages only: a clock while it is still on its way, a
+    // tick once the server has it, green once the other side has read it. The model
+    // gives an empty string for anything incoming, which is what hides this.
+    Label {
+        id: sendStateIcon
+
+        visible: model.sendState !== ""
+        anchors {
+            left: messageDate.right
+            leftMargin: 6
+            baseline: messageDate.baseline
+        }
+        text: model.sendState === "sending" ? icons.sending
+              : model.sendState === "failed" ? icons.sendingerror
+              : model.sendState === "read" ? icons.check2
+              : icons.check1
+        font.family: icons.fontFamily
+        font.pixelSize: 16
+        // The bubble behind this is #15A8CA, so the sent tick takes the same washed-out
+        // white the date does and read is the one state that gets a colour of its own.
+        color: model.sendState === "read" ? "#7BE87B" : "white"
+        opacity: model.sendState === "read" ? 1.0 : 0.75
     }
 
     QtObject {

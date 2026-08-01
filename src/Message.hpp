@@ -53,6 +53,11 @@ public:
 
     bool isService() const noexcept;
 
+    // TDLib carries a sending state only while the message is on its way out: null means
+    // the server has it. Both are false for anything incoming.
+    bool isPending() const noexcept;
+    bool isFailed() const noexcept;
+
     // Null when this message is not a reply.
     const ReplyInfo *replyTo() const noexcept;
 
@@ -73,6 +78,8 @@ private:
     qlonglong m_chatId;
     qlonglong m_senderId;
     bool m_isOutgoing;
+    bool m_isPending;
+    bool m_isFailed;
     QDateTime m_date;
     QDateTime m_editDate;
 
