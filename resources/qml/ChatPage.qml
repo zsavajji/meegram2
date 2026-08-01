@@ -219,12 +219,6 @@ Page {
                                     "image://chatPhoto/" + chat.photo.localPath :
                                     "image://theme/icon-l-content-avatar-placeholder"
 
-                        // Swallows taps on the avatar so they do not fall through to
-                        // whatever is behind the header.
-                        MouseArea {
-                            anchors.fill: parent
-                        }
-
                         // The chat list delegate normally starts this, but a chat
                         // opened from a notification was never scrolled past.
                         Component.onCompleted: {
@@ -255,6 +249,14 @@ Page {
                             width: chatInfoRow.width - profilePhotoImage.width - chatInfoRow.spacing
                         }
                     }
+                }
+
+                // One area over the avatar and the name rather than one on each: the
+                // whole row goes to the same page, and it also swallows taps that would
+                // otherwise fall through to whatever is behind the header.
+                MouseArea {
+                    anchors.fill: chatInfoRow
+                    onClicked: root.openProfile()
                 }
             }
         }
@@ -928,6 +930,19 @@ Page {
         rejectButtonText: qsTr("Cancel")
 
         onAccepted: messageModel.deleteMessage(menuTarget.messageId, revoke)
+    }
+
+    // Pushed fresh each time and destroyed by the stack on the way back, like every
+    // other page that is not a picker: there is no state on it worth keeping.
+    function openProfile() {
+        var component = Qt.createComponent("ProfilePage.qml");
+
+        if (component.status !== Component.Ready) {
+            console.debug("Error loading component:", component.errorString());
+            return;
+        }
+
+        pageStack.push(component);
     }
 
     // Built on demand: the page imports QtMobility.gallery, and if that module is

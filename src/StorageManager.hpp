@@ -39,6 +39,21 @@ public:
     [[nodiscard]] std::shared_ptr<SupergroupFullInfo> supergroupFullInfo(qlonglong groupId) const noexcept;
     [[nodiscard]] std::shared_ptr<User> user(qlonglong userId) const noexcept;
 
+    // The one field of userFullInfo anything here shows, so it is kept as the string it
+    // is displayed as rather than behind a class of its own. Empty until loadUserFullInfo
+    // has been through.
+    [[nodiscard]] QString userBio(qlonglong userId) const noexcept;
+
+    // Fetches the full info a user's bio lives on. The answer is taken from the reply
+    // rather than from updateUserFullInfo alone: TDLib only pushes that update when the
+    // full info actually changed, so a second request for the same user - which is what
+    // reopening a profile is - would otherwise be answered by nothing at all.
+    //
+    // Lives here rather than on the caller because the reply arrives on the TDLib worker
+    // thread, and this object outlives every page that asks; a ChatInfoFormatter is
+    // destroyed the moment another chat is opened.
+    void loadUserFullInfo(qlonglong userId) noexcept;
+
 signals:
     void chatFoldersUpdated();
     void basicGroupUpdated(qlonglong groupId);
@@ -59,6 +74,7 @@ signals:
     void chatPositionUpdated(qlonglong chatId);
     void supergroupUpdated(qlonglong groupId);
     void userUpdated(qlonglong userId);
+    void userFullInfoUpdated(qlonglong userId);
 
     void chatOnlineMemberCountUpdated(qlonglong chatId, int onlineMemberCount);
 
@@ -73,6 +89,10 @@ public slots:
 
 private slots:
     void handleResult(td::td_api::Object *object);
+
+    // Queued from the getUserFullInfo callback, so the map is only ever written on this
+    // thread. See loadUserFullInfo.
+    void setUserBio(qlonglong userId, const QString &bio) noexcept;
 
 private:
     void registerChatPhoto(const std::shared_ptr<Chat> &chat) noexcept;
@@ -94,4 +114,5 @@ private:
     std::unordered_map<qlonglong, std::shared_ptr<Supergroup>> m_supergroup;
     std::unordered_map<qlonglong, std::shared_ptr<SupergroupFullInfo>> m_supergroupFullInfo;
     std::unordered_map<qlonglong, std::shared_ptr<User>> m_users;
+    std::unordered_map<qlonglong, QString> m_userBios;
 };

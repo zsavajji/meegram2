@@ -33,6 +33,10 @@ public:
     QDateTime wasOnline() const;
     QStringList activeUsernames() const;
 
+    // Digits only, no leading "+". Empty when the other side's privacy settings hide it,
+    // which is what makes showing it a matter of checking for a string.
+    QString phoneNumber() const;
+
     void setStatus(td::td_api::object_ptr<td::td_api::UserStatus> status);
 
 signals:
@@ -50,4 +54,5 @@ private:
 
     QDateTime m_wasOnline;
     QStringList m_activeUsernames;
+    QString m_phoneNumber;
 };

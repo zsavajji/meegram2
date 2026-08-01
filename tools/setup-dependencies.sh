@@ -440,6 +440,31 @@ build_opus() {
         fi
     fi
 
+    # No SIMD on the device, because opus's own CMake build cannot produce a working one
+    # on 32-bit ARM. It defines OPUS_ARM_MAY_HAVE_NEON, which makes celt/arm/arm_celt_map.c
+    # put celt_pitch_xcorr_neon in the runtime dispatch table, but it never assembles
+    # celt/arm/celt_pitch_xcorr_arm.s - that symbol only exists in hand-written assembly,
+    # and only the autotools build runs it through arm2gnu.pl. The archive links fine and
+    # then meegram fails with an undefined reference to celt_pitch_xcorr_neon. Still true
+    # in opus 1.6.1, and aarch64 never hits it because there the NEON path is intrinsics
+    # only, so upgrading the tag is not the fix.
+    #
+    # Turning intrinsics off drops the whole ARM SIMD path - the silk NEON kernels too,
+    # not just the missing one. That is affordable at what src/OggOpus.cpp asks for
+    # (20 kbps mono SILK at complexity 5, which the C code encodes many times faster than
+    # real time on a 1 GHz Cortex-A8) and it is the only single-flag fix.
+    #
+    # ponytail: pure C on ARM; if voice note encoding ever shows up in a profile, the
+    # upgrade path is to build opus with its autotools cross-configuration instead, which
+    # assembles the .s files and gives back both NEON paths.
+    #
+    # Left on for the simulator, where x86 SSE is detected and built correctly.
+    local opus_disable_intrinsics=OFF
+
+    if [[ "$ARGS" == "harmattan" ]]; then
+        opus_disable_intrinsics=ON
+    fi
+
     # opus_demo and the test vectors are not wanted; nothing here runs them.
     local opus_options=(
         "${common_options[@]}"
@@ -447,6 +472,7 @@ build_opus() {
         -DOPUS_BUILD_TESTING=OFF
         -DOPUS_BUILD_SHARED_LIBRARY=OFF
         -DOPUS_FIXED_POINT="$opus_fixed_point"
+        -DOPUS_DISABLE_INTRINSICS="$opus_disable_intrinsics"
     )
 
     local sysroot="$SDK_PATH/Madde/sysroots/harmattan_sysroot_10.2011.34-1_slim"
