@@ -718,7 +718,18 @@ Page {
 
                         anchors.fill: parent
                         anchors.margins: -12
-                        onClicked: emojiPanel.toggle()
+                        onClicked: {
+                            emojiPanel.open = !emojiPanel.open;
+
+                            // Last on purpose: these two are the only calls here that
+                            // depend on TextArea exposing the platform's input-panel
+                            // methods, and a panel that opens without lowering the
+                            // keyboard still beats a button that half-works.
+                            if (emojiPanel.open)
+                                textArea.closeSoftwareInputPanel();
+                            else
+                                textArea.openSoftwareInputPanel();
+                        }
                     }
                 }
 
@@ -776,136 +787,17 @@ Page {
             // Takes the keyboard's place rather than covering the chat: the keyboard has
             // to come down for it either way, and down here picking several in a row does
             // not hide the message being written.
-            Rectangle {
+            EmojiPicker {
                 id: emojiPanel
 
-                property bool open: false
-
-                // -1 until first opened, so the categories are not built during page
-                // construction - every chat page would pay for a panel most never show.
-                property int currentTab: -1
-
                 width: parent.width
-                height: 260
-                // Column skips invisible children entirely, so a closed panel costs no
-                // layout - and the grid never has to lay itself out at zero height.
-                visible: open
-                clip: true
-                color: "white"
 
-                function toggle() {
-                    open = !open;
-
-                    if (open && currentTab === -1)
-                        showTab(0);
-
-                    // Last in both branches on purpose: these two are the only calls here
-                    // that depend on TextArea exposing the platform's input-panel methods,
-                    // and a panel that opens without lowering the keyboard still beats one
-                    // whose button half-works.
-                    if (open)
-                        textArea.closeSoftwareInputPanel();
-                    else
-                        textArea.openSoftwareInputPanel();
-                }
-
-                function showTab(index) {
-                    currentTab = index;
-
-                    var tab = emojiTabs.categories[index];
-                    var list = [];
-
-                    for (var c = tab.first; c <= tab.last; ++c)
-                        list = list.concat(utils.emojiCategory(c));
-
-                    emojiGrid.model = list;
-                }
-
-                Row {
-                    id: emojiTabs
-
-                    width: parent.width
-                    height: 48
-
-                    // Inclusive ranges over Emoji::Category. Emotion and People share a
-                    // tab, and so do Objects and Symbols: the icon font has no glyph for
-                    // either second half, and Telegram groups them the same way. Ranges
-                    // rather than a list of ids because the categories are contiguous in
-                    // Emoji::emojis() - a merged tab is two neighbours joined.
-                    property variant categories: [
-                        { icon: icons.smile, first: 0, last: 1 },
-                        { icon: icons.animals, first: 2, last: 2 },
-                        { icon: icons.eats, first: 3, last: 3 },
-                        { icon: icons.car, first: 4, last: 4 },
-                        { icon: icons.sport, first: 5, last: 5 },
-                        { icon: icons.lamp, first: 6, last: 7 },
-                        { icon: icons.flag, first: 8, last: 8 }
-                    ]
-
-                    Repeater {
-                        model: emojiTabs.categories
-
-                        Item {
-                            width: emojiTabs.width / emojiTabs.categories.length
-                            height: emojiTabs.height
-
-                            Label {
-                                anchors.centerIn: parent
-                                text: modelData.icon
-                                font.family: icons.fontFamily
-                                font.pixelSize: 32
-                                color: emojiPanel.currentTab === index ? "#0077A8" : "#505050"
-                            }
-
-                            MouseArea {
-                                anchors.fill: parent
-                                onClicked: emojiPanel.showTab(index)
-                            }
-                        }
-                    }
-                }
-
-                GridView {
-                    id: emojiGrid
-
-                    anchors {
-                        left: parent.left
-                        right: parent.right
-                        top: emojiTabs.bottom
-                        bottom: parent.bottom
-                    }
-                    // Ten to a row in portrait, on 32px assets. Below the platform's touch
-                    // target, but a grid of full-size buttons fits twenty emoji on screen
-                    // and turns picking one into scrolling.
-                    cellWidth: 48
-                    cellHeight: 48
-                    clip: true
-
-                    delegate: Item {
-                        width: emojiGrid.cellWidth
-                        height: emojiGrid.cellHeight
-
-                        Image {
-                            anchors.centerIn: parent
-                            width: 32
-                            height: 32
-                            sourceSize.width: 32
-                            sourceSize.height: 32
-                            source: "qrc:/emoji/" + modelData.filename
-                            asynchronous: true
-                        }
-
-                        MouseArea {
-                            anchors.fill: parent
-                            onClicked: {
-                                // Appended rather than inserted at the cursor: setting
-                                // .text is what QML1 gives us, and that moves the cursor
-                                // anyway, so put it back at the end where typing resumes.
-                                textArea.text += modelData.unicode;
-                                textArea.cursorPosition = textArea.text.length;
-                            }
-                        }
-                    }
+                // Appended rather than inserted at the cursor: setting .text is what
+                // QML1 gives us, and that moves the cursor anyway, so put it back at
+                // the end where typing resumes.
+                onPicked: {
+                    textArea.text += unicode;
+                    textArea.cursorPosition = textArea.text.length;
                 }
             }
         }
