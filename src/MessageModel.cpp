@@ -317,7 +317,10 @@ int MessageModel::count() const noexcept
 
 bool MessageModel::loading() const noexcept
 {
-    return m_loading;
+    // Both directions, not just m_loading. Paging up runs fetchMoreBack/m_backFetching,
+    // so a property that only reported m_loading left the header spinner dark for the
+    // one wait the user actually sits through - scrolling back into history.
+    return m_loading || m_backFetching;
 }
 
 void MessageModel::getChatHistory(const QString &fromMessageId, int offset, int limit, bool fetchPrevious) noexcept
@@ -372,12 +375,12 @@ void MessageModel::handleHistoryResponse(void *responseObject, bool fetchPreviou
         return;
 
     auto cleanupFlags = [this]() {
-        if (m_loading)
+        if (m_loading || m_backFetching)
         {
             m_loading = false;
+            m_backFetching = false;
             emit loadingChanged();
         }
-        m_backFetching = false;
 
         emit countChanged();
     };
@@ -538,6 +541,8 @@ void MessageModel::fetchMoreBack() noexcept
     m_backFetching = true;
 
     requestHistory(std::ranges::min(m_messages), 0, MessageSliceLimit, true);
+
+    emit loadingChanged();
 }
 
 void MessageModel::viewMessagesUpTo(int index) noexcept
@@ -715,6 +720,7 @@ void MessageModel::refresh() noexcept
     endResetModel();
 
     emit countChanged();
+    emit loadingChanged();
 }
 
 void MessageModel::handleResult(td::td_api::Object *object) noexcept
@@ -949,13 +955,12 @@ void MessageModel::reloadHistory() noexcept
     {
         qWarning() << "getChatHistory: gave up after" << m_historyRetries << "empty replies for chat" << m_chat->id();
 
-        if (m_loading)
+        if (m_loading || m_backFetching)
         {
             m_loading = false;
+            m_backFetching = false;
             emit loadingChanged();
         }
-
-        m_backFetching = false;
 
         emit countChanged();
         return;
