@@ -566,6 +566,23 @@ void MessageModel::viewMessagesUpTo(int index) noexcept
     m_client->send(std::move(request));
 }
 
+void MessageModel::openMessageContent(const QString &rawMessageId) noexcept
+{
+    const auto messageId = toId(rawMessageId);
+
+    const auto it = m_messageMap.find(messageId);
+    // Own messages are opened by definition, and TDLib errors on them.
+    if (it == m_messageMap.end() || it->second->isOutgoing())
+        return;
+
+    auto request = td::td_api::make_object<td::td_api::openMessageContent>();
+
+    request->chat_id_ = m_chat->id();
+    request->message_id_ = messageId;
+
+    m_client->send(std::move(request));
+}
+
 void MessageModel::deleteMessage(const QString &rawMessageId, bool revoke) noexcept
 {
     const auto messageId = toId(rawMessageId);

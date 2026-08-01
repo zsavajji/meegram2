@@ -307,6 +307,9 @@ class MessageVoiceNote : public QObject, public MessageContent
     // had nothing to download and nothing to say about itself.
     Q_PROPERTY(File *file READ file CONSTANT)
     Q_PROPERTY(int duration READ duration CONSTANT)
+    // Constant like the rest: listening to a note makes TDLib send updateMessageContent,
+    // which replaces this whole object, so the binding re-evaluates on a new instance.
+    Q_PROPERTY(bool isListened READ isListened CONSTANT)
 
 public:
     explicit MessageVoiceNote(td::td_api::object_ptr<td::td_api::messageVoiceNote> content, QObject *parent = nullptr);
@@ -314,6 +317,7 @@ public:
     QString caption() const;
     File *file() const;
     int duration() const;
+    bool isListened() const;
 
     // Same canonical-instance dance as MessageDocument; see the note there.
     const std::shared_ptr<File> &voiceFile() const noexcept;
@@ -322,6 +326,7 @@ public:
 private:
     QString m_caption;
     int m_duration{};
+    bool m_isListened{};
 
     std::shared_ptr<File> m_file;
 };

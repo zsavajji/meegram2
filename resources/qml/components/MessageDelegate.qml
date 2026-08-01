@@ -602,10 +602,14 @@ Item {
 
                 // Same object drives every bubble, so starting one note is what stops
                 // whichever was already playing.
-                if (voice.playing && voice.source === file.localPath)
+                if (voice.playing && voice.source === file.localPath) {
                     voice.stop();
-                else
+                } else {
                     voice.play(file.localPath);
+                    // Listened state lives on the message content, not on the read
+                    // pointer - without this the note stays unplayed on other clients.
+                    messageModel.openMessageContent(model.id);
+                }
             }
 
             onPressAndHold: menuTarget.open(model.id, model.sender, model.content.caption, model.isOutgoing,
@@ -671,15 +675,30 @@ Item {
                             font.pixelSize: 23
                         }
 
-                        Label {
+                        Row {
                             width: parent.width
-                            // Duration comes off the message, not the file, so it reads
-                            // right before the note has finished downloading.
-                            text: utils.formatTime(model.content.duration)
-                            color: model.isOutgoing ? "white" : "#505050"
-                            opacity: model.isOutgoing ? 0.75 : 1.0
-                            font.pixelSize: 18
-                            font.weight: Font.Light
+                            spacing: 8
+
+                            Label {
+                                // Duration comes off the message, not the file, so it reads
+                                // right before the note has finished downloading.
+                                text: utils.formatTime(model.content.duration)
+                                color: model.isOutgoing ? "white" : "#505050"
+                                opacity: model.isOutgoing ? 0.75 : 1.0
+                                font.pixelSize: 18
+                                font.weight: Font.Light
+                            }
+
+                            Rectangle {
+                                // Unplayed marker. Incoming only - a note you sent is
+                                // listened by definition, and TDLib reports it as such.
+                                width: 12
+                                height: 12
+                                radius: 6
+                                anchors.verticalCenter: parent.verticalCenter
+                                color: "#0077A8"
+                                visible: !model.isOutgoing && !model.content.isListened
+                            }
                         }
                     }
                 }
