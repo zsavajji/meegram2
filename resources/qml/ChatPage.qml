@@ -352,8 +352,10 @@ Page {
                     // and onMovementEnded needs the user to actually drag.
                     listView.markVisibleAsRead()
 
-                    if (++ticks >= 5)
+                    if (++ticks >= 5) {
                         stop()
+                        listView.fillViewport()
+                    }
                 }
             }
 
@@ -427,6 +429,22 @@ Page {
             }
 
             onAtYBeginningChanged: fetchOlder()
+
+            // The other way a chat runs out of history to show: the slice that landed is
+            // shorter than the screen - TDLib answers getChatHistory with fewer messages
+            // than asked for while its own fetch is still in flight - so there is nothing
+            // to flick. atYBeginning and atYEnd are then both stuck true, which pins
+            // followLast true and blocks fetchOlder for good; the chat paged no further
+            // until it was closed and reopened, by which point the slice came back full.
+            //
+            // Re-armed only by fetchedPosition, i.e. by a page that actually brought rows,
+            // so a chat with no more history asks once and stops.
+            function fillViewport() {
+                if (loading || settleTimer.running || count === 0 || contentHeight > height)
+                    return
+
+                messageModel.fetchMoreBack()
+            }
         }
 
         Column {
@@ -823,6 +841,8 @@ Page {
 
         onFetchedPosition: {
             listView.positionViewAtIndex(numItems, ListView.Beginning);
+            // Keep pulling while the loaded slice still does not fill the screen.
+            listView.fillViewport();
         }
 
         // Not onCountChanged: that also fires when a page of older messages is
