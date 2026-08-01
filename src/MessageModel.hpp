@@ -70,6 +70,9 @@ public:
     // QStringList version, which is why the other side only saw a message go read
     // when it was replied to - a reply marks the chat read as a side effect.
     Q_INVOKABLE void viewMessagesUpTo(int index) noexcept;
+    // Marks one message's content as opened - what makes a voice note count as listened
+    // on the other clients. viewMessages only moves the read pointer, it does not do this.
+    Q_INVOKABLE void openMessageContent(const QString &messageId) noexcept;
     Q_INVOKABLE void deleteMessage(const QString &messageId, bool revoke = false) noexcept;
 
     Q_INVOKABLE void sendMessage(const QString &message, const QString &replyToMessageId = {}) noexcept;

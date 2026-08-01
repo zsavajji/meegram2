@@ -602,10 +602,14 @@ Item {
 
                 // Same object drives every bubble, so starting one note is what stops
                 // whichever was already playing.
-                if (voice.playing && voice.source === file.localPath)
+                if (voice.playing && voice.source === file.localPath) {
                     voice.stop();
-                else
+                } else {
                     voice.play(file.localPath);
+                    // Listened state lives on the message content, not on the read
+                    // pointer - without this the note stays unplayed on other clients.
+                    messageModel.openMessageContent(model.id);
+                }
             }
 
             onPressAndHold: menuTarget.open(model.id, model.sender, model.content.caption, model.isOutgoing,
