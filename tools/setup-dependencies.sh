@@ -417,13 +417,30 @@ build_opus() {
         -DBUILD_TESTING=OFF
     )
 
-    # No docs, no extra programs, and no float-only build: the Cortex-A8 has a VFP unit so
-    # the float encoder is the right one, but opus_demo and the test vectors are not.
+    # Fixed point on the device. The Cortex-A8's VFP unit is not pipelined and scalar
+    # float is slow on it - NEON is the fast path but the compiler will not reliably put
+    # opus's scalar float code there. Encoding has to keep up with the microphone in real
+    # time while the UI still draws, so the integer path is the safer default; it is what
+    # every other ARMv7 opus build uses. Override with OPUS_FIXED_POINT=OFF to A/B it.
+    #
+    # Left off for the simulator, where it would only cost quality for no reason.
+    local opus_fixed_point="${OPUS_FIXED_POINT:-}"
+
+    if [ -z "$opus_fixed_point" ]; then
+        if [[ "$ARGS" == "harmattan" ]]; then
+            opus_fixed_point=ON
+        else
+            opus_fixed_point=OFF
+        fi
+    fi
+
+    # opus_demo and the test vectors are not wanted; nothing here runs them.
     local opus_options=(
         "${common_options[@]}"
         -DOPUS_BUILD_PROGRAMS=OFF
         -DOPUS_BUILD_TESTING=OFF
         -DOPUS_BUILD_SHARED_LIBRARY=OFF
+        -DOPUS_FIXED_POINT="$opus_fixed_point"
     )
 
     local sysroot="$SDK_PATH/Madde/sysroots/harmattan_sysroot_10.2011.34-1_slim"

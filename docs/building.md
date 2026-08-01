@@ -230,6 +230,13 @@ are static and PIC for the same reasons as rlottie, and both ship a `CMakeLists.
 they go through the same path as libwebp rather than needing autotools cross-configuration.
 `OPUS_BUILD_PROGRAMS` and the test targets are off; nothing here runs `opus_demo`.
 
+opus is built **fixed-point** for the device (`OPUS_FIXED_POINT=ON`, the default when the
+target is `harmattan`). The Cortex-A8's VFP unit is not pipelined and scalar float is slow
+on it — NEON is the fast path, but the compiler will not reliably put opus's scalar float
+code there. Encoding has to keep up with the microphone in real time while the UI is still
+drawing, so the integer path is the safer default. The simulator build stays float, where
+fixed point would only cost quality. Override either with `OPUS_FIXED_POINT=OFF|ON`.
+
 The container muxing on top of them is hand-written in `src/OggOpus.cpp`, and
 `tools/opus_roundtrip.cpp` is its self-check — a known tone through the encoder and back
 out of the decoder. It deliberately links no Qt, so it also builds on a development
