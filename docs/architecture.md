@@ -229,9 +229,15 @@ disconnects.
 `folderModels`, `folderModel`, `selectedChat`, `chatInfo`, `messageModel`, `title`
 and `status`.
 
-Two instantiable QML types are registered (`main.cpp:59-60`) — `LottieAnimation`
-and `QrCode` — plus 33 uncreatable types so QML can hold typed pointers to
+Three instantiable QML types are registered — `LottieAnimation`, `QrCode` and
+`VoiceNote` — plus 33 uncreatable types so QML can hold typed pointers to
 `Message*`, `Chat*`, the `MessageContent` hierarchy and friends.
+
+`ChatInfoFormatter` (`chatInfo`) carries the profile page's fields as well as the
+header's: `username`, `bio` and `phoneNumber`, all empty strings when they do not apply.
+`bio` reads through `StorageManager::userBio` rather than holding its own copy — the
+request that fills it has to outlive the formatter, which is destroyed the moment
+another chat is opened.
 
 ### QML page flow
 
@@ -246,8 +252,25 @@ main.qml (PageStackWindow)     owns appManager.initialize() and the `initialized
     │   └── Loader → SignInPage / CodeEnterPage / PasswordPage / QrCodePage
     ├── ArchivedChatPage       pushed to depth 2
     ├── SettingsPage → LanguageSettingsPage
+    ├── PhotoViewPage          full-screen Flickable with pinch zoom. Pushed by
+    │                          appWindow.openPhoto(), so ChatPage and ProfilePage
+    │                          both reach it without owning it
     └── ChatPage → MessageDelegate → MessageBubble / ServiceMessageDelegate
+        ├── EmojiPicker        in-page panel, not a page — takes the keyboard's place
+        ├── ProfilePage        pushed fresh from the header, destroyed on the way back
+        ├── PhotoPickerPage    built once, then kept
+        └── FilePickerPage     built once, then kept
 ```
+
+The two **pickers** are the exception to "pushed fresh and destroyed on the way back".
+Each is created once into a `property QtObject` on `ChatPage` and pushed again on later
+attachments, so closing one is really a hide — reopening should land where the last
+browse ended rather than rewinding. `FilePickerPage` resets its folder on
+`PageStatus.Inactive`, i.e. after the pop animation, so that reset is not visible.
+
+Both check `component.status` before use, and say so in a banner if the import is
+missing. That matters for `PhotoPickerPage`: it imports `QtMobility.gallery`, and a
+component that fails to load would otherwise be a button that silently does nothing.
 
 Nothing is pushed at startup: the chat list *is* the root page, reached by swapping
 `MainPage`'s `Loader` rather than by stacking a second page on a splash screen. So
@@ -383,9 +406,11 @@ inherits that ordering guarantee for free, and any code that stashes the raw
 | `NotificationManager` | Harmattan banners over D-Bus; owns the tap-to-open service and object paths. In-process transport only — with `meegramd` it is not built |
 | `NotificationEndpoint` | Daemon transport only: `com.meegram` `/notification` `openChat`, called by `meegramd` when a banner is tapped |
 | `ChatPhotoProvider` | `image://chatPhoto/` — decodes avatars at the requested size, crops and masks them, with a cache |
-| `StickerProvider` | `image://sticker/` — decodes WebP stickers via libwebp, scaled during decode |
+| `StickerProvider` | `image://sticker/` — decodes any WebP by path via libwebp, scaled during decode. Named for stickers because they got there first; video and GIF stills use it too |
 | `LottieAnimation` | rlottie renderer; auth pages only, never in a list |
 | `QrCodeItem` | QR rendering for login-by-QR |
+| `VoiceNote` | Microphone and speaker for voice notes. One instance per chat page drives both directions, which is what keeps "only one note plays at a time" true with no bookkeeping |
+| `OggOpus` | Opus encode/decode and Ogg muxing. **Deliberately Qt-free**, so `tools/opus_roundtrip.cpp` builds on a host with no Qt 4 |
 | `ScopeTimer` | Opt-in profiling (`-DMEEGRAM_PROFILE=ON`) |
 
 ### One File object per file id
