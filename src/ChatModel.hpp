@@ -21,6 +21,10 @@ class ChatModel : public QAbstractListModel
 
     Q_PROPERTY(int count READ count NOTIFY countChanged)
     Q_PROPERTY(bool loading READ loading NOTIFY loadingChanged)
+    // Substring match on the chat title, empty for "show everything". Set from the
+    // search field in ChatListView; each list (main, archived, every folder) has its
+    // own model and so its own filter.
+    Q_PROPERTY(QString filter READ filter WRITE setFilter NOTIFY filterChanged)
 
 public:
     explicit ChatModel(std::unique_ptr<ChatList> list, std::shared_ptr<Locale> locale, std::shared_ptr<StorageManager> storage);
@@ -53,6 +57,9 @@ public:
     int count() const;
     bool loading() const;
 
+    QString filter() const;
+    void setFilter(const QString &filter);
+
     // The view's "I have reached the bottom" signal. QML1's ListView does not use
     // canFetchMore/fetchMore, so demand has to come from QML explicitly.
     Q_INVOKABLE void loadMore();
@@ -73,6 +80,7 @@ public:
 signals:
     void countChanged();
     void loadingChanged();
+    void filterChanged();
 
 public slots:
     void clear();
@@ -117,6 +125,10 @@ private:
     // incremental insert and the sort, so they cannot disagree about it.
     bool isInList(Chat *chat) const;
 
+    // Same three call sites as isInList: every chat the model holds matches the
+    // current filter, so nothing downstream has to know about searching.
+    bool matchesFilter(const std::shared_ptr<Chat> &chat) const;
+
     // Drops a row on request. Deliberately not inferred from chat positions: the only
     // signal TDLib gives for "left the list" is an order of 0, which non-pinned chats
     // also carry while loading, so acting on it emptied the list.
@@ -146,6 +158,8 @@ private:
     int m_emptyRetries{0};
 
     int m_count{};
+
+    QString m_filter;
 
     QTimer m_sortTimer;
 

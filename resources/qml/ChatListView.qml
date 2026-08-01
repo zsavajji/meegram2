@@ -26,6 +26,81 @@ Item {
         model: root.model
         snapMode: ListView.SnapToItem
 
+        // The search field sits above the first row rather than in a bar of its own:
+        // pull the list down to reach it, and it costs no screen space the rest of
+        // the time - which on a 854px screen already carrying a TopBar and a tab row
+        // is the whole argument.
+        header: Item {
+            id: searchHeader
+
+            width: listView.width
+            height: 72
+
+            TextField {
+                id: searchField
+
+                anchors { fill: parent; leftMargin: 12; rightMargin: 12; topMargin: 8; bottomMargin: 8 }
+                placeholderText: qsTr("Search")
+                platformStyle: TextFieldStyle { paddingRight: clearIcon.width + 16 }
+                inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
+
+                // Each keystroke re-scans the model, so coalesce a burst of them the
+                // way ChatModel's own sort timer does.
+                onTextChanged: filterTimer.restart()
+
+                Image {
+                    id: clearIcon
+
+                    anchors { right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
+                    source: "image://theme/icon-m-input-clear"
+                    visible: searchField.text.length > 0
+
+                    MouseArea {
+                        // The icon is smaller than a fingertip; the margins are the
+                        // touch target, not the artwork.
+                        anchors { fill: parent; margins: -12 }
+                        onClicked: {
+                            searchField.text = "";
+                            searchField.closeSoftwareInputPanel();
+                        }
+                    }
+                }
+            }
+
+            Timer {
+                id: filterTimer
+
+                interval: 300
+                onTriggered: {
+                    root.model.filter = searchField.text;
+
+                    // Setting the filter resets the model, which puts the view back at
+                    // the top - i.e. on the header. That is right while searching and
+                    // wrong once the field is empty again.
+                    if (searchField.text === "")
+                        listView.hideSearch();
+                }
+            }
+        }
+
+        // ListView.positionViewAtBeginning() includes the header, so it would show the
+        // search field. Putting row 0 at the top is what tucks it away.
+        function hideSearch() {
+            if (count > 0)
+                positionViewAtIndex(0, ListView.Beginning);
+        }
+
+        // The list is empty when it is built, so the header can only be tucked away
+        // once the first chats arrive.
+        property bool searchTucked: false
+
+        onCountChanged: {
+            if (!searchTucked && count > 0) {
+                searchTucked = true;
+                hideSearch();
+            }
+        }
+
         // The model shows everything it has, so reaching the bottom is the signal to
         // pull the next page from TDLib. QML1's ListView has no fetchMore of its own.
         onAtYEndChanged: {
@@ -106,6 +181,15 @@ Item {
         platformStyle: BusyIndicatorStyle { size: "large" }
     }
 
+    // Otherwise a search that matches nothing is a blank screen with a text box on it,
+    // which reads as broken rather than as empty.
+    Label {
+        anchors.centerIn: parent
+        color: "#505050"
+        text: qsTr("NoResult")
+        visible: model.filter !== "" && model.count === 0 && !model.loading
+    }
+
     ScrollDecorator {
         flickableItem: listView
     }
@@ -114,10 +198,6 @@ Item {
     // here are gone: ChatModel now seeds itself when its first batch of chats
     // arrives, and takes later chats incrementally. Driving populate() from QML as
     // well would reset the model a second time and throw away the scroll position.
-
-    function positionViewAtBeginning() {
-        listView.positionViewAtBeginning();
-    }
 
     Component.onCompleted: { model.refresh() }
 }
