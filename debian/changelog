@@ -1,3 +1,31 @@
+meegram (0.3.1) unstable; urgency=low
+
+  * Starting a conversation with somebody who is not in the chat list yet. A new-message
+    page searches your contacts by name or username and everybody else by their public
+    username, and opens a chat with whoever you pick. The search field over the chat list
+    only ever matched chats Telegram had already sent; this one asks the server.
+  * A contact you have never written to can now be opened. There was no chat to open —
+    Telegram creates one on demand — and asking for it by id simply answered "not found",
+    which also affected Saved Messages on a fresh install and notifications tapped before
+    the chat list had loaded.
+  * Finding which of the phone's contacts are on Telegram, from the new-message page.
+    It says what it does before it does it: the numbers are sent to Telegram and the
+    matches are added to your Telegram contacts on every device signed into the account.
+    The official clients do the same thing on first launch without asking.
+  * Making a group: a name, a list of contacts to tick, and the group opens once the
+    server has it. Ticks survive filtering the list, so you can search for each person in
+    turn. A basic group, as the official clients create; Telegram upgrades it to a
+    supergroup on its own when it outgrows one.
+  * Search results carry the person's photo. A profile photo belongs to the person rather
+    than to any one conversation, so it now lives on the user — a contact with no chat had
+    nowhere to keep one. Avatars nobody has ever fetched are downloaded on sight and fill
+    themselves in as they land.
+  * A chat with no messages in it no longer spins forever. The spinner was waiting on a
+    row count that never comes for an empty chat — one just created, or one that was
+    cleared — and it now gives way to "still no messages".
+
+ -- Andrea Faggin <blackbird5308@gmail.com>  Sun, 02 Aug 2026 16:00:00 +0100
+
 meegram (0.3.0) unstable; urgency=low
 
   * Voice notes. Tap the microphone to start, tap again to send; the attach button

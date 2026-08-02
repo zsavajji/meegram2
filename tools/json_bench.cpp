@@ -62,7 +62,7 @@ constexpr int ApiId = 142713;
 constexpr auto ApiHash = "9e9e687a70150c6436afe3a2b6bfd7d7";
 constexpr auto DeviceModel = "Nokia N9";
 constexpr auto SystemVersion = "MeeGo 1.2 Harmattan";
-constexpr auto AppVersion = "0.3.0";
+constexpr auto AppVersion = "0.3.1";
 
 double cpuSeconds()
 {

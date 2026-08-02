@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(MeeGram VERSION 0.3.0 LANGUAGES CXX)
+project(MeeGram VERSION 0.3.1 LANGUAGES CXX)
 
 # Without this an unset CMAKE_BUILD_TYPE means no -O flag at all, i.e. -O0.
 # This codebase leans on std::ranges views and templates, which -O0 punishes hard.
