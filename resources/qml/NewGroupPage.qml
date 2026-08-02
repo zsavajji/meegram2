@@ -27,7 +27,7 @@ Page {
             margins: 12
         }
 
-        placeholderText: "Group name"
+        placeholderText: qsTr("GroupName")
         maximumLength: 128
     }
 

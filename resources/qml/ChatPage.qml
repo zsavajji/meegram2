@@ -489,7 +489,12 @@ Page {
             width: parent.width
             height: busyIndicator.height
 
-            visible: messageModel.count === 0
+            // An empty list is not the same as a list still arriving. Testing count alone
+            // meant a chat with no messages in it - one just created, or one that was
+            // cleared - span forever, because the count it was waiting for never comes.
+            // MessageModel gives up after its own retries and clears loading, which is the
+            // moment this has to stop.
+            visible: messageModel.loading && messageModel.count === 0
 
             BusyIndicator  {
                 id: busyIndicator
@@ -500,6 +505,17 @@ Page {
                 running: visible
                 platformStyle: BusyIndicatorStyle { size: "large" }
             }
+        }
+
+        // The other half of the same condition: nothing to show, and nothing still coming.
+        Label {
+            anchors.centerIn: parent
+
+            color: "#505050"
+            font.pixelSize: 24
+            horizontalAlignment: Text.AlignHCenter
+            text: qsTr("NoMessages")
+            visible: !messageModel.loading && messageModel.count === 0
         }
 
         Column {
