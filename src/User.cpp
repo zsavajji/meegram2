@@ -17,6 +17,7 @@ User::User(td::td_api::object_ptr<td::td_api::user> userFullInfo, QObject *paren
         }
     }
 
+    setProfilePhoto(std::move(userFullInfo->profile_photo_));
     setStatus(std::move(userFullInfo->status_));
 }
 
@@ -63,6 +64,49 @@ QStringList User::activeUsernames() const
 QString User::phoneNumber() const
 {
     return m_phoneNumber;
+}
+
+File *User::photo() const noexcept
+{
+    return m_file.get();
+}
+
+File *User::bigPhoto() const noexcept
+{
+    return m_bigFile.get();
+}
+
+const std::shared_ptr<File> &User::photoFile() const noexcept
+{
+    return m_file;
+}
+
+void User::adoptPhotoFile(std::shared_ptr<File> file) noexcept
+{
+    m_file = std::move(file);
+}
+
+const std::shared_ptr<File> &User::bigPhotoFile() const noexcept
+{
+    return m_bigFile;
+}
+
+void User::adoptBigPhotoFile(std::shared_ptr<File> file) noexcept
+{
+    m_bigFile = std::move(file);
+}
+
+void User::setProfilePhoto(td::td_api::object_ptr<td::td_api::profilePhoto> photo) noexcept
+{
+    if (photo && photo->small_)
+    {
+        m_file = std::make_shared<File>(std::move(photo->small_));
+
+        if (photo->big_)
+            m_bigFile = std::make_shared<File>(std::move(photo->big_));
+
+        emit photoChanged();
+    }
 }
 
 void User::setStatus(td::td_api::object_ptr<td::td_api::UserStatus> status)

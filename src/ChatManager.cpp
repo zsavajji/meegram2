@@ -114,10 +114,7 @@ QString ChatInfoFormatter::status() const noexcept
 
 QString ChatInfoFormatter::username() const noexcept
 {
-    const auto usernames = m_user ? m_user->activeUsernames() : (m_supergroup ? m_supergroup->activeUsernames() : QStringList());
-
-    // The first is the primary one; the rest are aliases that resolve to the same chat.
-    return usernames.isEmpty() ? QString() : QLatin1Char('@') + usernames.first();
+    return Utils::getChatUsername(m_chat, m_storageManager);
 }
 
 QString ChatInfoFormatter::bio() const noexcept
@@ -380,6 +377,7 @@ ChatManager::ChatManager(std::shared_ptr<StorageManager> storageManager, std::sh
     , m_mainModel(std::make_unique<ChatModel>(std::make_unique<ChatList>(ChatList::Main), m_locale, m_storage))
     , m_archivedModel(std::make_unique<ChatModel>(std::make_unique<ChatList>(ChatList::Archive), m_locale, m_storage))
     , m_folderModel(std::make_unique<ChatFolderModel>())
+    , m_searchModel(std::make_unique<SearchModel>(m_storage))
 {
     updateFolderModels();
 
@@ -426,6 +424,11 @@ QObject *ChatManager::mainModel() const noexcept
 QObject *ChatManager::archivedModel() const noexcept
 {
     return m_archivedModel.get();
+}
+
+QObject *ChatManager::searchModel() const noexcept
+{
+    return m_searchModel.get();
 }
 
 QList<QObject *> ChatManager::folderModels() const noexcept
@@ -510,13 +513,22 @@ void ChatManager::fetchChat(qlonglong chatId) noexcept
 
     m_fetchingChatId = chatId;
 
-    m_client->send(td::td_api::make_object<td::td_api::getChat>(chatId), [this, chatId](auto &&response) {
+    // A positive chat id is a user id - TDLib numbers a private chat after the user it is
+    // with, and every other kind of chat negative. getChat only knows chats that already
+    // exist, and a contact you have never written to has none, so it answers "Chat not
+    // found" for exactly the case the contact search exists to serve. createPrivateChat
+    // creates it instead, and returns the existing one when there is one. force is false
+    // so the real title and photo come back rather than whatever is cached locally.
+    auto request = chatId > 0 ? td::td_api::object_ptr<td::td_api::Function>(td::td_api::make_object<td::td_api::createPrivateChat>(chatId, false))
+                              : td::td_api::object_ptr<td::td_api::Function>(td::td_api::make_object<td::td_api::getChat>(chatId));
+
+    m_client->send(std::move(request), [this, chatId](auto &&response) {
         const auto failed = response->get_id() == td::td_api::error::ID;
 
         if (failed)
         {
             const auto *error = static_cast<const td::td_api::error *>(response.get());
-            qWarning() << "getChat failed for" << chatId << error->code_ << QString::fromStdString(error->message_);
+            qWarning() << "fetching chat" << chatId << "failed:" << error->code_ << QString::fromStdString(error->message_);
         }
 
         // This runs on the TDLib worker thread. Hop to the main thread before touching

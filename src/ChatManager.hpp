@@ -3,6 +3,7 @@
 #include "ChatFolderModel.hpp"
 #include "ChatModel.hpp"
 #include "MessageModel.hpp"
+#include "SearchModel.hpp"
 
 #include <QObject>
 #include <QTimer>
@@ -101,6 +102,11 @@ class ChatManager : public QObject
 
     Q_PROPERTY(Chat *selectedChat READ selectedChat NOTIFY selectedChatChanged)
 
+    // Starting a conversation with somebody who is not in the chat list yet. One model for
+    // the whole session rather than one per page: the page is pushed and popped, and its
+    // results are worth nothing once it is gone.
+    Q_PROPERTY(QObject *searchModel READ searchModel CONSTANT)
+
     Q_PROPERTY(QObject *chatInfo READ chatInfoFormatter NOTIFY selectedChatChanged)
     Q_PROPERTY(QObject *messageModel READ messageModel NOTIFY selectedChatChanged)
 
@@ -114,6 +120,8 @@ public:
     QList<QObject *> folderModels() const noexcept;
 
     Chat *selectedChat() const noexcept;
+
+    QObject *searchModel() const noexcept;
 
     QObject *chatInfoFormatter() const noexcept;
     QObject *messageModel() const noexcept;
@@ -165,6 +173,7 @@ private:
     std::vector<std::unique_ptr<ChatModel>> m_folderModels;
 
     std::unique_ptr<ChatFolderModel> m_folderModel;
+    std::unique_ptr<SearchModel> m_searchModel;
 
     std::shared_ptr<Chat> m_selectedChat;
 

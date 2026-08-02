@@ -42,6 +42,8 @@ constexpr auto SystemVersion = "MeeGo 1.2 Harmattan";
 constexpr std::array<int, 3> ServiceNotificationsUserIds = {42777, 333000, 777000};
 
 constexpr auto ChatSliceLimit = 25;
+constexpr auto ContactSearchLimit = 20;
+constexpr auto MaxImportedContacts = 5000u;
 constexpr auto MessageSliceLimit = 20;
 
 constexpr auto MutedValueMax = 2147483647;  // int32.max = 2^32 - 1

@@ -8,6 +8,7 @@
 #include "MessageService.hpp"
 #include "ScopeTimer.hpp"
 #include "StorageManager.hpp"
+#include "Supergroup.hpp"
 #include "User.hpp"
 
 #include <QApplication>
@@ -892,6 +893,36 @@ QString Utils::getChatTitle(std::shared_ptr<Chat> chat, std::shared_ptr<StorageM
     const auto title = chat->title().trimmed();
 
     return !title.isEmpty() ? title : QObject::tr("HiddenName");
+}
+
+QString Utils::getUserUsername(const std::shared_ptr<User> &user) noexcept
+{
+    const auto usernames = user ? user->activeUsernames() : QStringList();
+
+    // The first is the primary one; the rest are aliases that resolve to the same chat.
+    return usernames.isEmpty() ? QString() : QLatin1Char('@') + usernames.first();
+}
+
+QString Utils::getChatUsername(const std::shared_ptr<Chat> &chat, const std::shared_ptr<StorageManager> &storage) noexcept
+{
+    if (!chat)
+        return {};
+
+    switch (chat->type())
+    {
+        case Chat::Private:
+        case Chat::Secret:
+            return getUserUsername(storage->user(chat->typeId()));
+        case Chat::Supergroup:
+        case Chat::Channel: {
+            const auto supergroup = storage->supergroup(chat->typeId());
+            const auto usernames = supergroup ? supergroup->activeUsernames() : QStringList();
+
+            return usernames.isEmpty() ? QString() : QLatin1Char('@') + usernames.first();
+        }
+        default:
+            return {};
+    }
 }
 
 QString Utils::getSenderName(const Message *message, std::shared_ptr<StorageManager> storage) noexcept

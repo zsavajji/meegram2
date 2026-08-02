@@ -138,6 +138,7 @@ set(SRC_FILES
     src/OggOpus.cpp
     src/PluralRules.cpp
     src/QrCodeItem.cpp
+    src/SearchModel.cpp
     src/Settings.cpp
     src/StickerProvider.cpp
     src/StorageManager.cpp
@@ -175,6 +176,7 @@ set(HEADER_FILES
     src/PluralRules.hpp
     src/QrCodeItem.hpp
     src/ScopeTimer.hpp
+    src/SearchModel.hpp
     src/StickerProvider.hpp
     src/Settings.hpp
     src/StorageManager.hpp
@@ -241,6 +243,25 @@ target_link_libraries(meegram PRIVATE
     ZLIB::ZLIB
     Threads::Threads
 )
+
+# The phone's address book, which "find contacts on Telegram" reads. QtMobility 1.2 is
+# what Harmattan ships; a desktop Qt 4 generally has no QtContacts, so this is optional
+# and src/ChatManager.cpp compiles the feature out when it is missing.
+#
+# find_path/find_library rather than pkg_check_modules, for the sysroot reason spelled out
+# at the dbus block further down: QtContacts.pc reports include paths relative to the
+# sysroot and pkg-config would resolve them against the host's /usr/include.
+find_path(QTCONTACTS_INCLUDE_DIR QContactManager PATH_SUFFIXES qt4/QtContacts)
+find_path(QTMOBILITY_INCLUDE_DIR qmobilityglobal.h PATH_SUFFIXES qt4/QtMobility)
+find_library(QTCONTACTS_LIBRARY QtContacts)
+
+if (QTCONTACTS_INCLUDE_DIR AND QTMOBILITY_INCLUDE_DIR AND QTCONTACTS_LIBRARY)
+    target_compile_definitions(meegram PRIVATE MEEGRAM_PHONE_CONTACTS)
+    target_include_directories(meegram SYSTEM PRIVATE ${QTCONTACTS_INCLUDE_DIR} ${QTMOBILITY_INCLUDE_DIR})
+    target_link_libraries(meegram PRIVATE ${QTCONTACTS_LIBRARY})
+else()
+    message(STATUS "QtContacts not found - the phone address book search will find nothing")
+endif()
 
 # The codec's self-check: a known tone through the encoder and back out of the decoder.
 # Not wired into the app - build and run it after touching src/OggOpus.cpp, which is the

@@ -75,6 +75,19 @@ void StorageManager::registerChatPhoto(const std::shared_ptr<Chat> &chat) noexce
     }
 }
 
+void StorageManager::registerUserPhoto(const std::shared_ptr<User> &user) noexcept
+{
+    if (const auto &file = user->photoFile())
+    {
+        user->adoptPhotoFile(registerFile(file));
+    }
+
+    if (const auto &file = user->bigPhotoFile())
+    {
+        user->adoptBigPhotoFile(registerFile(file));
+    }
+}
+
 std::shared_ptr<File> StorageManager::file(int fileId) const noexcept
 {
     if (auto it = m_files.find(fileId); it != m_files.end())
@@ -307,6 +320,7 @@ void StorageManager::handleResult(td::td_api::Object *object)
             auto update = static_cast<td::td_api::updateUser *>(object);
             auto user = std::make_shared<User>(std::move(update->user_));
             auto userId = user->id();
+            registerUserPhoto(user);
             m_users.insert_or_assign(userId, std::move(user));
             emit userUpdated(userId);
             break;

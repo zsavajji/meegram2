@@ -97,6 +97,13 @@ public:
 
     static QString getChatTitle(std::shared_ptr<Chat> chat, std::shared_ptr<StorageManager> storage, bool showSavedMessages = true) noexcept;
 
+    // The public "@name" a chat can be reached by, empty for the ones that have none
+    // (basic groups, private groups, users who never set one). Lives on the chat rather
+    // than beside it because the username is the supergroup's or the user's, and the chat
+    // is the only thing that knows which of those it is.
+    static QString getChatUsername(const std::shared_ptr<Chat> &chat, const std::shared_ptr<StorageManager> &storage) noexcept;
+    static QString getUserUsername(const std::shared_ptr<User> &user) noexcept;
+
     static QString getSenderName(const Message *message, std::shared_ptr<StorageManager> storage) noexcept;
     static QString getSenderAuthor(Message *message, std::shared_ptr<StorageManager> storage, bool openUser) noexcept;
 

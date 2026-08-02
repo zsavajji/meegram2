@@ -96,6 +96,7 @@ private slots:
 
 private:
     void registerChatPhoto(const std::shared_ptr<Chat> &chat) noexcept;
+    void registerUserPhoto(const std::shared_ptr<User> &user) noexcept;
 
     QVariantMap m_options;
 

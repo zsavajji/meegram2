@@ -266,6 +266,10 @@ Page {
         // replaces, it shows the key rather than nothing while it waits.
         MenuLayout {
             MenuItem {
+                text: appWindow.tr("NewMessageTitle")
+                onClicked: pageStack.push(Qt.createComponent("NewChatPage.qml"))
+            }
+            MenuItem {
                 text: appWindow.tr("SavedMessages")
                 onClicked: appWindow.openChat(storageManager.myId())
             }
