@@ -31,6 +31,11 @@ class SearchModel : public QAbstractListModel
     // asked yet" are the same empty model, and only one of them is worth a message.
     Q_PROPERTY(bool searched READ searched NOTIFY searchedChanged)
 
+    // How many rows are ticked, for the member picker. Kept here rather than in QML because
+    // filtering the list rebuilds every delegate, and a tick that lives in a delegate is
+    // lost the moment it scrolls or the query changes.
+    Q_PROPERTY(int selectedCount READ selectedCount NOTIFY selectedCountChanged)
+
 public:
     explicit SearchModel(std::shared_ptr<StorageManager> storage);
     ~SearchModel() override;
@@ -40,6 +45,7 @@ public:
         TitleRole,
         UsernameRole,
         PhotoRole,
+        SelectedRole,
     };
 
     int rowCount(const QModelIndex &parent = QModelIndex()) const override;
@@ -47,12 +53,25 @@ public:
     QHash<int, QByteArray> roleNames() const;
 
     int count() const noexcept;
+    int selectedCount() const noexcept;
     bool loading() const noexcept;
     bool searched() const noexcept;
 
     // Contacts by name or username, and everybody else by public username. An empty query
     // just clears the model.
     Q_INVOKABLE void search(const QString &query);
+
+    // Contacts only, and an empty query lists them all - the member picker, where a channel
+    // found by username would be nonsense. Deliberately a bigger slice than search() takes:
+    // that one shows a handful of contacts beside the public hits, this one is the list you
+    // are choosing from.
+    Q_INVOKABLE void searchContacts(const QString &query);
+
+    // The picker's ticks. Held by id rather than by row, so filtering the list keeps them:
+    // pick somebody, search for the next person, and the first is still chosen.
+    Q_INVOKABLE void toggleSelection(const QString &id);
+    Q_INVOKABLE void clearSelection();
+    Q_INVOKABLE QStringList selectedIds() const;
 
     // Sends the phone's address book to Telegram and fills the model with the people in it
     // who have an account. Not a lookup: the numbers are uploaded and the matches are added
@@ -64,6 +83,7 @@ signals:
     void countChanged();
     void loadingChanged();
     void searchedChanged();
+    void selectedCountChanged();
 
 private slots:
     // Invoked (queued) from the TDLib worker thread - see the note in sendSearch().
@@ -85,6 +105,10 @@ private:
     int beginRequest(int pendingResponses);
 
     void setLoading(bool loading);
+
+    // The contacts half of both entry points. Its answer lands in handleResults like any
+    // other, so the two differ only in what else they ask for.
+    void sendContactSearch(const QString &query, int limit, int requestId);
 
     // Asks TDLib to fetch an avatar that is not on disk yet. The delegate binds to the
     // File, which notifies on its own when the download lands, so nothing here has to
@@ -108,6 +132,10 @@ private:
     int m_pending{0};
 
     QSet<qlonglong> m_seenIds;
+
+    // Survives a new query on purpose - see toggleSelection. Emptied only by
+    // clearSelection(), which the picker calls on its way in.
+    QSet<qlonglong> m_selected;
 
     // Liveness token for the search callbacks, which Client invokes on the TDLib worker
     // thread. ChatManager owns this model and is destroyed on sign-out, so an answer can

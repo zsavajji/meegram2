@@ -132,6 +132,11 @@ public:
     Q_INVOKABLE bool openChat(const QString &chatId) noexcept;
     Q_INVOKABLE void closeChat(const QString &chatId) noexcept;
 
+    // Creates a group with the given members and reports it on chatAvailable, which is what
+    // opens it - the same path a chat fetched by id takes. A basic group, as the official
+    // clients make: Telegram upgrades it to a supergroup on its own when it outgrows one.
+    Q_INVOKABLE void createGroup(const QString &title, const QStringList &userIds) noexcept;
+
     // Installed on the application, to close and reopen the selected chat as the window
     // loses and regains focus. Public because that is where QObject declares it.
     bool eventFilter(QObject *object, QEvent *event) noexcept override;

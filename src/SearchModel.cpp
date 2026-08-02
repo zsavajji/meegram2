@@ -11,6 +11,9 @@
 #include <QDebug>
 #include <QStringList>
 
+#include <algorithm>
+#include <ranges>
+
 // QtMobility 1.2, which is what Harmattan ships. Optional because a desktop Qt 4 usually
 // has no QtContacts at all - see the find_path block in CMakeLists.txt - and the rest of
 // the app has no business failing to build over the address book.
@@ -76,6 +79,35 @@ std::vector<td::td_api::object_ptr<td::td_api::importedContact>> phoneBookContac
     return contacts;
 }
 
+// Turns one TDLib answer into ids for handleResults. Runs on the TDLib worker thread, so it
+// hops to the main thread before anything touches the model - the same discipline
+// ChatModel's loadChats callback follows, including that updateNewChat and updateUser for
+// these have already been processed by the time the queued call is delivered.
+template <typename Response, typename IdsOf>
+void postIds(SearchModel *model, const std::shared_ptr<std::atomic_bool> &alive, int requestId, const char *what, Response &&response, IdsOf idsOf)
+{
+    // The model may already be gone - ChatManager is destroyed on sign-out.
+    if (!alive->load())
+        return;
+
+    QVariantList ids;
+
+    if (response->get_id() == td::td_api::error::ID)
+    {
+        const auto *error = static_cast<const td::td_api::error *>(response.get());
+        qWarning() << what << "failed:" << error->code_ << QString::fromStdString(error->message_);
+    }
+    else
+    {
+        for (auto id : idsOf(response))
+        {
+            ids.append(QString::number(id));
+        }
+    }
+
+    QMetaObject::invokeMethod(model, "handleResults", Qt::QueuedConnection, Q_ARG(int, requestId), Q_ARG(QVariantList, ids));
+}
+
 }  // namespace
 
 SearchModel::SearchModel(std::shared_ptr<StorageManager> storage)
@@ -118,6 +150,8 @@ QVariant SearchModel::data(const QModelIndex &index, int role) const
             // Returned fresh per call rather than held anywhere: the File belongs to the
             // Chat or the User, both of which this row keeps alive.
             return QVariant::fromValue(row.chat ? row.chat->photo() : row.user->photo());
+        case SelectedRole:
+            return m_selected.contains(row.id);
         default:
             return {};
     }
@@ -131,6 +165,7 @@ QHash<int, QByteArray> SearchModel::roleNames() const
     roles[TitleRole] = "title";
     roles[UsernameRole] = "username";
     roles[PhotoRole] = "photo";
+    roles[SelectedRole] = "selected";
 
     return roles;
 }
@@ -138,6 +173,11 @@ QHash<int, QByteArray> SearchModel::roleNames() const
 int SearchModel::count() const noexcept
 {
     return static_cast<int>(m_rows.size());
+}
+
+int SearchModel::selectedCount() const noexcept
+{
+    return m_selected.size();
 }
 
 bool SearchModel::loading() const noexcept
@@ -202,46 +242,99 @@ void SearchModel::search(const QString &query)
 
     setLoading(true);
 
-    // Answers arrive on the TDLib worker thread. Hopping to the main thread before
-    // touching the model is the same discipline ChatModel's loadChats callback follows,
-    // including that updateNewChat and updateUser for these have already been processed by
-    // the time the queued call is delivered.
-    const auto collect = [this, requestId, alive = m_alive](const char *what, auto &&response, const auto &idsOf) {
-        if (!alive->load())
-            return;
-
-        QVariantList ids;
-
-        if (response->get_id() == td::td_api::error::ID)
-        {
-            const auto *error = static_cast<const td::td_api::error *>(response.get());
-            qWarning() << what << "failed:" << error->code_ << QString::fromStdString(error->message_);
-        }
-        else
-        {
-            for (auto id : idsOf(response))
-            {
-                ids.append(QString::number(id));
-            }
-        }
-
-        QMetaObject::invokeMethod(this, "handleResults", Qt::QueuedConnection, Q_ARG(int, requestId), Q_ARG(QVariantList, ids));
-    };
-
     // People you know, matched on first name, last name or username. This is the half that
     // answers offline, and the half that finds somebody you have saved but never written
     // to - a user id is also the id of the private chat with them, so both halves of the
     // search speak in chat ids from here on.
-    client->send(td::td_api::make_object<td::td_api::searchContacts>(trimmed.toStdString(), ContactSearchLimit), [collect](auto &&response) {
-        collect("searchContacts", response,
-                [](const auto &r) { return r->get_id() == td::td_api::users::ID ? static_cast<const td::td_api::users *>(r.get())->user_ids_ : std::vector<std::int64_t>(); });
-    });
+    sendContactSearch(trimmed, ContactSearchLimit, requestId);
 
     // Everyone else: public usernames, server side.
-    client->send(td::td_api::make_object<td::td_api::searchPublicChats>(trimmed.toStdString(), nullptr), [collect](auto &&response) {
-        collect("searchPublicChats", response,
-                [](const auto &r) { return r->get_id() == td::td_api::chats::ID ? static_cast<const td::td_api::chats *>(r.get())->chat_ids_ : std::vector<std::int64_t>(); });
-    });
+    client->send(td::td_api::make_object<td::td_api::searchPublicChats>(trimmed.toStdString(), nullptr),
+                 [this, requestId, alive = m_alive](auto &&response) {
+                     postIds(this, alive, requestId, "searchPublicChats", response, [](const auto &r) {
+                         return r->get_id() == td::td_api::chats::ID ? static_cast<const td::td_api::chats *>(r.get())->chat_ids_ : std::vector<std::int64_t>();
+                     });
+                 });
+}
+
+void SearchModel::searchContacts(const QString &query)
+{
+    // No "@" stripping and no public half: an empty query here means "list my contacts",
+    // which is what the member picker opens with.
+    const auto requestId = beginRequest(1);
+
+    if (!m_storage->client())
+    {
+        m_pending = 0;
+        setLoading(false);
+        return;
+    }
+
+    setLoading(true);
+
+    sendContactSearch(query.trimmed(), ContactListLimit, requestId);
+}
+
+void SearchModel::sendContactSearch(const QString &query, int limit, int requestId)
+{
+    auto client = m_storage->client();
+
+    if (!client)
+        return;
+
+    client->send(td::td_api::make_object<td::td_api::searchContacts>(query.toStdString(), limit),
+                 [this, requestId, alive = m_alive](auto &&response) {
+                     postIds(this, alive, requestId, "searchContacts", response, [](const auto &r) {
+                         return r->get_id() == td::td_api::users::ID ? static_cast<const td::td_api::users *>(r.get())->user_ids_ : std::vector<std::int64_t>();
+                     });
+                 });
+}
+
+void SearchModel::toggleSelection(const QString &id)
+{
+    const auto chatId = toId(id);
+
+    if (!m_selected.remove(chatId))
+        m_selected.insert(chatId);
+
+    // The row may not be on screen - a tick survives the list being re-filtered - so this
+    // finds it rather than assuming it is there.
+    const auto it = std::ranges::find_if(m_rows, [chatId](const auto &row) { return row.id == chatId; });
+
+    if (it != m_rows.end())
+    {
+        const auto row = static_cast<int>(std::distance(m_rows.begin(), it));
+        emit dataChanged(index(row), index(row));
+    }
+
+    emit selectedCountChanged();
+}
+
+void SearchModel::clearSelection()
+{
+    if (m_selected.isEmpty())
+        return;
+
+    m_selected.clear();
+
+    if (!m_rows.empty())
+        emit dataChanged(index(0), index(static_cast<int>(m_rows.size()) - 1));
+
+    emit selectedCountChanged();
+}
+
+QStringList SearchModel::selectedIds() const
+{
+    QStringList ids;
+    ids.reserve(m_selected.size());
+
+    // Decimal strings, like every id crossing into QML - see Common.hpp.
+    for (const auto id : m_selected)
+    {
+        ids.append(QString::number(id));
+    }
+
+    return ids;
 }
 
 void SearchModel::importPhoneContacts()
@@ -266,30 +359,19 @@ void SearchModel::importPhoneContacts()
     setLoading(true);
 
     client->send(td::td_api::make_object<td::td_api::importContacts>(std::move(contacts)), [this, requestId, alive = m_alive](auto &&response) {
-        if (!alive->load())
-            return;
+        postIds(this, alive, requestId, "importContacts", response, [](const auto &r) {
+            if (r->get_id() != td::td_api::importedContacts::ID)
+                return std::vector<std::int64_t>();
 
-        QVariantList userIds;
+            const auto &userIds = static_cast<const td::td_api::importedContacts *>(r.get())->user_ids_;
 
-        if (response->get_id() == td::td_api::importedContacts::ID)
-        {
-            const auto *imported = static_cast<const td::td_api::importedContacts *>(response.get());
+            // Zero is TDLib's "this number has no Telegram account", which is most of an
+            // address book.
+            std::vector<std::int64_t> matched;
+            std::ranges::copy_if(userIds, std::back_inserter(matched), [](auto userId) { return userId != 0; });
 
-            for (auto userId : imported->user_ids_)
-            {
-                // Zero is TDLib's "this number has no Telegram account", which is most of
-                // an address book.
-                if (userId != 0)
-                    userIds.append(QString::number(userId));
-            }
-        }
-        else if (response->get_id() == td::td_api::error::ID)
-        {
-            const auto *error = static_cast<const td::td_api::error *>(response.get());
-            qWarning() << "importContacts failed:" << error->code_ << QString::fromStdString(error->message_);
-        }
-
-        QMetaObject::invokeMethod(this, "handleResults", Qt::QueuedConnection, Q_ARG(int, requestId), Q_ARG(QVariantList, userIds));
+            return matched;
+        });
     });
 }
 

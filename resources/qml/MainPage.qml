@@ -270,6 +270,10 @@ Page {
                 onClicked: pageStack.push(Qt.createComponent("NewChatPage.qml"))
             }
             MenuItem {
+                text: appWindow.tr("NewGroup")
+                onClicked: pageStack.push(Qt.createComponent("NewGroupPage.qml"))
+            }
+            MenuItem {
                 text: appWindow.tr("SavedMessages")
                 onClicked: appWindow.openChat(storageManager.myId())
             }

@@ -541,6 +541,55 @@ void ChatManager::fetchChat(qlonglong chatId) noexcept
     });
 }
 
+void ChatManager::createGroup(const QString &title, const QStringList &userIds) noexcept
+{
+    std::vector<std::int64_t> memberIds;
+    memberIds.reserve(userIds.size());
+
+    for (const auto &rawUserId : userIds)
+    {
+        memberIds.push_back(toId(rawUserId));
+    }
+
+    // TDLib refuses an empty member list, and a group of one is not a group. The page keeps
+    // its button disabled until somebody is picked; this is the backstop.
+    if (memberIds.empty())
+    {
+        emit chatAvailable(QString::number(0), false);
+        return;
+    }
+
+    // 0: no auto-delete timer, which is what the official clients create a group with.
+    m_client->send(td::td_api::make_object<td::td_api::createNewBasicGroupChat>(std::move(memberIds), title.trimmed().toStdString(), 0),
+                   [this](auto &&response) {
+                       qlonglong chatId = 0;
+
+                       if (response->get_id() == td::td_api::createdBasicGroupChat::ID)
+                       {
+                           const auto *created = static_cast<const td::td_api::createdBasicGroupChat *>(response.get());
+                           chatId = created->chat_id_;
+
+                           // The group exists either way - somebody whose privacy settings
+                           // refuse invites is left out of it, not a reason to fail.
+                           if (created->failed_to_add_members_ && !created->failed_to_add_members_->failed_to_add_members_.empty())
+                           {
+                               qWarning() << "createNewBasicGroupChat could not add"
+                                          << static_cast<int>(created->failed_to_add_members_->failed_to_add_members_.size()) << "of the members";
+                           }
+                       }
+                       else if (response->get_id() == td::td_api::error::ID)
+                       {
+                           const auto *error = static_cast<const td::td_api::error *>(response.get());
+                           qWarning() << "createNewBasicGroupChat failed:" << error->code_ << QString::fromStdString(error->message_);
+                       }
+
+                       // Worker thread; hop before emitting. handleChatFetched is the same
+                       // "this chat is ready to open" report a fetch by id makes, so main.qml
+                       // needs nothing new to push the new group's page.
+                       QMetaObject::invokeMethod(this, "handleChatFetched", Qt::QueuedConnection, Q_ARG(qlonglong, chatId), Q_ARG(bool, chatId != 0));
+                   });
+}
+
 void ChatManager::handleChatFetched(qlonglong chatId, bool ok) noexcept
 {
     if (!ok)

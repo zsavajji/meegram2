@@ -21,6 +21,7 @@
         <file>qml/LanguageSettingsPage.qml</file>
         <file>qml/MainPage.qml</file>
         <file>qml/NewChatPage.qml</file>
+        <file>qml/NewGroupPage.qml</file>
         <file>qml/main.qml</file>
         <file>qml/PasswordPage.qml</file>
         <file>qml/PhotoPickerPage.qml</file>

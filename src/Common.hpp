@@ -43,6 +43,9 @@ constexpr std::array<int, 3> ServiceNotificationsUserIds = {42777, 333000, 77700
 
 constexpr auto ChatSliceLimit = 25;
 constexpr auto ContactSearchLimit = 20;
+
+// The member picker lists contacts rather than showing a handful beside public hits.
+constexpr auto ContactListLimit = 200;
 constexpr auto MaxImportedContacts = 5000u;
 constexpr auto MessageSliceLimit = 20;
 
