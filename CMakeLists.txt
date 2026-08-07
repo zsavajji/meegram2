@@ -225,6 +225,17 @@ target_compile_definitions(meegram PRIVATE $<$<BOOL:${MEEGRAM_PROFILE}>:MEEGRAM_
 option(MEEGRAM_GL_VIEWPORT "Use a QGLWidget viewport for QDeclarativeView" ON)
 target_compile_definitions(meegram PRIVATE $<$<BOOL:${MEEGRAM_GL_VIEWPORT}>:MEEGRAM_GL_VIEWPORT>)
 
+# Point stderr at ~/.meegram/<binary>.log, rotated at 256 KiB with one .1 kept
+# (src/Log.hpp). One switch for both processes, because neither can rely on the stderr it
+# inherits: the app is launched through invoker, which discards it, and meegramd is D-Bus
+# activated, which hands it dbus-daemon's. A diagnostic nobody can read is not one.
+#
+# OFF leaves stderr exactly as it was handed over - for a profiling run watching PROF
+# tables over SSH, a supervisor already capturing output, or socat driving the relay by
+# hand. The meegramd half of this is applied where that target is defined.
+option(MEEGRAM_FILE_LOG "Write stderr to a rotated file instead of inheriting it" ON)
+target_compile_definitions(meegram PRIVATE $<$<BOOL:${MEEGRAM_FILE_LOG}>:MEEGRAM_FILE_LOG>)
+
 target_link_libraries(meegram PRIVATE
     Lib::QRCode
     Td::TdStatic
@@ -349,6 +360,11 @@ if (MEEGRAM_JSON_TRANSPORT)
     add_executable(meegramd src/daemon/main.cpp src/daemon/Notifier.cpp)
     target_link_libraries(meegramd PRIVATE Td::TdJsonStatic Threads::Threads ${DBUS_LIBRARY})
     target_compile_options(meegramd PRIVATE -Wall -Wextra -Wno-psabi)
+
+    # src/Log.hpp, shared with the app. The only header meegramd takes from outside its own
+    # directory, and it links no Qt to get it. See MEEGRAM_FILE_LOG above for the switch.
+    target_include_directories(meegramd PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_definitions(meegramd PRIVATE $<$<BOOL:${MEEGRAM_FILE_LOG}>:MEEGRAM_FILE_LOG>)
 
     # SYSTEM: dbus-protocol.h has pre-C++11 string-literal concatenation that warns under
     # -Wall, and it is not ours to fix. The tdutils headers are the notifier's JSON

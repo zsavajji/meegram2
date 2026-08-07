@@ -9,6 +9,8 @@
 #include <QPixmapCache>
 #include <QTextCodec>
 
+#include <atomic>
+
 #ifdef MEEGRAM_GL_VIEWPORT
 #include <QGLWidget>
 #endif
@@ -20,6 +22,7 @@
 
 #include "AppManager.hpp"
 #include "Authorization.hpp"
+#include "Log.hpp"
 #include "Chat.hpp"
 #include "ChatManager.hpp"
 #include "ChatPhotoProvider.hpp"
@@ -41,6 +44,31 @@
 #include "Utils.hpp"
 
 namespace {
+
+// Qt's default handler is this same fprintf, so installing one changes nothing about where
+// the output goes - openLog has already pointed stderr at the file, which is what captures
+// qWarning, TDLib and the GL driver alike. What it buys is somewhere to check the file's
+// size that costs no timer: the only thing that grows the log is a message passing through
+// here, and an idle phone must not be woken to look at a file nothing has written to.
+void logMessage(QtMsgType type, const char *message)
+{
+    std::fprintf(stderr, "%s\n", message);
+
+    // Every 256th line rather than every one: a binding warning firing per frame would
+    // otherwise cost an fstat per frame. Atomic because qWarning is called from the TDLib
+    // reader thread as well as this one.
+    static std::atomic<int> sinceCheck{0};
+
+    if (sinceCheck.fetch_add(1, std::memory_order_relaxed) >= 256)
+    {
+        sinceCheck = 0;
+        rotateLogIfLarge();
+    }
+
+    // What the default handler does, and the reason qFatal is fatal.
+    if (type == QtFatalMsg)
+        std::abort();
+}
 
 #ifdef MEEGRAM_PROFILE
 // Frame counter. drawForeground runs once per QGraphicsView paint whatever the viewport
@@ -156,6 +184,11 @@ private:
 
 Q_DECL_EXPORT int main(int argc, char *argv[])
 {
+    // Before QApplication, so whatever Qt reports while it is being built is already going
+    // to the file rather than to the stderr invoker discards.
+    openLog("meegram.log");
+    qInstallMsgHandler(logMessage);
+
     QApplication app(argc, argv);
 
     // See the note in ScopeTimer.hpp. These four straddle the Qt / QML / TDLib

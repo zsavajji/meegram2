@@ -270,18 +270,31 @@ zeroed elements, and message ids run into the billions. Wanted `{messageId}`.
 
 ### Nothing appears in the log at all
 
-`qWarning` writes to **stderr**, and the `.desktop` launches through `invoker`, which
-discards it — so `grep` over `/var/log/syslog` finds nothing no matter how much the app
-is logging. Run the binary directly instead of tapping the icon:
+**Fixed at the source.** Both binaries now point stderr at a file of their own before
+anything else runs (`src/Log.hpp`, `-DMEEGRAM_FILE_LOG=OFF` to opt out):
 
 ```sh
-ssh user@<n9-ip>
-export DISPLAY=:0
-/opt/meegram/bin/meegram 2>&1 | tee /home/user/meegram.log
+tail -f ~/.meegram/meegram.log       # the app, however it was launched
+tail -f ~/.meegram/meegramd.log      # the daemon, including the activated one
 ```
 
-An empty log then means the code path genuinely did not run, which is information. An
-empty syslog means nothing at all.
+Each rotates at 256 KiB and keeps one `.1`, so the ceiling is 512 KiB per process.
+
+The reason it needed fixing: `qWarning` writes to stderr, the `.desktop` and the D-Bus
+service file both launch the app through `invoker`, which discards it, and `meegramd` is
+activated by dbus-daemon and inherits *its* stderr — which Harmattan also discards. On
+the two launches that matter most, nothing was reaching any log at all, and `grep` over
+`/var/log/syslog` found nothing no matter how much either process was saying. Running the
+binary by hand over SSH was the only way to read either, which meant the failures unique
+to being launched — a tapped notification, an activated daemon — were the ones that could
+not be observed.
+
+An empty log now means the code path genuinely did not run, which is information.
+
+One thing to know when reading them: the two halves of a failed connection are logged on
+opposite sides. `meegramd: rejecting <path>` is the daemon refusing a peer; `Client:
+activated com.meegram.Daemon but no socket on <path>` is the app never having found the
+socket. Only one of the two files will have anything to say.
 
 ### `debian/` changes have no effect on the package
 

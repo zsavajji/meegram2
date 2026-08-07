@@ -229,6 +229,51 @@ void Client::send(td::td_api::object_ptr<td::td_api::Function> request, std::fun
     }
 }
 
+bool Client::reconnect()
+{
+    // The destructor's sequence, plus an open at the end - and the order is the whole
+    // function. The reader is parked in read() on m_socket and a stop_token cannot
+    // interrupt that, so the socket has to be shut down before the join; and the old
+    // thread has to be joined before m_socket is reassigned, or it wakes up reading the
+    // connection that replaced it.
+    if (m_socket >= 0)
+        ::shutdown(m_socket, SHUT_RDWR);
+
+    m_worker.request_stop();
+
+    if (m_worker.joinable())
+        m_worker.join();
+
+    if (m_socket >= 0)
+    {
+        ::close(m_socket);
+        m_socket = -1;
+    }
+
+    // Whatever was in flight died with the connection. Request ids never repeat within a
+    // process, so a stale one cannot match a handler registered after this - what the
+    // clear is for is the closures themselves, which would otherwise hold what they
+    // captured for the life of the app waiting for an answer that was lost with the
+    // socket.
+    {
+        std::unique_lock lock(m_handlerMutex);
+
+        m_handlers.clear();
+    }
+
+    // ponytail: blocks the UI thread for up to three seconds when the daemon has to be
+    // activated, the same wait the constructor already takes at startup. A thread and a
+    // signal if that ever feels broken under a finger rather than at launch.
+    m_socket = connectToDaemon();
+
+    if (m_socket < 0)
+        return false;
+
+    initialize();
+
+    return true;
+}
+
 void Client::initialize()
 {
     m_worker = std::jthread([this](std::stop_token token) {

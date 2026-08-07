@@ -21,6 +21,10 @@ PageStackWindow {
     // signal, or is recreated after it, can never recover it.
     property bool initialized: false
 
+    // A tapped notification that arrived before there was anything to open it with. See
+    // openChat(); the flush is onChatManagerChanged below.
+    property string pendingChatId: ""
+
     initialPage: Component { MainPage {} }
 
     onOrientationChangeFinished: showStatusBar = isPortrait
@@ -49,6 +53,19 @@ PageStackWindow {
         onChatRequested: {
             pageStack.pop(null, true)
             openChat(chatId)
+        }
+
+        // TDLib has just authorized, which is the earliest a tap can be acted on. The
+        // chat is often still not in the store this soon - openChat fetches it and
+        // onChatAvailable finishes the push.
+        onChatManagerChanged: {
+            if (pendingChatId === "")
+                return;
+
+            var chatId = pendingChatId;
+            pendingChatId = "";
+
+            openChat(chatId);
         }
     }
 
@@ -102,11 +119,28 @@ PageStackWindow {
     }
 
     function openChat(chatId) {
+        // A tap on a banner starts the app, and the D-Bus call carrying it is delivered
+        // as soon as NotificationEndpoint owns the name - which is in AppManager's
+        // constructor, before TDLib has authorized and so before chatManager exists.
+        // This used to call straight into it: the null threw, the handler stopped there,
+        // and the tap was gone for the rest of the run, leaving the launch it started
+        // sitting on the chat list. Hold it until there is something to open it with.
+        //
+        // appManager.chatManager rather than the alias on appWindow: that alias is a
+        // binding on the same signal that flushes this, and nothing orders the two. Same
+        // reason MainPage reads it that way.
+        var manager = appManager.chatManager;
+
+        if (!manager) {
+            pendingChatId = chatId;
+            return;
+        }
+
         // Push only if there is something to show. This used to push regardless, so a
         // chat that could not be selected produced a page with chat, chatInfo and
         // messageModel all undefined - a spinner that never resolved. A refusal means a
         // fetch is under way; onChatAvailable comes back with the outcome.
-        if (!chatManager.openChat(chatId))
+        if (!manager.openChat(chatId))
             return;
 
         var component = Qt.createComponent("ChatPage.qml");

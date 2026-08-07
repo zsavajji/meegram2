@@ -34,6 +34,16 @@ public:
 
     void send(td::td_api::object_ptr<td::td_api::Function> request, std::function<void(td::td_api::object_ptr<td::td_api::Object>)> callback = {});
 
+    // Drops the connection and opens a new one, then restarts the reader. False when there
+    // is still nothing to connect to, in which case nothing has changed and it can be
+    // called again. In process there is nothing to reconnect and it answers true - see the
+    // note on the definition in Client.cpp.
+    //
+    // Called from AppManager::retry, which is the only thing in the app that can get a
+    // dead transport moving again: with the socket gone, Client::send drops every request
+    // before it is encoded, so no amount of re-sending reaches anyone.
+    bool reconnect();
+
     // Feeds a locally built object into result() as if TDLib had sent it.
     //
     // TDLib emits updateAuthorizationState only when the state *changes*. In process that

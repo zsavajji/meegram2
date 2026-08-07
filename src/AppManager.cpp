@@ -262,6 +262,11 @@ bool AppManager::isAuthorized() const noexcept
     return m_isAuthorized;
 }
 
+bool AppManager::isServiceUnreachable() const noexcept
+{
+    return m_serviceUnreachable;
+}
+
 const QString &AppManager::connectionStateString() const noexcept
 {
     return m_connectionStateString;
@@ -360,9 +365,38 @@ void AppManager::initialize() noexcept
     // never arrive on its own.
     QTimer::singleShot(InitializationStallMs, this, SLOT(reportInitializationStall()));
 
-    m_languagePackInfoModel = std::make_unique<LanguagePackInfoModel>(m_client);
+    // Built once. retry() runs this whole function again, and make_unique here would
+    // destroy the previous model synchronously - while the settings page, if it is open,
+    // is still bound to it. Nothing about it is tied to the connection: it holds a list of
+    // languages and asks for it on demand, so the existing one works against the new
+    // socket unchanged.
+    if (!m_languagePackInfoModel)
+    {
+        m_languagePackInfoModel = std::make_unique<LanguagePackInfoModel>(m_client);
 
-    emit languagePackInfoModelChanged();
+        emit languagePackInfoModelChanged();
+    }
+}
+
+void AppManager::retry() noexcept
+{
+    // The reconnect is the half that cannot be skipped: with the socket gone, Client::send
+    // drops every request before it is encoded, so re-running initialize() on its own
+    // would send nothing at all and the screen would go back to a spinner that resolves no
+    // better than the last one.
+    if (!m_client->reconnect())
+    {
+        qWarning() << "retry: still nothing to connect to; leaving the message up";
+        return;
+    }
+
+    m_serviceUnreachable = false;
+    emit serviceUnreachableChanged();
+
+    // Back to the spinner, with a fresh stall deadline behind it - so an attempt that goes
+    // the same way as the last one puts the message back up on its own, and the button
+    // with it.
+    initialize();
 }
 
 void AppManager::setParameters() noexcept
@@ -559,6 +593,19 @@ void AppManager::reportInitializationStall() noexcept
                << (m_initializationStatus[0] ? "ok" : "PENDING") << "| language pack" << (m_initializationStatus[1] ? "ok" : "PENDING")
                << "| connection" << (m_connectionStateString.isEmpty() ? QLatin1String("never reported") : QLatin1String("reported"))
                << m_connectionStateString << "| authorized" << m_isAuthorized;
+
+    // The half that cannot release itself. Nothing has come back from TDLib at all, and
+    // nothing will: under the daemon transport the socket is opened once in Client's
+    // constructor and there is no reconnect, so this is a dead run - a failed connect, a
+    // connection the daemon's peer check refused, or a daemon that is not there. The
+    // spinner has nothing to resolve to, and the warning above reaches no log the user
+    // can read: D-Bus activation and the launcher both run the app through invoker, which
+    // discards stderr. So say it on screen instead. MainPage swaps the spinner for it.
+    if (!m_initializationStatus[0])
+    {
+        m_serviceUnreachable = true;
+        emit serviceUnreachableChanged();
+    }
 
     // And stop waiting for it. Startup waits for the language pack because QML1 never
     // retranslates (see MainPage.qml), but a first launch with no local pack and no

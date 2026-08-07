@@ -27,6 +27,7 @@
 // Framing is one JSON object per line. TDLib emits compact single-line JSON and escapes
 // every control character inside strings, so a raw newline never appears in a payload.
 
+#include "Log.hpp"
 #include "Notifier.hpp"
 
 #include <td/telegram/td_json_client.h>
@@ -507,6 +508,10 @@ BusStatus claimBusName(DBusConnection **out)
 
 int main(int argc, char *argv[])
 {
+    // First, so that everything below it - the bus name it could not claim, the socket
+    // already held by another instance - is written somewhere readable.
+    openLog("meegramd.log");
+
     // A flag rather than an environment variable, deliberately. meegramd is D-Bus
     // activated, and any process at this uid can put variables into the session bus's
     // activation environment - so an env-var escape hatch could be switched on by the
@@ -618,6 +623,16 @@ int main(int argc, char *argv[])
 
                 notifier->onUpdate(line, length);
             }
+            else
+            {
+                // The 30-second timeout tick, and the only rotation check a daemon nobody
+                // is connected to ever gets: the poll loop below is parked in poll(-1) with
+                // nothing to wake it, while this loop keeps writing a retry line every 30
+                // seconds for as long as the device is offline. On the timeout rather than
+                // on every trip because during initial sync this loop runs thousands of
+                // times a minute, and the poll loop is awake and checking throughout.
+                rotateLogIfLarge();
+            }
 
             // On every trip, not only on the timeout: a client that is failing to connect
             // is not necessarily a quiet one, and the 30 seconds are counted here rather
@@ -629,6 +644,8 @@ int main(int argc, char *argv[])
 
     for (;;)
     {
+        rotateLogIfLarge();
+
         std::vector<pollfd> fds;
         size_t busIndex = 0;
         size_t firstConnection = 0;

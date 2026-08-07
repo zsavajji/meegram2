@@ -37,6 +37,16 @@ void Client::send(td::td_api::object_ptr<td::td_api::Function> request, std::fun
     m_clientManager->send(m_clientId, id, std::move(request));
 }
 
+bool Client::reconnect()
+{
+    // Nothing to reconnect: TDLib is in this process, its worker has not gone anywhere,
+    // and a socket that does not exist cannot have died. True rather than false so the
+    // caller carries on to re-run initialize(), which is the only half of a retry that
+    // means anything here - and TDLib answering "Unexpected setTdlibParameters" to the
+    // second attempt is already handled as success (AppManager::setParameters).
+    return true;
+}
+
 void Client::initialize()
 {
     // A worker thread using std::jthread for automatic joining

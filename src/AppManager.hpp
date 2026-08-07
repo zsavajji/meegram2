@@ -35,6 +35,11 @@ class AppManager : public QObject
     Q_PROPERTY(bool authorized READ isAuthorized NOTIFY authorizedChanged)
     Q_PROPERTY(QString connectionStateString READ connectionStateString NOTIFY connectionStateChanged)
 
+    // TDLib never answered, so the startup spinner has nothing to resolve to. Distinct
+    // from connectionStateString, which is TDLib reporting on its own connection - this
+    // is not having heard from TDLib at all. See reportInitializationStall.
+    Q_PROPERTY(bool serviceUnreachable READ isServiceUnreachable NOTIFY serviceUnreachableChanged)
+
     // All built in the constructor and never replaced, so no change to notify.
     Q_PROPERTY(Client *client READ client CONSTANT)
     Q_PROPERTY(Authorization *authorization READ authorization CONSTANT)
@@ -49,6 +54,8 @@ public:
     explicit AppManager(QObject *parent = nullptr);
 
     bool isAuthorized() const noexcept;
+
+    bool isServiceUnreachable() const noexcept;
 
     const QString &connectionStateString() const noexcept;
 
@@ -68,6 +75,8 @@ signals:
 
     void authorizedChanged();
 
+    void serviceUnreachableChanged();
+
     void connectionStateChanged();
 
     void appInitialized();
@@ -82,6 +91,11 @@ public slots:
     void downloadFile(int fileId, int priority, qlonglong offset, qlonglong limit, bool synchronous);
 
     void initialize() noexcept;
+
+    // The "Try again" button on MainPage's unreachable screen. Reopens the connection and
+    // runs startup again from the top; does nothing but say so if there is still no daemon
+    // to reach, so it can be pressed as many times as it takes.
+    void retry() noexcept;
 
 private slots:
     void handleResult(td::td_api::Object *object);
@@ -117,6 +131,12 @@ private:
     void handleConnectionState(const td::td_api::ConnectionState &connectionState);
 
     bool m_isAuthorized{false};
+
+    // One way. Set at the stall deadline and never cleared: there is no reconnect path -
+    // the socket is opened once, in Client's constructor - so a transport that is dead at
+    // eight seconds is dead for the run. If TDLib does answer late, appInitialized fires
+    // and MainPage leaves this state on `initialized` without consulting it.
+    bool m_serviceUnreachable{false};
 
     QString m_connectionStateString;
 

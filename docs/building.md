@@ -378,8 +378,11 @@ Installed artefacts in the sysroot survive, but the trees and stamps do not.
 | `MEEGRAM_PROFILE` | `OFF` | Enables `src/ScopeTimer.hpp`: a timing table to stderr every 5 s, carrying current RSS, plus the labelled `MEEGRAM RSS` startup markers in `main.cpp`. |
 | `MEEGRAM_JSON_TRANSPORT` | `OFF` | Talk to TDLib through the `meegramd` daemon over a Unix socket instead of in-process. Builds `meegramd`, swaps `src/Client.cpp` for `src/ClientProxy.cpp`. |
 | `MEEGRAM_JSON_BENCH` | `OFF` | Builds `json_bench`, which measures what the JSON wire format costs per update on device. |
+| `MEEGRAM_FILE_LOG` | `ON` | Both binaries point stderr at `~/.meegram/<name>.log`, rotated at 256 KiB with one `.1` kept (`src/Log.hpp`). `OFF` leaves stderr as inherited. |
 
-Run the app over SSH when profiling — `invoker` in the `.desktop` swallows stderr.
+Run the app over SSH when profiling, or turn `MEEGRAM_FILE_LOG` off — `invoker` in the
+`.desktop` swallows stderr, and with the file log on, the `PROF` tables go to
+`~/.meegram/meegram.log` rather than to the terminal you are watching.
 
 ### The daemon transport
 
@@ -420,7 +423,23 @@ It listens on `$XDG_RUNTIME_DIR/meegram.sock`, falling back to `~/.meegram/sock`
 second instance exits rather than stealing the socket from a running one; the bus name is
 what arbitrates, so that holds even when two start at once.
 
-Running it by hand still works and is how to read its stderr:
+### Its log
+
+`~/.meegram/meegramd.log`, rotated to `.log.1` at 256 KiB and never more than those two
+files. The app writes `~/.meegram/meegram.log` the same way; both come from `src/Log.hpp`
+and `-DMEEGRAM_FILE_LOG=OFF` turns them off together.
+
+Activation is the normal way the daemon starts, and it hands it dbus-daemon's stderr,
+which Harmattan discards — so `openLog()` moves the descriptor before anything else runs,
+and the twenty-odd `fprintf(stderr)` calls in the daemon are unchanged. This is where a
+rejected peer, a connection state or a banner that failed to post is written.
+
+```sh
+tail -f ~/.meegram/meegramd.log    # works against the activated daemon, which is the point
+```
+
+Running it by hand still works. It prints where the log is on the stderr it inherited,
+then writes everything after that to the file:
 
 ```sh
 /opt/meegram/bin/meegramd          # over SSH there is usually no session bus

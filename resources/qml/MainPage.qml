@@ -42,7 +42,7 @@ Page {
             bottom: parent.bottom
         }
 
-        sourceComponent: !appWindow.initialized ? busyComponent
+        sourceComponent: !appWindow.initialized ? (appManager.serviceUnreachable ? unreachableComponent : busyComponent)
                        : !appManager.chatManager ? infoComponent
                        : folderChatModels.count === 0 ? chatLayoutComponent
                                                       : chatTabsLayoutComponent
@@ -58,6 +58,65 @@ Page {
                 anchors.centerIn: parent
                 running: true
                 platformStyle: BusyIndicatorStyle { size: "large" }
+            }
+        }
+    }
+
+    // The spinner's dead end, and the only screen in the app that reports on the plumbing
+    // rather than on Telegram. It exists because the alternative is a busy indicator that
+    // spins for the rest of the run: appInitialized needs a reply to setTdlibParameters,
+    // and nothing retries or times that out - see reportInitializationStall.
+    //
+    // Not qsTr'd. The language pack comes over the same transport that just failed, so on
+    // a first launch there is nothing to translate this with - same reason infoComponent's
+    // tagline below is a plain string.
+    Component {
+        id: unreachableComponent
+
+        Item {
+            anchors.fill: parent
+
+            Column {
+                spacing: 20
+                width: parent.width
+
+                anchors {
+                    top: parent.top
+                    left: parent.left
+                    right: parent.right
+                    topMargin: 30
+                }
+
+                Text {
+                    text: "Can't reach TDLib"
+                    wrapMode: Text.Wrap
+                    font.pixelSize: 30
+                    color: "#777777"
+                    horizontalAlignment: Text.AlignHCenter
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: parent.width
+                }
+
+                Text {
+                    text: "Nothing has come back since startup."
+                    wrapMode: Text.Wrap
+                    font.pixelSize: 22
+                    color: "#777777"
+                    horizontalAlignment: Text.AlignHCenter
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: parent.width - 40
+                }
+
+                // Reopens the connection and runs startup again. A failed attempt leaves
+                // this screen exactly as it is, so it can be pressed again; a successful
+                // one goes back to the spinner, and the stall deadline behind it puts this
+                // back up if the second attempt ends like the first.
+                Button {
+                    text: "Try again"
+                    platformStyle: ButtonStyle { inverted: true }
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    onClicked: appManager.retry()
+                }
             }
         }
     }
