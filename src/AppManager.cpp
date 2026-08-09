@@ -253,7 +253,10 @@ AppManager::AppManager(QObject *parent)
     // as soon as com.meegram is owned. Registering it later means dropping that first tap.
     m_notificationEndpoint = std::make_unique<NotificationEndpoint>();
 
-    connect(m_notificationEndpoint.get(), SIGNAL(chatRequested(QString)), SIGNAL(chatRequested(QString)));
+    // Through handleChatRequested rather than straight to the signal. The comment above is
+    // the reason this class owns the endpoint this early, and it is also the reason a
+    // direct signal-to-signal connect loses the tap: nothing is listening yet.
+    connect(m_notificationEndpoint.get(), SIGNAL(chatRequested(QString)), SLOT(handleChatRequested(QString)));
 #endif
 }
 
@@ -347,8 +350,36 @@ void AppManager::downloadFile(int fileId, int priority, qlonglong offset, qlongl
     m_client->send(td::td_api::make_object<td::td_api::downloadFile>(fileId, priority, offset, limit, synchronous));
 }
 
+void AppManager::handleChatRequested(const QString &chatId) noexcept
+{
+    if (!m_qmlReady)
+    {
+        m_pendingChatId = chatId;
+        return;
+    }
+
+    emit chatRequested(chatId);
+}
+
 void AppManager::initialize() noexcept
 {
+    // Before anything below can return early. main.qml calls this from
+    // Component.onCompleted, so from here a chatRequested has somewhere to land.
+    m_qmlReady = true;
+
+    if (!m_pendingChatId.isEmpty())
+    {
+        // Back through the same slot, which now takes the other branch and emits. Queued,
+        // not direct: this runs inside Component.onCompleted, and the handler it wakes
+        // calls pageStack.pop(null, true) on a stack whose initial page is still being
+        // completed. Deferring it to the next trip through the event loop lets the scene
+        // finish first. main.qml holds it again from there if TDLib has not authorized
+        // yet, which on this path it has not.
+        QMetaObject::invokeMethod(this, "handleChatRequested", Qt::QueuedConnection, Q_ARG(QString, m_pendingChatId));
+
+        m_pendingChatId.clear();
+    }
+
     m_client->send(td::td_api::make_object<td::td_api::getOption>("version"), {});
 
     setOption("language_pack_database_path", QString(QDir::homePath() + DatabaseDirectory + "/langpack"));

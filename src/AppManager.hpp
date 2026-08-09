@@ -98,6 +98,19 @@ public slots:
     void retry() noexcept;
 
 private slots:
+    // The endpoint's tap, held back until there is a QML scene to receive it.
+    //
+    // NotificationEndpoint is constructed in this class's constructor, deliberately, so a
+    // tap that started the process is not missed - but that constructor runs before
+    // setSource, so re-emitting chatRequested straight through fires it into a scene whose
+    // Connections do not exist yet. Measured on device: a cold start driven by the real
+    // D-Bus call produced no notification-tap marker at all and landed on the chat list,
+    // while the identical call against a running app opened the chat in 2.28 s.
+    //
+    // main.qml's own pendingChatId cannot cover this - it lives inside the handler that
+    // never runs.
+    void handleChatRequested(const QString &chatId) noexcept;
+
     void handleResult(td::td_api::Object *object);
 
     void loadLanguagePack() noexcept;
@@ -131,6 +144,17 @@ private:
     void handleConnectionState(const td::td_api::ConnectionState &connectionState);
 
     bool m_isAuthorized{false};
+
+    // False until initialize() runs, which main.qml calls from Component.onCompleted -
+    // so it is exactly "the scene exists and its Connections are live". The one thing
+    // that distinguishes a tap worth emitting from a tap that would be emitted into
+    // nothing.
+    bool m_qmlReady{false};
+
+    // A tap that arrived before that, held for initialize() to release. Only ever one:
+    // the last tap is the one the user meant, and two taps before the scene exists would
+    // otherwise push two chat pages.
+    QString m_pendingChatId;
 
     // One way. Set at the stall deadline and never cleared: there is no reconnect path -
     // the socket is opened once, in Client's constructor - so a transport that is dead at

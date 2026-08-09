@@ -26,6 +26,13 @@ public:
 
     static QString formattedText(const td::td_api::object_ptr<td::td_api::formattedText> &value) noexcept;
 
+    // Puts a QML-side event on the same startup timeline main.cpp writes. Everything
+    // after app.exec() - initialize(), the daemon handshake, TDLib authorizing, the
+    // chat list arriving - happens with no C++ call site to hang a marker off, and it
+    // is most of what a user calls "startup". Compiles to nothing without
+    // MEEGRAM_PROFILE, so the call sites are safe to leave in.
+    Q_INVOKABLE static void mark(const QString &name) noexcept;
+
     Q_INVOKABLE static QString formatTime(int totalSeconds) noexcept;
 
     Q_INVOKABLE static QString replaceEmoji(const QString &text) noexcept;

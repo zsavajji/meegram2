@@ -19,6 +19,7 @@
 #include "Client.hpp"
 
 #include "JsonCodec.hpp"
+#include "ScopeTimer.hpp"
 
 #include "td/utils/JsonBuilder.h"
 
@@ -106,13 +107,27 @@ int connectToDaemon()
 {
     const std::string path = socketPath();
 
+    MEEGRAM_MARK("daemon-connect-begin");
+
     // Already running, which is the whole point of the daemon - this is the path taken
     // every time the UI is reopened against a connection that never went away.
     if (const int fd = tryConnect(path); fd >= 0)
+    {
+        // A warm start ends here, and the whole block below is what a cold one pays
+        // instead. Two runs of the same log tell the two apart on this one line.
+        MEEGRAM_MARK("daemon-already-up");
         return fd;
+    }
+
+    MEEGRAM_MARK("daemon-activate-begin");
 
     if (!startDaemonService())
         return -1;
+
+    // StartServiceByName is synchronous and dbus-daemon does not answer until meegramd
+    // owns the name, so this marker has the whole fork+exec of a 49 MB binary behind it,
+    // plus everything meegramd runs before claimBusName.
+    MEEGRAM_MARK("daemon-activated");
 
     // meegramd claims the bus name before it binds the socket, deliberately - that
     // ordering is what makes the name a real mutex between two daemons (see claimBusName
@@ -127,7 +142,15 @@ int connectToDaemon()
         ::usleep(20 * 1000);
 
         if (const int fd = tryConnect(path); fd >= 0)
+        {
+            // The attempt count is the number that matters here, not the elapsed time:
+            // it says whether the socket was one poll behind the bus name or a hundred,
+            // which is the difference between "20 ms of slop" and "the listen() is
+            // waiting on something slow in meegramd".
+            qWarning("Client: daemon socket appeared after %d polls (%d ms)", attempt + 1, (attempt + 1) * 20);
+            MEEGRAM_MARK("daemon-socket-up");
             return fd;
+        }
     }
 
     qWarning("Client: activated %s but no socket on %s: %s", DaemonService, path.c_str(), std::strerror(errno));

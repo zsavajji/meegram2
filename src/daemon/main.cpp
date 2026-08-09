@@ -569,6 +569,23 @@ int main(int argc, char *argv[])
     for (const int end : wakeupPipe)
         ::fcntl(end, F_SETFL, ::fcntl(end, F_GETFL, 0) | O_NONBLOCK);
 
+    // Before any client exists, because TDLib's default verbosity applies from its first
+    // instruction and this is a synchronous, client-independent call.
+    //
+    // Measured on device: without it a cold start writes 10.9 MB of per-file, per-message
+    // trace into meegramd.log in 35 seconds - ~1.5 MB/s sustained to eMMC on a single
+    // core, right across the window where the user is waiting for the chat list. It also
+    // crossed rotateLogIfLarge's cap twice during that window, so the rename-and-unlink
+    // churn landed on the same phase.
+    //
+    // The in-process transport has always set this (Client.cpp:10). When TDLib moved into
+    // the daemon the call did not move with it - ClientProxy.cpp says as much, that
+    // logging is "meegramd's to configure", and nothing here ever did.
+    //
+    // 1 rather than 0: warnings and errors are what makes meegramd.log worth keeping, and
+    // they are a handful of lines a run rather than megabytes.
+    td_execute(R"({"@type":"setLogVerbosityLevel","new_verbosity_level":1})");
+
     // Nothing is created until the first request is sent, so this is just an id.
     const int clientId = td_create_client_id();
 

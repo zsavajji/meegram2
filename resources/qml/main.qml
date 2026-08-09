@@ -45,12 +45,20 @@ PageStackWindow {
     Connections {
         target: appManager
 
-        onAppInitialized: appWindow.initialized = true
+        onAppInitialized: {
+            utils.mark("app-initialized")
+            appWindow.initialized = true
+        }
 
         // A system notification was tapped. Back out to the chat list first, so repeated
         // taps do not stack chat pages on top of each other. The chat list is the root
         // page, so popping to it is exactly what pop(null) does.
         onChatRequested: {
+            // The notification tap lands here. On a cold start this fires from
+            // AppManager's constructor, so it can be the earliest marker of all - which
+            // is the point: everything after it is latency the user is watching.
+            utils.mark("notification-tap")
+
             pageStack.pop(null, true)
             openChat(chatId)
         }
@@ -64,6 +72,10 @@ PageStackWindow {
 
             var chatId = pendingChatId;
             pendingChatId = "";
+
+            // Closes the gap opened at "chat-open-deferred": TDLib has authorized and the
+            // held tap can finally be acted on.
+            utils.mark("chat-open-flushed")
 
             openChat(chatId);
         }
@@ -132,9 +144,15 @@ PageStackWindow {
         var manager = appManager.chatManager;
 
         if (!manager) {
+            // On a notification-tap launch this is the normal outcome, not an error: the
+            // tap beat TDLib's authorization. The gap from here to "chat-open-flushed"
+            // is dead time the user spends looking at the chat list they did not ask for.
+            utils.mark("chat-open-deferred")
             pendingChatId = chatId;
             return;
         }
+
+        utils.mark("chat-open-begin")
 
         // Push only if there is something to show. This used to push regardless, so a
         // chat that could not be selected produced a page with chat, chatInfo and
@@ -143,6 +161,10 @@ PageStackWindow {
         if (!manager.openChat(chatId))
             return;
 
+        // Separated so the compile below is attributable on its own: openChat() is the
+        // C++ side selecting the chat and kicking off the first history fetch.
+        utils.mark("chat-selected")
+
         var component = Qt.createComponent("ChatPage.qml");
 
         if (component.status !== Component.Ready) {
@@ -150,14 +172,30 @@ PageStackWindow {
             return;
         }
 
+        // Brackets the compile of ChatPage.qml, which is the largest file in the scene
+        // and is not compiled until the first chat is opened - so a cold start pays it
+        // here rather than in setSource.
+        utils.mark("chatpage-compiled")
+
         pageStack.push(component);
+
+        utils.mark("chatpage-pushed")
     }
 
     Component.onCompleted: {
         theme.inverted = settings.invertedTheme
 
+        // Startup markers. This one is the first thing the event loop runs, so the gap
+        // back to "shown" is what QApplication::exec costs before it reaches us.
+        utils.mark("qml-oncompleted")
+
         // Starting the app is not a page's job - the root page used to own this, which
         // tied the whole startup sequence to the lifetime of one page.
         appManager.initialize()
+
+        // initialize() returns as soon as the request is away; everything real about it
+        // is asynchronous. The delta to onAppInitialized is the daemon handshake plus
+        // TDLib authorizing, which is the phase no C++ marker can reach.
+        utils.mark("initialize-returned")
     }
 }

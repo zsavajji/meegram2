@@ -245,6 +245,18 @@ QString Utils::formattedText(const td::td_api::object_ptr<td::td_api::formattedT
     return html;
 }
 
+void Utils::mark(const QString &name) noexcept
+{
+    // toUtf8() lives to the end of the full expression and mark() prints inside it, so
+    // the pointer is valid for the whole call. Unused without MEEGRAM_PROFILE, where
+    // the macro is an empty do/while.
+    const QByteArray utf8 = name.toUtf8();
+
+    MEEGRAM_MARK(utf8.constData());
+
+    Q_UNUSED(utf8)
+}
+
 QString Utils::formatTime(int totalSeconds) noexcept
 {
     QString result;

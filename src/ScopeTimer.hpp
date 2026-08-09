@@ -8,21 +8,22 @@
 // call counts and accumulated time is written to stderr. Compiles to nothing
 // when MEEGRAM_PROFILE is undefined, so it is safe to leave the call sites in.
 //
-// MEEGRAM_RSS("name") prints one labelled resident-set reading. It exists to settle
-// the question docs/restructuring.md opens: whether the Qt/QML side really dominates
-// TDLib's memory, which is what decides whether moving TDLib into a service reclaims
-// anything. The startup markers in main.cpp straddle the boundaries that separate the
-// two, so the deltas between consecutive lines attribute the RSS.
+// MEEGRAM_MARK("name") prints one labelled point on a timeline: milliseconds since the
+// first marker, milliseconds since the previous one, and the resident set. It is the
+// startup instrument - a phase that has no loop to wrap has nothing MEEGRAM_SCOPE can
+// measure, so the only way to attribute it is to bracket it with two markers and read
+// the delta. main.cpp, ClientProxy.cpp and the QML call sites via Utils::mark lay the
+// markers end to end from process entry to the first message list.
 //
-// The other half of that measurement - resident set before and after minimising the
-// window - needs no code and no marker, because both samples are reachable from
-// outside the process:
+// The resident-set column is a leftover from what these markers were first written for
+// (docs/restructuring.md, whether Qt/QML dominates TDLib's memory) and is kept because
+// it costs one /proc read per marker and docs/profiling.md's S0 table is built from it.
+// Ignore it when the question is time.
+//
+// Resident set before and after minimising the window needs no marker at all - both
+// samples are reachable from outside the process:
 //
 //   while :; do grep VmRSS /proc/$(pidof meegram)/status; sleep 5; done
-//
-// Read a few lines, minimise, read a few more. Sampling that from inside would mean
-// an idle timer, and an idle timer is exactly the thing whose cost would perturb the
-// number it is trying to report.
 
 #ifdef MEEGRAM_PROFILE
 
@@ -89,18 +90,52 @@ inline long long rssKb()
 // Printed immediately rather than accumulated into the table below: these are a
 // timeline, so their order carries the meaning, and a delta against the previous
 // marker is the number actually being read off.
+//
+// Two clocks, because startup needs both. t= is milliseconds since the first marker,
+// which is what attributes a phase; the epoch printed once on the header line is what
+// attributes everything *before* the first marker. The binary is ~40 MB of mostly
+// static TDLib, so the dynamic linker's relocation and demand-paging of it happen
+// before main() runs and no in-process clock can see them. Bracket it from outside:
+//
+//   echo "exec $(date +%s%3N)"; /opt/meegram/bin/meegram 2>&1 | tee log
+//
+// and subtract that from the header's epoch= to get the pre-main cost.
 inline void mark(const char *name)
 {
     const std::lock_guard<std::mutex> lock(mutex());
 
-    static long long previous = 0;
+    const auto now = Clock::now();
+
+    static const Clock::time_point first = now;
+    static Clock::time_point last = now;
+
+    // A flag rather than `now == first`: two markers can land inside one clock tick,
+    // and that would print the header twice.
+    static bool headerPrinted = false;
+
+    if (!headerPrinted)
+    {
+        headerPrinted = true;
+
+        const auto epochMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                 std::chrono::system_clock::now().time_since_epoch())
+                                 .count();
+        std::fprintf(stderr, "---- MEEGRAM MARK ---- epoch=%lldms\n", static_cast<long long>(epochMs));
+    }
+
+    const auto ms = [](Clock::duration d) {
+        return static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(d).count());
+    };
 
     const long long rss = rssKb();
 
-    std::fprintf(stderr, "---- MEEGRAM RSS ---- %-22s %7lld KiB  (%+lld)\n", name, rss, rss - previous);
+    // Time first: the elapsed column is what a startup run is read down, and the "+"
+    // beside it is the one number that names a phase's cost.
+    std::fprintf(stderr, "---- MEEGRAM MARK ---- t=%6lldms  +%6lldms  %-24s %7lld KiB\n", ms(now - first), ms(now - last), name,
+                 rss);
     std::fflush(stderr);
 
-    previous = rss;
+    last = now;
 }
 
 inline void dumpLocked()
@@ -161,7 +196,7 @@ private:
 #define MEEGRAM_SCOPE_CAT_(a, b) a##b
 #define MEEGRAM_SCOPE_NAME_(line) MEEGRAM_SCOPE_CAT_(meegramScopeTimer_, line)
 #define MEEGRAM_SCOPE(name) const ::profiling::ScopeTimer MEEGRAM_SCOPE_NAME_(__LINE__)(name)
-#define MEEGRAM_RSS(name) ::profiling::mark(name)
+#define MEEGRAM_MARK(name) ::profiling::mark(name)
 
 #else
 
@@ -170,7 +205,7 @@ private:
     {                       \
     } while (false)
 
-#define MEEGRAM_RSS(name) \
+#define MEEGRAM_MARK(name) \
     do                    \
     {                     \
     } while (false)

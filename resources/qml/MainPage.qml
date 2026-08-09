@@ -46,6 +46,11 @@ Page {
                        : !appManager.chatManager ? infoComponent
                        : folderChatModels.count === 0 ? chatLayoutComponent
                                                       : chatTabsLayoutComponent
+
+        // The end of the startup timeline: the busy indicator is gone and the real chat
+        // layout has been built. Fires on every swap, so a run shows the busy component
+        // first - it is the last "chat-layout-loaded" line that ends startup.
+        onLoaded: utils.mark(sourceComponent === busyComponent ? "busy-shown" : "chat-layout-loaded")
     }
 
     Component {

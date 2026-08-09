@@ -137,7 +137,7 @@ protected:
         if (event->type() != QEvent::User)
             return QObject::event(event);
 
-        MEEGRAM_RSS("teardown-before");
+        MEEGRAM_MARK("teardown-before");
 
         m_view->setSource(QUrl());
         m_view->engine()->clearComponentCache();
@@ -154,7 +154,7 @@ protected:
         // fragmented heap with a different fix.
         QPixmapCache::clear();
 
-        MEEGRAM_RSS("teardown-after");
+        MEEGRAM_MARK("teardown-after");
 
         // Measured: the teardown above returns 52 KiB of a 28 MiB scene. The objects are
         // destroyed, but every QML allocation is small enough to come from a glibc arena
@@ -170,7 +170,7 @@ protected:
         //                 releases it, which is the service architecture's whole argument
 #ifdef __GLIBC__
         malloc_trim(0);
-        MEEGRAM_RSS("teardown-trimmed");
+        MEEGRAM_MARK("teardown-trimmed");
 #endif
 
         return true;
@@ -189,11 +189,16 @@ Q_DECL_EXPORT int main(int argc, char *argv[])
     openLog("meegram.log");
     qInstallMsgHandler(logMessage);
 
+    // Time zero for every marker below. Everything before it - the dynamic linker
+    // relocating a ~40 MB mostly-static binary and demand-paging it off eMMC - is
+    // invisible from in here; see the note in ScopeTimer.hpp for how to bracket it.
+    MEEGRAM_MARK("main-entry");
+
     QApplication app(argc, argv);
 
     // See the note in ScopeTimer.hpp. These four straddle the Qt / QML / TDLib
     // boundaries, so consecutive deltas attribute the resident set between them.
-    MEEGRAM_RSS("qt-app");
+    MEEGRAM_MARK("qt-app");
 
     QCoreApplication::setApplicationName(AppName);
     QCoreApplication::setApplicationVersion(AppVersion);
@@ -208,6 +213,11 @@ Q_DECL_EXPORT int main(int argc, char *argv[])
     QFontDatabase::addApplicationFont(":/fonts/NotoSansSymbols-Regular.ttf");
 
     QTextCodec::setCodecForCStrings(QTextCodec::codecForName("UTF-8"));
+
+    // Splits font loading off from type registration: addApplicationFont parses a TTF
+    // and rebuilds the font database, which is the one call between here and the view
+    // that does real work. The 45 qmlRegister calls below are table inserts.
+    MEEGRAM_MARK("fonts");
 
     qRegisterMetaType<qlonglong>("qlonglong");
 
@@ -278,7 +288,7 @@ Q_DECL_EXPORT int main(int argc, char *argv[])
     viewer.viewport()->setAttribute(Qt::WA_NoSystemBackground);
 #endif
 
-    MEEGRAM_RSS("view+gl");
+    MEEGRAM_MARK("view+gl");
 
     AppManager appManager;
     Utils utils;
@@ -286,7 +296,7 @@ Q_DECL_EXPORT int main(int argc, char *argv[])
     // TDLib exists from here, but its databases are not open yet - it grows over the
     // sync that follows, so this marker is its floor, not its cost. The 5-second PROF
     // table carries the rss= that tracks the rest.
-    MEEGRAM_RSS("tdlib-client");
+    MEEGRAM_MARK("tdlib-client");
 
     // MEEGRAM_HEADLESS=1 syncs TDLib without ever building the QML scene, so its
     // steady-state RSS can be read on its own. That is the one figure the startup
@@ -307,7 +317,7 @@ Q_DECL_EXPORT int main(int argc, char *argv[])
     if (qgetenv("MEEGRAM_HEADLESS") == "1")
     {
         appManager.initialize();
-        MEEGRAM_RSS("headless-tdlib-start");
+        MEEGRAM_MARK("headless-tdlib-start");
         return app.exec();
     }
 
@@ -337,12 +347,24 @@ Q_DECL_EXPORT int main(int argc, char *argv[])
     }
 
     viewer.setResizeMode(QDeclarativeView::SizeRootObjectToView);
+
+    MEEGRAM_MARK("pre-setsource");
+
     viewer.setSource(QUrl("qrc:/qml/main.qml"));
-    viewer.showFullScreen();
 
     // The QML scene is built by setSource, so this delta is the number the whole
-    // exercise turns on: what a resident UI costs over a headless TDLib.
-    MEEGRAM_RSS("qml-scene");
+    // exercise turns on: what a resident UI costs over a headless TDLib. In time it is
+    // Qt 4.7 parsing and compiling 31 .qml files with no compiled-QML cache anywhere -
+    // the prime suspect for the wall-clock half of the same marker.
+    MEEGRAM_MARK("qml-scene");
+
+    viewer.showFullScreen();
+
+    // Split from the marker above because they fail differently: a slow setSource is
+    // QML compilation, a slow showFullScreen is the window manager and the first GL
+    // buffer swap. Both land before anything is on screen and neither is separable
+    // from outside the process.
+    MEEGRAM_MARK("shown");
 
     return app.exec();
 }

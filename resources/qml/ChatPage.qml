@@ -424,6 +424,10 @@ Page {
                 beginSettle()
                 markVisibleAsRead()
                 loading = false
+
+                // The end of the startup timeline. Everything before it is the user
+                // waiting; from here the message list is populated and positioned.
+                utils.mark("messages-shown")
             }
 
             onCountChanged: settleIfLoaded()
@@ -1071,7 +1075,13 @@ Page {
         }
     }
 
-    Component.onCompleted: openedChatId = chat ? chat.id : 0
+    Component.onCompleted: {
+        openedChatId = chat ? chat.id : 0
+
+        // The page exists and is bound; the delta from here to "messages-shown" is the
+        // first getChatHistory round trip plus the list positioning itself.
+        utils.mark("chatpage-completed")
+    }
 
     // Runs on app shutdown as well as on leaving the page, and by then appWindow's
     // properties can already be gone - chatManager reads back null and this threw.
