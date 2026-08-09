@@ -61,6 +61,23 @@ Dialog {
                 text: "Copyright \u00a9 2022 Chukwudi Nwutobo<br/>Contact: <a href='mailto:nwutobo@outlook.com?subject=Meegram'>nwutobo@outlook.com</a>"
                 onLinkActivated: Qt.openUrlExternally(link)
             }
+
+            Label {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                horizontalAlignment: Text.AlignHCenter
+                color: "#757575"
+                text: "Maintainer"
+            }
+
+            Label {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                horizontalAlignment: Text.AlignHCenter
+                color: "white"
+                text: "Andrea Faggin (@zsavajji)<br/><a href='mailto:hellothere@andreafagg.in?subject=Meegram'>hellothere@andreafagg.in</a><br/><a href='https://github.com/zsavajji'>github.com/zsavajji</a>"
+                onLinkActivated: Qt.openUrlExternally(link)
+            }
         }
     }
 }

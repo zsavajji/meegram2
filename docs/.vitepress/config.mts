@@ -21,7 +21,7 @@ export default defineConfig({
       { text: 'Building', link: '/building' },
       { text: 'Troubleshooting', link: '/troubleshooting' },
       {
-        text: 'v0.3.0',
+        text: 'v0.3.2',
         items: [
           { text: 'Changelog', link: 'https://github.com/qtinsider/meegram2/blob/main/debian/changelog' },
           { text: 'Issues', link: 'https://github.com/qtinsider/meegram2/issues' },
@@ -90,6 +90,7 @@ export default defineConfig({
           { text: '3 · Cross-toolchain', link: '/building#_3-cross-toolchain' },
           { text: '4 · Dependencies', link: '/building#_4-dependencies' },
           { text: '5 · Configure and build', link: '/building#_5-configure-and-build' },
+          { text: 'Configuration flags', link: '/building#configuration-flags' },
           { text: '6 · Package', link: '/building#_6-package' },
         ],
       },

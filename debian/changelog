@@ -1,3 +1,23 @@
+meegram (0.3.2) unstable; urgency=low
+
+  * Tapping a notification opens the chat in about four seconds, where it used to take
+    twenty-seven. Nothing was slow in the way it looked: the app could not open the
+    tapped chat until the background service had handed over its entire session — every
+    chat, every contact, five and a half megabytes of it — because that was the only
+    thing that put the chat within reach. It now asks for the one chat it was told to
+    open, and gets it in ten milliseconds.
+  * Opening a chat by name rather than from the list — Saved Messages, a contact you
+    have never written to, a tapped notification — no longer depends on the app having
+    been started before the background service. It could quietly do nothing at all.
+  * The app starts lighter and stays lighter: about 20 MB less memory at the moment a
+    chat opens, because the session no longer arrives as one enormous message that has
+    to be taken apart in one piece.
+  * The language pack is no longer downloaded on every single launch. It is 1.8 MB, it
+    changes a few times a year, and every launch spent seconds on it before showing
+    anything. It is now refreshed every couple of days instead.
+
+ -- Andrea Faggin <hellothere@andreafagg.in>  Sun, 09 Aug 2026 17:45:00 +0200
+
 meegram (0.3.1) unstable; urgency=low
 
   * Starting a conversation with somebody who is not in the chat list yet. A new-message

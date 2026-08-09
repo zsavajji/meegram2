@@ -9,32 +9,65 @@ useful for editing and for deploying to the device, but it does not drive the bu
 
 ## The whole thing, start to finish
 
+Every command, in order, for a device build and package. Steps 1–3 are once per
+machine; steps 4–7 are the loop you actually work in.
+
 ```bash
-# 0. host packages - see section 1
+# ── 0. environment ────────────────────────────────────────────────────────────
+# Needed by every step below. Put these in your shell profile - forgetting one is
+# the single most common way a build goes wrong, and most of them fail late.
+export QT_SDK_PATH=/path/to/QtSDK                       # dir containing Madde/ and Simulator/
+export TOOLCHAIN_PREFIX=arm-none-linux-gnueabi          # the cross compiler's prefix
+export PATH="$HOME/cross/arm-harmattan/bin:$PATH"       # the cross compiler itself
+export PATH="$QT_SDK_PATH/Madde/bin:$PATH"              # mad, for packaging
+
+# ── 1. host packages ──────────────────────────────────────────────────────────
+# See "1. Host packages" for the Fedora list and why each entry is there.
+sudo apt install build-essential cmake git wget tar xz-utils perl \
+                 pkg-config gperf coreutils gawk sed \
+                 flex bison texinfo \
+                 libssl-dev zlib1g-dev \
+                 dpkg-dev debhelper fakeroot
+
+# ── 2. submodules ─────────────────────────────────────────────────────────────
 git submodule update --init --recursive
 
-# 1. cross-toolchain (long; only needed once)
-export QT_SDK_PATH=/path/to/QtSDK
+# ── 3. cross-toolchain (slow: an hour or more; once per machine) ─────────────
 ./tools/build-toolchain.sh
 
-export PATH="$HOME/cross/arm-harmattan/bin:$PATH"
-export TOOLCHAIN_PREFIX=arm-none-linux-gnueabi
-
-# 2. dependencies - note BOTH arguments are required
+# ── 4. dependencies (slow the first time; re-runs skip what is already built) ─
+# BOTH arguments are required.
 ./tools/setup-dependencies.sh harmattan "$QT_SDK_PATH"
 
-# 3. build
+# ── 5. configure ──────────────────────────────────────────────────────────────
+# Every flag is explained under "Configuration flags". Pass them all explicitly,
+# every time - see the warning about the cache in that section.
 cmake -B build-app \
   -DCMAKE_TOOLCHAIN_FILE=tools/toolchain.cmake \
   -DQT_SDK_PATH="$QT_SDK_PATH" \
-  -DBUILD_HARMATTAN=ON
+  -DBUILD_HARMATTAN=ON \
+  -DMEEGRAM_JSON_TRANSPORT=ON \
+  -DMEEGRAM_PROFILE=OFF
+
+# ── 6. build ──────────────────────────────────────────────────────────────────
 cmake --build build-app -j4
 
-# 4. package
-cmake --build build-app --target package
+# ── 7. package ────────────────────────────────────────────────────────────────
+mad set harmattan_10.2011.34-1_rt1.2      # once per machine; `mad list` shows targets
+cmake --build build-app --target package  # does NOT compile - build first
+
+# ── 8. install on the device ─────────────────────────────────────────────────
+scp meegram_0.3.2_armel.deb user@<n9>:/tmp/
+ssh user@<n9> 'dpkg -i /tmp/meegram_0.3.2_armel.deb'
 ```
 
 Everything below explains a step or a failure mode.
+
+::: tip Rebuilding after a code change
+Steps 6 and 7 only. Re-run step 5 as well if you change a flag — and when you do,
+repeat the whole `cmake -B build-app ...` line rather than just the flag you want
+different.
+:::
 
 ---
 
@@ -367,18 +400,67 @@ clearing the cache with `rm -rf build` destroys every dependency build tree.
 Installed artefacts in the sysroot survive, but the trees and stamps do not.
 :::
 
-### Build options
+### Configuration flags
 
-| Option | Default | Purpose |
+Everything `cmake -B build-app` accepts. Defaults are what you get on a *fresh* cache,
+which is not the same as what you get on an existing one — read the warning first.
+
+::: danger Flags are cached and sticky: omitting one does not restore its default
+Every flag below is a CMake `option()` or a cache variable, so its value persists in
+`build-app/CMakeCache.txt` until something explicitly changes it. Dropping
+`-DMEEGRAM_PROFILE=ON` from a reconfigure leaves profiling **on**. Setting a flag once
+for an experiment leaves it set for every build after it, including the one you ship.
+
+Two consequences worth internalising:
+
+- **Pass the full flag list every time you configure.** The line in
+  [The whole thing](#the-whole-thing-start-to-finish) is the one to repeat.
+- **`--fresh` wipes the cache, so unpassed flags fall back to their defaults** —
+  including `BUILD_HARMATTAN=OFF`, which silently turns a device build into a host
+  build with no install rules and no `package` target. If `--target package` reports
+  *"No rule to make target 'package'"*, this is why.
+
+Check what a build tree actually believes:
+
+```bash
+grep -E "BUILD_HARMATTAN|MEEGRAM_|CMAKE_BUILD_TYPE" build-app/CMakeCache.txt
+```
+:::
+
+#### Required for a device build
+
+| Flag | Value | What it does |
 |---|---|---|
-| `CMAKE_BUILD_TYPE` | `Release` | Defaulted explicitly; unset used to mean `-O0`. |
-| `BUILD_HARMATTAN` | `OFF` | Device ABI flags, boostable, install rules, packaging. |
-| `QT_SDK_PATH` | — | SDK root. Also feeds `QML_IMPORT_PATH` for the Qt Creator code model. |
-| `MEEGRAM_GL_VIEWPORT` | `ON` | `QGLWidget` viewport for `QDeclarativeView`. Turn off to A/B against software paint. |
-| `MEEGRAM_PROFILE` | `OFF` | Enables `src/ScopeTimer.hpp`: a timing table to stderr every 5 s, carrying current RSS, plus the labelled `MEEGRAM RSS` startup markers in `main.cpp`. |
-| `MEEGRAM_JSON_TRANSPORT` | `OFF` | Talk to TDLib through the `meegramd` daemon over a Unix socket instead of in-process. Builds `meegramd`, swaps `src/Client.cpp` for `src/ClientProxy.cpp`. |
+| `CMAKE_TOOLCHAIN_FILE` | `tools/toolchain.cmake` | Points CMake at the cross compiler and the Harmattan sysroot. **Generated by `tools/setup-dependencies.sh`** — it does not exist in a fresh checkout, so step 4 has to run before step 5. Cannot be changed on an existing build tree; CMake refuses. |
+| `QT_SDK_PATH` | your SDK root | The directory holding `Madde/` and `Simulator/`. Falls back to the `QT_SDK_PATH` environment variable if not passed. Also derives `QML_IMPORT_PATH`. |
+| `BUILD_HARMATTAN` | `ON` | The device build. Turns on the ARM ABI flags (`-mfloat-abi=hard`, NEON), links the app boostable, and defines the install rules, the OpenSSL/QtMultimedia staging and the **`package` target**. `OFF` builds for the host, which is only useful for the standalone checks below. Default `OFF`. |
+| `MEEGRAM_JSON_TRANSPORT` | `ON` | The shipping architecture: TDLib lives in `meegramd` and the app talks to it over a Unix socket, so closing the window no longer closes the Telegram connection. Builds `meegramd`, swaps `src/Client.cpp` for `src/ClientProxy.cpp`, and swaps `NotificationManager` for `NotificationEndpoint`. Needs the generated client-direction codec; configure fails with a pointer to `setup-dependencies.sh` if it is missing. Default `OFF`. |
+
+#### Optional
+
+| Flag | Default | When to change it |
+|---|---|---|
+| `CMAKE_BUILD_TYPE` | `Release` | Set explicitly by `CMakeLists.txt`, because an unset build type means no `-O` flag at all, i.e. `-O0`. `Debug` also turns on `-Werror` and keeps `qDebug()` output, which `Release` compiles out via `QT_NO_DEBUG_OUTPUT`. |
+| `MEEGRAM_PROFILE` | `OFF` | `ON` enables `src/ScopeTimer.hpp`: the `MEEGRAM MARK` startup timeline and a `MEEGRAM PROF` table every 5 s, both to stderr with RSS. **Leave it off for anything you ship.** With it off, `MEEGRAM_MARK`/`MEEGRAM_SCOPE` compile to nothing, so the call sites — including `utils.mark(...)` in QML — cost nothing and can stay where they are. |
+| `MEEGRAM_GL_VIEWPORT` | `ON` | `QGLWidget` viewport for `QDeclarativeView`. `OFF` A/Bs it against software paint, which is worth doing on the real compositor but is not what you want in a release. |
+| `MEEGRAM_FILE_LOG` | `ON` | Both binaries redirect stderr to `~/.meegram/<name>.log`, rotated at 256 KiB keeping one `.1` (`src/Log.hpp`). `OFF` leaves stderr inherited — do that when you are watching a terminal, since with it on the profiling tables go to the file instead. |
 | `MEEGRAM_JSON_BENCH` | `OFF` | Builds `json_bench`, which measures what the JSON wire format costs per update on device. |
-| `MEEGRAM_FILE_LOG` | `ON` | Both binaries point stderr at `~/.meegram/<name>.log`, rotated at 256 KiB with one `.1` kept (`src/Log.hpp`). `OFF` leaves stderr as inherited. |
+| `TDLIB_SOURCE_DIR` | `td` | The TDLib checkout, for the JSON codec headers TDLib does not install. Only if your `td/` is elsewhere. |
+| `TDLIB_BUILD_DIR` | `build/tdlib` | The TDLib cross-build tree, for the generated `td/utils/config.h`. |
+| `MEEGRAM_OPENSSL_LIB_DIR` | `build/crypto/lib` | Where the cross-built `libssl`/`libcrypto` to ship are found. |
+
+#### Recipes
+
+```bash
+# What you ship
+-DBUILD_HARMATTAN=ON -DMEEGRAM_JSON_TRANSPORT=ON -DMEEGRAM_PROFILE=OFF
+
+# Measuring startup on device (see docs/notification-startup.md)
+-DBUILD_HARMATTAN=ON -DMEEGRAM_JSON_TRANSPORT=ON -DMEEGRAM_PROFILE=ON -DMEEGRAM_FILE_LOG=ON
+
+# Host build, for the standalone checks only - no install rules, no package target
+-DMEEGRAM_JSON_TRANSPORT=ON
+```
 
 Run the app over SSH when profiling, or turn `MEEGRAM_FILE_LOG` off — `invoker` in the
 `.desktop` swallows stderr, and with the file log on, the `PROF` tables go to
