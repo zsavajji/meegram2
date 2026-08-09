@@ -25,6 +25,13 @@ public:
     QString languagePluralId() const;
     void setLanguagePluralId(const QString &value);
 
+    // How the last run ended: signed in, or not. Read before TDLib has said anything, so
+    // startup can show the right screen instead of the one that means "we have not asked
+    // yet" - see AppManager::isSignedOut. Wrong only across a sign-out performed by
+    // another client, and corrected the moment TDLib reports a real state.
+    bool wasAuthorized() const;
+    void setWasAuthorized(bool value);
+
 signals:
     void invertedThemeChanged();
 
@@ -35,6 +42,7 @@ private:
     QSettings *m_settings{};
 
     bool m_invertedTheme;
+    bool m_wasAuthorized;
 
     QString m_languagePackId;
     QString m_languagePluralId;

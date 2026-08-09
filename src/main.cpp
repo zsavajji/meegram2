@@ -2,14 +2,19 @@
 #include <QDeclarativeComponent>
 #include <QDeclarativeContext>
 #include <QDeclarativeEngine>
+#include <QDeclarativeError>
 #include <QDeclarativeView>
+#include <QDir>
+#include <QFile>
 #include <QFontDatabase>
 #include <QModelIndex>
 #include <QPainter>
 #include <QPixmapCache>
+#include <QStringList>
 #include <QTextCodec>
 
 #include <atomic>
+#include <chrono>
 
 #ifdef MEEGRAM_GL_VIEWPORT
 #include <QGLWidget>
@@ -180,6 +185,145 @@ private:
     QDeclarativeView *m_view;
 };
 
+#ifdef MEEGRAM_PROFILE
+// Breaks the "pre-setsource" -> "busy-shown" gap down per file. That gap is the largest
+// single phase of a cold start (1877 ms of 4180 ms, measured on device), and Qt 4.7.4 has
+// no way to precompute any of it: no Qt Quick Compiler (5.8), no disk cache (5.11), not
+// even QDeclarativeComponent::Asynchronous (4.8). QDeclarativeCompiledData lives in the
+// engine and dies with it. So the only levers are compiling less and compiling later, and
+// which of those is worth pulling depends on where the time is.
+//
+// Here rather than in a tools/ binary because every interesting file starts with
+// "import MyComponent 1.0" - the module registered above, which exists only inside this
+// process. A standalone harness cannot resolve it, so main.qml and MainPage.qml, the two
+// files that matter, are exactly the two it could not measure.
+//
+// A fresh QDeclarativeEngine per file is the point: the component cache is per-engine, so
+// one shared engine would charge the first file for the whole MeeGo Components import and
+// hand every later file a free ride. Each row is therefore "this file, cold, including its
+// imports" - subtract the [imports only] row for the file's own share.
+//
+// What a fresh engine does *not* reset is the module plugin, which is dlopen()ed once per
+// process. Pass 1 carries it, pass 2 does not; the difference is load cost that no
+// restructuring of our own QML can remove.
+//
+// Compile only, never create(): instantiation needs a view for most of these roots, and
+// separating the two is the whole question. If the scene time turns out to be
+// instantiation rather than compilation, then precompiled QML would not have helped even
+// if this Qt had it.
+void runQmlBench(int passes)
+{
+    // Both levels: entryList does not recurse, and components/ holds MessageDelegate,
+    // EmojiPicker and ChatItem, which are not small. Names are kept relative to :/qml so
+    // the url below is the same shape for either.
+    //
+    // No name filter and no Filters argument. Asking for ("*.qml", QDir::Files) returned
+    // exactly one of the nineteen top-level files on device, and QResourceFileEngine's
+    // handling of either argument is not something this can verify from here - so it takes
+    // the unfiltered listing, which one call cannot get wrong, and selects by suffix in
+    // C++. The counts are printed for the same reason: a listing that silently returns one
+    // entry produced a table that looked complete and was not.
+    QStringList files;
+
+    const QStringList roots = QDir(":/qml").entryList();
+    const QStringList componentNames = QDir(":/qml/components").entryList();
+
+    for (const QString &name : roots)
+    {
+        if (name.endsWith(".qml"))
+            files.append(name);
+    }
+
+    for (const QString &name : componentNames)
+    {
+        if (name.endsWith(".qml"))
+            files.append("components/" + name);
+    }
+
+    files.sort();
+
+    // The names, not just the counts. Two runs were spent reasoning about why a listing
+    // that reports the right number of entries yields the wrong number of files; the
+    // entries themselves settle it in one run and should have been the first thing
+    // printed. Quoted so trailing whitespace or an empty name is visible.
+    std::fprintf(stderr, "---- MEEGRAM QMLBENCH ---- %d entries in :/qml, %d in :/qml/components, %d .qml selected\n",
+                 roots.size(), componentNames.size(), files.size());
+
+    for (const QString &name : roots)
+        std::fprintf(stderr, "      root entry      \"%s\"\n", qPrintable(name));
+
+    for (const QString &name : componentNames)
+        std::fprintf(stderr, "      component entry \"%s\"\n", qPrintable(name));
+
+    // The imports arm, built from main.qml's own import block so it cannot drift from what
+    // the app actually asks for. QtObject rather than Item: no visual parent needed.
+    QByteArray stub;
+    {
+        QFile mainQml(":/qml/main.qml");
+        if (mainQml.open(QIODevice::ReadOnly | QIODevice::Text))
+        {
+            while (!mainQml.atEnd())
+            {
+                const QByteArray line = mainQml.readLine().trimmed();
+
+                if (line.startsWith("import "))
+                    stub += line + "\n";
+                // Imports precede the root object, so the first line that is neither an
+                // import, a comment nor blank means there are no more.
+                else if (!line.isEmpty() && !line.startsWith("//"))
+                    break;
+            }
+        }
+        stub += "\nQtObject {}\n";
+    }
+
+    for (int pass = 1; pass <= passes; ++pass)
+    {
+        std::fprintf(stderr, "---- MEEGRAM QMLBENCH ---- pass %d/%d%s\n", pass, passes,
+                     pass == 1 ? " (includes one-off module plugin load)" : " (plugin already loaded)");
+
+        {
+            QDeclarativeEngine engine;
+            const auto start = std::chrono::steady_clock::now();
+            QDeclarativeComponent component(&engine);
+            // setData, not a file: the stub has no url of its own. The base url still has
+            // to point at :/qml so "import \"components\"" resolves.
+            component.setData(stub, QUrl("qrc:/qml/__imports_only.qml"));
+            const double ms = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start).count() / 1000.0;
+
+            std::fprintf(stderr, "  %-34s %9.1f ms%s\n", "[imports only]", ms, component.isError() ? "  ERROR" : "");
+
+            if (component.isError())
+            {
+                for (const QDeclarativeError &error : component.errors())
+                    std::fprintf(stderr, "      %s\n", qPrintable(error.toString()));
+            }
+        }
+
+        for (const QString &name : files)
+        {
+            QDeclarativeEngine engine;
+
+            const auto start = std::chrono::steady_clock::now();
+            QDeclarativeComponent component(&engine, QUrl("qrc:/qml/" + name));
+            const double ms = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start).count() / 1000.0;
+
+            // A file that fails to compile is not a fast file; say so rather than
+            // reporting the 2 ms it took to give up.
+            std::fprintf(stderr, "  %-34s %9.1f ms%s\n", qPrintable(name), ms, component.isError() ? "  ERROR" : "");
+
+            if (component.isError())
+            {
+                for (const QDeclarativeError &error : component.errors())
+                    std::fprintf(stderr, "      %s\n", qPrintable(error.toString()));
+            }
+        }
+    }
+
+    std::fflush(stderr);
+}
+#endif
+
 }  // namespace
 
 Q_DECL_EXPORT int main(int argc, char *argv[])
@@ -320,6 +464,18 @@ Q_DECL_EXPORT int main(int argc, char *argv[])
         MEEGRAM_MARK("headless-tdlib-start");
         return app.exec();
     }
+
+#ifdef MEEGRAM_PROFILE
+    // MEEGRAM_QML_BENCH=N compiles every .qml on its own engine, N passes, and exits
+    // without building the scene or touching TDLib. Here rather than earlier because the
+    // qmlRegisterType calls above are what make "import MyComponent 1.0" resolvable, and
+    // every file worth measuring starts with one.
+    if (const int passes = qgetenv("MEEGRAM_QML_BENCH").toInt(); passes > 0)
+    {
+        runQmlBench(passes);
+        return 0;
+    }
+#endif
 
     app.installTranslator(appManager.locale());
 

@@ -15,6 +15,7 @@
 #include <QTimer>
 
 #include <algorithm>
+#include <optional>
 
 namespace {
 
@@ -247,6 +248,12 @@ AppManager::AppManager(QObject *parent)
     if (m_locale->loadCache(m_settings->languagePackId()))
         m_initializationStatus[1] = true;
 
+    // The last run's outcome, standing in until TDLib reports a real one. Without it the
+    // only available answer this early is "not authorized", which is also what a signed-out
+    // user looks like - and MainPage cannot tell those apart, so it showed the sign-in
+    // screen to everyone during the gap.
+    m_signedOut = !m_settings->wasAuthorized();
+
 #ifdef MEEGRAM_JSON_TRANSPORT
     // Before authorization, and before the socket has said anything: a tap that started
     // this process is already on its way, and the D-Bus call that carries it is delivered
@@ -268,6 +275,11 @@ bool AppManager::isAuthorized() const noexcept
 bool AppManager::isServiceUnreachable() const noexcept
 {
     return m_serviceUnreachable;
+}
+
+bool AppManager::isSignedOut() const noexcept
+{
+    return m_signedOut;
 }
 
 const QString &AppManager::connectionStateString() const noexcept
@@ -677,6 +689,45 @@ void AppManager::handleResult(td::td_api::Object *object)
 
 void AppManager::handleAuthorizationState(const td::td_api::AuthorizationState &authorizationState)
 {
+    // Recorded before the Ready test below, which returns early for everything else and so
+    // never learned that a user is signed *out*. Only the states that need the user to do
+    // something count: WaitTdlibParameters is startup plumbing every launch passes through,
+    // and treating it as signed out would put the sign-in screen up on every cold start -
+    // exactly the flash this exists to remove.
+    const auto signedOut = [&authorizationState] {
+        switch (authorizationState.get_id())
+        {
+            case td::td_api::authorizationStateWaitPhoneNumber::ID:
+            case td::td_api::authorizationStateWaitPremiumPurchase::ID:
+            case td::td_api::authorizationStateWaitEmailAddress::ID:
+            case td::td_api::authorizationStateWaitEmailCode::ID:
+            case td::td_api::authorizationStateWaitCode::ID:
+            case td::td_api::authorizationStateWaitOtherDeviceConfirmation::ID:
+            case td::td_api::authorizationStateWaitRegistration::ID:
+            case td::td_api::authorizationStateWaitPassword::ID:
+            case td::td_api::authorizationStateLoggingOut::ID:
+            case td::td_api::authorizationStateClosed::ID:
+                return std::optional<bool>(true);
+            case td::td_api::authorizationStateReady::ID:
+                return std::optional<bool>(false);
+            default:
+                // WaitTdlibParameters, Closing: says nothing either way, so leave the
+                // seeded guess in place.
+                return std::optional<bool>();
+        }
+    }();
+
+    if (signedOut.has_value() && *signedOut != m_signedOut)
+    {
+        m_signedOut = *signedOut;
+
+        // Persisted here rather than only on Ready, so a sign-out is remembered too and
+        // the next launch opens straight onto the sign-in screen.
+        m_settings->setWasAuthorized(!m_signedOut);
+
+        emit signedOutChanged();
+    }
+
     if (authorizationState.get_id() != td::td_api::authorizationStateReady::ID)
         return;
 

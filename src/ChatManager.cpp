@@ -592,6 +592,13 @@ void ChatManager::createGroup(const QString &title, const QStringList &userIds) 
 
 void ChatManager::handleChatFetched(qlonglong chatId, bool ok) noexcept
 {
+    // Only the chat still being waited on. fetchChat keeps one latch, so opening a second
+    // chat before the first reply lands overwrites it - and main.qml turns every
+    // chatAvailable into a pageStack.push, so without this the late reply for the
+    // abandoned chat pushes a page the user has already navigated away from.
+    if (m_fetchingChatId != chatId)
+        return;
+
     if (!ok)
         m_fetchingChatId = 0;  // a network failure should not block a later attempt
 

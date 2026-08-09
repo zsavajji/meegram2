@@ -42,15 +42,29 @@ Page {
             bottom: parent.bottom
         }
 
+        // appManager.signedOut, not !chatManager. The two are not the same question:
+        // chatManager is null both when the user is signed out and when TDLib simply has
+        // not answered yet, and appInitialized regularly fires before it does - so a
+        // signed-in user got the "StartMessaging" welcome screen for the gap. signedOut is
+        // seeded from the last run's outcome, so it is already correct here.
         sourceComponent: !appWindow.initialized ? (appManager.serviceUnreachable ? unreachableComponent : busyComponent)
-                       : !appManager.chatManager ? infoComponent
+                       : appManager.signedOut ? infoComponent
+                       : !appManager.chatManager ? busyComponent
                        : folderChatModels.count === 0 ? chatLayoutComponent
                                                       : chatTabsLayoutComponent
 
         // The end of the startup timeline: the busy indicator is gone and the real chat
         // layout has been built. Fires on every swap, so a run shows the busy component
         // first - it is the last "chat-layout-loaded" line that ends startup.
-        onLoaded: utils.mark(sourceComponent === busyComponent ? "busy-shown" : "chat-layout-loaded")
+        //
+        // Named for what actually loaded. This marked "chat-layout-loaded" for anything
+        // that was not the spinner, so an infoComponent swap - the flash fixed above - was
+        // recorded as the chat list being up, and a startup figure taken from it could have
+        // been either.
+        onLoaded: utils.mark(sourceComponent === busyComponent ? "busy-shown"
+                           : sourceComponent === infoComponent ? "info-shown"
+                           : sourceComponent === unreachableComponent ? "unreachable-shown"
+                                                                     : "chat-layout-loaded")
     }
 
     Component {
@@ -351,13 +365,38 @@ Page {
             }
             MenuItem {
                 text: "About"
-                onClicked: aboutDialog.open()
+                onClicked: root.openAbout()
             }
         }
     }
 
-    AboutDialog {
-        id: aboutDialog
+    // Built on demand rather than with the page. As a declared element this compiled with
+    // MainPage on every launch - 214.3 ms on device (MEEGRAM_QML_BENCH, pass 1) - for a
+    // dialog that is opened almost never. Qt.createComponent takes a string, so the type is
+    // not resolved until this runs.
+    //
+    // Unlike the chat layouts, which were deferred the same way and put the time straight
+    // back onto the path to the chat list, nothing loads this during startup at all: the
+    // 214 ms has no tail to pay it back in.
+    //
+    // Kept for the life of the page once built, so opening About twice does not compile it
+    // twice.
+    property variant aboutDialogItem: null
+
+    function openAbout() {
+        if (!aboutDialogItem)
+        {
+            var component = Qt.createComponent("components/AboutDialog.qml");
+
+            if (component.status !== Component.Ready) {
+                console.debug("About dialog failed to load:", component.errorString());
+                return;
+            }
+
+            aboutDialogItem = component.createObject(root);
+        }
+
+        aboutDialogItem.open();
     }
 
     // Every item in the menu dereferences chatManager, so it cannot be offered before
@@ -367,7 +406,7 @@ Page {
             anchors.right: (parent !== undefined) ? parent.right : undefined
             visible: !appManager.chatManager
             iconSource: "qrc:/images/help-icon.png"
-            onClicked: aboutDialog.open()
+            onClicked: root.openAbout()
         }
         ToolIcon {
             platformIconId: "toolbar-view-menu"

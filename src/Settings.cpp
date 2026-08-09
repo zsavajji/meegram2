@@ -13,6 +13,10 @@ Settings::Settings(QObject *parent)
 
     m_languagePackId = m_settings->value("languagePackId", DefaultLanguageCode).toString();
     m_languagePluralId = m_settings->value("languagePluralId", DefaultLanguageCode).toString();
+
+    // Defaults false, so a first launch shows the sign-in screen with no round trip - which
+    // is the correct screen for it, and the one case where guessing wrong costs nothing.
+    m_wasAuthorized = m_settings->value("wasAuthorized", false).toBool();
 }
 
 bool Settings::invertedTheme() const
@@ -27,6 +31,20 @@ void Settings::setInvertedTheme(bool value)
         m_invertedTheme = value;
         m_settings->setValue("invertedTheme", m_invertedTheme);
         emit invertedThemeChanged();
+    }
+}
+
+bool Settings::wasAuthorized() const
+{
+    return m_wasAuthorized;
+}
+
+void Settings::setWasAuthorized(bool value)
+{
+    if (m_wasAuthorized != value)
+    {
+        m_wasAuthorized = value;
+        m_settings->setValue("wasAuthorized", m_wasAuthorized);
     }
 }
 

@@ -40,6 +40,20 @@ class AppManager : public QObject
     // is not having heard from TDLib at all. See reportInitializationStall.
     Q_PROPERTY(bool serviceUnreachable READ isServiceUnreachable NOTIFY serviceUnreachableChanged)
 
+    // Whether to offer the sign-in screen. Distinct from !authorized, which is also true
+    // before TDLib has said anything - and MainPage used !chatManager for this, so the
+    // moment appInitialized fired ahead of authorizationStateReady a signed-in user was
+    // shown the "StartMessaging" welcome screen. Those two are independent: appInitialized
+    // needs setTdlibParameters plus the language pack, both of which a warm daemon answers
+    // at once, while the authorization state still costs a round trip.
+    //
+    // Seeded from Settings::wasAuthorized so it is already right before TDLib answers, and
+    // corrected by handleAuthorizationState the moment it does. That makes the common case
+    // - a signed-in user reopening the app - show the spinner rather than a screen telling
+    // them to sign in, and a genuinely signed-out user reach the sign-in button with no
+    // round trip at all.
+    Q_PROPERTY(bool signedOut READ isSignedOut NOTIFY signedOutChanged)
+
     // All built in the constructor and never replaced, so no change to notify.
     Q_PROPERTY(Client *client READ client CONSTANT)
     Q_PROPERTY(Authorization *authorization READ authorization CONSTANT)
@@ -56,6 +70,8 @@ public:
     bool isAuthorized() const noexcept;
 
     bool isServiceUnreachable() const noexcept;
+
+    bool isSignedOut() const noexcept;
 
     const QString &connectionStateString() const noexcept;
 
@@ -76,6 +92,8 @@ signals:
     void authorizedChanged();
 
     void serviceUnreachableChanged();
+
+    void signedOutChanged();
 
     void connectionStateChanged();
 
@@ -161,6 +179,10 @@ private:
     // eight seconds is dead for the run. If TDLib does answer late, appInitialized fires
     // and MainPage leaves this state on `initialized` without consulting it.
     bool m_serviceUnreachable{false};
+
+    // Seeded in the constructor from Settings::wasAuthorized, not default-initialised: the
+    // whole point is to be right before TDLib answers.
+    bool m_signedOut{true};
 
     QString m_connectionStateString;
 
