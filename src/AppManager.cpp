@@ -9,6 +9,7 @@
 #include "StorageManager.hpp"
 
 #include <QApplication>
+#include <QDateTime>
 #include <QDebug>
 #include <QDir>
 #include <QLocale>
@@ -224,6 +225,26 @@ constexpr int InitializationStallMs = 8000;
 // pace a network comes back at, not at the pace a request fails.
 constexpr int LanguagePackRetryMs = 5000;
 
+// How stale a cached language pack is allowed to get before it is pulled again.
+//
+// The pack answers with 1.8 MB on one line, measured on device, and Client::handleLine
+// decodes a line before it can look at the next - so refreshing it on every launch spent
+// seconds of the reader thread, and the socket behind it, on strings that change a few
+// times a year. The disk cache has already answered every qsTr by the time this is
+// decided; the request only ever picks up server-side edits.
+//
+// Two days: often enough that a translation fix lands within a couple of launches, rare
+// enough that it is not something a launch pays for.
+constexpr qint64 LanguagePackMaxAgeSeconds = 2 * 24 * 60 * 60;
+
+// And when it is due, still not during the launch. Nothing waits on it, so it goes out
+// once the things that are waited on have had the socket.
+constexpr int LanguagePackRefreshMs = 10000;
+
+// The window a notification tap gets to put its getChat on the socket ahead of the state
+// replay. See scheduleStateRestore.
+constexpr int StateRestoreDelayMs = 250;
+
 }  // namespace
 
 AppManager::AppManager(QObject *parent)
@@ -246,7 +267,12 @@ AppManager::AppManager(QObject *parent)
     // A hit also means startup has nothing to wait for - the request below still goes out
     // and still refreshes the pack, it just no longer holds the UI.
     if (m_locale->loadCache(m_settings->languagePackId()))
+    {
         m_initializationStatus[1] = true;
+
+        // Recorded so setParameters can hold the refresh back. See LanguagePackRefreshMs.
+        m_localeFromCache = true;
+    }
 
     // The last run's outcome, standing in until TDLib reports a real one. Without it the
     // only available answer this early is "not authorized", which is also what a signed-out
@@ -487,8 +513,15 @@ void AppManager::setParameters() noexcept
             // Asking after the parameters are accepted makes the first attempt the one that
             // works.
             //
+            // Unless a cached pack already answered it and is still fresh, in which case
+            // this launch asks for nothing at all - see LanguagePackMaxAgeSeconds. A stale
+            // one is refreshed, but later: nothing is waiting on it except the socket.
+            //
             // Queued, because this callback runs on the reader thread.
-            QMetaObject::invokeMethod(this, "loadLanguagePack", Qt::QueuedConnection);
+            if (!m_localeFromCache)
+                QMetaObject::invokeMethod(this, "loadLanguagePack", Qt::QueuedConnection);
+            else if (languagePackIsStale())
+                QMetaObject::invokeMethod(this, "refreshLanguagePack", Qt::QueuedConnection);
         }
     });
 }
@@ -513,7 +546,21 @@ void AppManager::requestAuthorizationState() noexcept
     });
 }
 
-#ifdef MEEGRAM_JSON_TRANSPORT
+// ponytail: a delay rather than a signal, because nothing in the app reports "the
+// notification tap has arrived, or is never going to". The tap is a D-Bus call dispatched
+// by the event loop and authorization is a queued update delivered by the same loop, and
+// measured on device they land 17 ms apart in an order nothing guarantees - so the tap
+// gets a window to ask first rather than a coin toss. A signal to close it on would need
+// the tap to be latched in one place instead of two (here and main.qml), which is a
+// restructure this does not need.
+//
+// The cost on a launch with no tap is 250 ms before a replay that takes seconds, and the
+// chat list cannot render ahead of it either way.
+void AppManager::scheduleStateRestore() noexcept
+{
+    QTimer::singleShot(StateRestoreDelayMs, this, SLOT(restoreState()));
+}
+
 // Everything TDLib announces exactly once, asked for rather than waited on.
 //
 // requestAuthorizationState above solves this for the login state; it is not special.
@@ -534,21 +581,37 @@ void AppManager::requestAuthorizationState() noexcept
 // replaying them through injectUpdate means StorageManager and every model take their
 // normal path and nothing else in the app has to know this happened.
 //
-// ponytail: the whole state arrives as one line. On a daemon that has been up for days with
-// thousands of dialogs in memory that could approach meegramd's 8 MiB per-client queue cap,
-// which drops the UI rather than truncating. Raise MaxOutgoingBytes if anyone ever hits it;
-// chunking needs a request that can page, and getCurrentState is not one.
+// The whole state used to arrive as one line, and on a real account that line is 5.5 MB:
+// 543 updateNewChat, 524 updateChatLastMessage, 343 updateUser and 930 KB of full-info
+// siblings, measured on device. Client::handleLine decodes a line before it looks at the
+// next, so it cost ~12 seconds of the reader thread and everything behind it waited -
+// which is what made a tapped notification take twenty seconds to open its chat.
+//
+// meegramd now relays it as its constituent updates, one per line, and answers this
+// request with a plain ok (see broadcastSplit in src/daemon/main.cpp). They arrive through
+// the ordinary update path, in order - which is load-bearing: TDLib emits supergroups
+// before the basic groups that name them, users before the secret chats that name them,
+// and updateNewChat before the updateChatLastMessage that carries the chat's positions.
 void AppManager::restoreState() noexcept
 {
     m_client->send(td::td_api::make_object<td::td_api::getCurrentState>(), [this](auto &&response) {
-        if (!response || response->get_id() != td::td_api::updates::ID)
+        if (!response)
             return;
 
+        // The replay has already been delivered, update by update. Nothing left to do but
+        // release the handler, which returning does.
+        if (response->get_id() == td::td_api::ok::ID)
+            return;
+
+        if (response->get_id() != td::td_api::updates::ID)
+            return;
+
+        // A daemon that predates the split answers with the whole thing. Worth keeping:
+        // meegramd is the resident process, so an upgraded UI meets the old one every time
+        // the app is reinstalled without a reboot, and the alternative failure is a chat
+        // list that stays empty for the rest of the session.
         auto updates = td::td_api::move_object_as<td::td_api::updates>(response);
 
-        // In order, which is load-bearing: TDLib emits supergroups before the basic groups
-        // that name them, users before the secret chats that name them, and updateNewChat
-        // before the updateChatLastMessage that carries the chat's positions.
         for (auto &update : updates->updates_)
         {
             if (update)
@@ -556,7 +619,6 @@ void AppManager::restoreState() noexcept
         }
     });
 }
-#endif
 
 void AppManager::loadLanguagePack() noexcept
 {
@@ -587,6 +649,11 @@ void AppManager::loadLanguagePack() noexcept
                 m_initializationStatus[1] = true;
                 checkInitializationStatus();
             }
+
+            // Queued: this runs on the reader thread and QSettings is not shared safely
+            // across threads. Recorded only on success, so a failed pull leaves the pack
+            // due and the next launch tries again.
+            QMetaObject::invokeMethod(this, "recordLanguagePackFetched", Qt::QueuedConnection);
         }
         else
         {
@@ -614,6 +681,29 @@ void AppManager::loadLanguagePack() noexcept
             QMetaObject::invokeMethod(this, "scheduleLanguagePackRetry", Qt::QueuedConnection);
         }
     });
+}
+
+bool AppManager::languagePackIsStale() const noexcept
+{
+    const auto fetchedAt = m_settings->languagePackFetchedAt();
+
+    // Never fetched, or a clock that has moved backwards - a device whose time was wrong
+    // and got corrected would otherwise sit on a pack it can never decide to refresh.
+    const auto now = QDateTime::currentMSecsSinceEpoch() / 1000;
+    if (fetchedAt <= 0 || fetchedAt > now)
+        return true;
+
+    return now - fetchedAt >= LanguagePackMaxAgeSeconds;
+}
+
+void AppManager::refreshLanguagePack() noexcept
+{
+    QTimer::singleShot(LanguagePackRefreshMs, this, SLOT(loadLanguagePack()));
+}
+
+void AppManager::recordLanguagePackFetched() noexcept
+{
+    m_settings->setLanguagePackFetchedAt(QDateTime::currentMSecsSinceEpoch() / 1000);
 }
 
 void AppManager::scheduleLanguagePackRetry() noexcept
@@ -739,12 +829,7 @@ void AppManager::handleAuthorizationState(const td::td_api::AuthorizationState &
 
     m_chatManager = std::make_shared<ChatManager>(m_storageManager, m_locale);
 
-#ifdef MEEGRAM_JSON_TRANSPORT
-    // After the ChatManager, so its models are connected to StorageManager before the
-    // replay reaches it - and after the m_chatManager guard above, which is what stops the
-    // updateAuthorizationState inside the replay from starting a second one.
-    restoreState();
-#else
+#ifndef MEEGRAM_JSON_TRANSPORT
     // Only the in-process transport builds one of these. Under the daemon transport
     // meegramd has been posting notifications since before this app was started, and it
     // learns which chat is on screen from the openChat it relays - so there is nothing to
@@ -755,7 +840,18 @@ void AppManager::handleAuthorizationState(const td::td_api::AuthorizationState &
     connect(m_notificationManager.get(), SIGNAL(chatRequested(QString)), SIGNAL(chatRequested(QString)));
 #endif
 
+    // Before the state restore below, which is the whole ordering: main.qml releases a held
+    // notification tap from here, and everything that tap needs - getChat, then the first
+    // getChatHistory - has to be on the socket ahead of the replay. One socket, one reader
+    // thread, decoded strictly in order, so whichever is asked for first the other waits.
     emit chatManagerChanged();
+
+#ifdef MEEGRAM_JSON_TRANSPORT
+    // After the ChatManager, so its models are connected to StorageManager before the
+    // replay reaches it - and after the m_chatManager guard above, which is what stops the
+    // updateAuthorizationState inside the replay from starting a second one.
+    scheduleStateRestore();
+#endif
 }
 
 void AppManager::handleConnectionState(const td::td_api::ConnectionState &connectionState)

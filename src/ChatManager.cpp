@@ -530,13 +530,35 @@ void ChatManager::fetchChat(qlonglong chatId) noexcept
             const auto *error = static_cast<const td::td_api::error *>(response.get());
             qWarning() << "fetching chat" << chatId << "failed:" << error->code_ << QString::fromStdString(error->message_);
         }
+        else if (response->get_id() == td::td_api::chat::ID)
+        {
+            // The reply *is* the chat, so use it. This used to rely on TDLib pushing
+            // updateNewChat ahead of the reply, which it does exactly once per TDLib
+            // process and never again - and meegramd's TDLib outlives the UI by design.
+            // So against a daemon that had already announced this chat to some earlier
+            // run, the reply arrived, StorageManager still did not have the chat, the
+            // retry missed again, and fetchChat's one-attempt latch stopped it there: a
+            // tapped notification opened nothing at all.
+            //
+            // It only ever appeared to work because getCurrentState's replay carried
+            // updateNewChat for every chat, so the open succeeded when the whole 5.5 MB
+            // of it had been decoded. That is what made tapping a banner take twenty
+            // seconds rather than the ten milliseconds this reply actually costs.
+            //
+            // injectUpdate rather than a private path into StorageManager: an update is
+            // what every subscriber already knows how to take, and it is the same
+            // mechanism restoreState and requestAuthorizationState use for the rest of
+            // what TDLib says exactly once.
+            m_client->injectUpdate(
+                td::td_api::make_object<td::td_api::updateNewChat>(td::td_api::move_object_as<td::td_api::chat>(response)));
+        }
 
         // This runs on the TDLib worker thread. Hop to the main thread before touching
         // anything or emitting.
         //
-        // TDLib sends updateNewChat before the reply that needs it, and Client emits
-        // updates through a queued connection as well, so by the time this queued call
-        // is delivered StorageManager has already processed the update.
+        // Queued after the injected update, and Qt delivers queued calls to a thread in
+        // the order they were posted - so StorageManager has taken the chat by the time
+        // this runs, which is the ordering handleChatFetched's caller depends on.
         QMetaObject::invokeMethod(this, "handleChatFetched", Qt::QueuedConnection, Q_ARG(qlonglong, chatId), Q_ARG(bool, !failed));
     });
 }

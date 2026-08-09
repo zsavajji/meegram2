@@ -54,6 +54,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -276,6 +277,144 @@ void broadcast(const char *line, size_t length)
     // the write would hand it a lock it has to wait for.
     if (queued)
         wakePollLoop();
+}
+
+// getCurrentState answers with everything a client needs to rebuild its state, in one
+// object. Measured on device against a real account: 5.5 MB on a single line - 543
+// updateNewChat, 524 updateChatLastMessage, 343 updateUser and 930 KB of full-info
+// siblings. A client decodes one line before it can look at the next, so that line cost
+// the UI ~12 seconds of its reader thread, and everything behind it waited for all of it:
+// the 14 KB getChat answering the notification the user had just tapped left TDLib in
+// 10 ms and was read twenty seconds later.
+//
+// So it goes out as what it already is - a sequence of updates, one per line,
+// indistinguishable from the ones TDLib emits live. The client's ordinary update path
+// takes them unchanged, neither process holds 5.5 MB or the object tree decoded from it
+// at once, and MaxOutgoingBytes stops being something anyone has to size against a
+// single response.
+//
+// A brace scanner rather than a parse, which is what keeps this a relay: the elements are
+// top-level objects in a flat array, so one pass over the bytes finds their boundaries
+// with no allocation and no unescaping, and each is relayed straight out of TDLib's own
+// buffer. This still does not read what it carries - it only finds where the commas are.
+constexpr char UpdatesPrefix[] = "{\"@type\":\"updates\"";
+constexpr char UpdatesField[] = "\"updates\":[";
+
+// The "@extra" the caller tagged its request with, read from the tail of the line - the
+// field is a sibling of "updates", so searching from the end of the array cannot hit a
+// string inside the payload. Empty if there is none, which is an unsolicited multi-update
+// rather than an answer to anybody.
+std::string extraValue(const char *begin, const char *end)
+{
+    constexpr char Field[] = "\"@extra\":\"";
+
+    const char *found = std::strstr(begin, Field);
+    if (!found || found >= end)
+        return {};
+
+    const char *value = found + sizeof(Field) - 1;
+
+    for (const char *p = value; p < end; ++p)
+    {
+        if (*p == '\\')
+        {
+            ++p;
+            continue;
+        }
+
+        if (*p == '"')
+            return std::string(value, static_cast<size_t>(p - value));
+    }
+
+    return {};
+}
+
+// Relays a multi-update response as its constituent updates. Returns false if this is not
+// one, or if the scan does not come out even - in which case the caller relays the line
+// whole, exactly as it did before. Nothing is written until the scan has finished, so a
+// line this cannot make sense of is never half-relayed.
+bool broadcastSplit(const char *line, size_t length)
+{
+    constexpr size_t prefixLength = sizeof(UpdatesPrefix) - 1;
+
+    if (length < prefixLength || std::memcmp(line, UpdatesPrefix, prefixLength) != 0)
+        return false;
+
+    const char *array = std::strstr(line + prefixLength, UpdatesField);
+    if (!array)
+        return false;
+
+    const char *const end = line + length;
+
+    std::vector<std::pair<const char *, size_t>> elements;
+    elements.reserve(64);
+
+    const char *elementStart = nullptr;
+    const char *arrayEnd = nullptr;
+
+    int depth = 0;
+    bool inString = false;
+
+    for (const char *p = array + sizeof(UpdatesField) - 1; p < end; ++p)
+    {
+        if (inString)
+        {
+            // A backslash escapes whatever follows it, including a quote and another
+            // backslash. Skipping the next byte outright is the whole of that rule.
+            if (*p == '\\')
+                ++p;
+            else if (*p == '"')
+                inString = false;
+
+            continue;
+        }
+
+        switch (*p)
+        {
+            case '"':
+                inString = true;
+                break;
+            case '{':
+                if (depth++ == 0)
+                    elementStart = p;
+                break;
+            case '}':
+                if (--depth == 0 && elementStart)
+                {
+                    elements.emplace_back(elementStart, static_cast<size_t>(p - elementStart) + 1);
+                    elementStart = nullptr;
+                }
+                break;
+            case ']':
+                if (depth == 0)
+                    arrayEnd = p;
+                break;
+            default:
+                break;
+        }
+
+        if (arrayEnd)
+            break;
+    }
+
+    // Anything unbalanced, unterminated, or still inside a string is a line this does not
+    // understand. Hand it back whole rather than guess.
+    if (!arrayEnd || depth != 0 || inString)
+        return false;
+
+    for (const auto &element : elements)
+        broadcast(element.first, element.second);
+
+    // The caller is still waiting on its request id, and it gets an answer: the updates
+    // have been delivered. AppManager::restoreState reads this as "the replay is complete".
+    if (const auto extra = extraValue(arrayEnd, end); !extra.empty())
+    {
+        const std::string acknowledgement = R"({"@type":"ok","@extra":")" + extra + R"("})";
+
+        broadcast(acknowledgement.data(), acknowledgement.size());
+    }
+
+    return true;
 }
 
 // The binary a connecting peer has to be running, derived from this one's own location
@@ -635,8 +774,10 @@ int main(int argc, char *argv[])
                 // Relayed first. The notifier makes blocking D-Bus calls, and a UI waiting
                 // on a chat list must not be behind a notification daemon that is thinking
                 // about it. TDLib's buffer stays valid until the next td_receive, so it is
-                // still ours to read afterwards.
-                broadcast(line, length);
+                // still ours to read afterwards - which is also what lets broadcastSplit
+                // relay slices of it without copying.
+                if (!broadcastSplit(line, length))
+                    broadcast(line, length);
 
                 notifier->onUpdate(line, length);
             }

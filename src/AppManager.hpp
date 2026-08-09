@@ -133,9 +133,25 @@ private slots:
 
     void loadLanguagePack() noexcept;
 
+    // Arms loadLanguagePack for later, when a cached pack has already answered every qsTr
+    // and the refresh would only be taking the socket away from the launch. A slot for the
+    // same reason as the retry below.
+    void refreshLanguagePack() noexcept;
+
+    // Stamps the pack as pulled. A slot because the reply lands on the reader thread and
+    // QSettings belongs to this one.
+    void recordLanguagePackFetched() noexcept;
+
     // Re-arms loadLanguagePack after a failed attempt. A slot because the failure is
     // noticed on the reader thread and a timer has to be started on this one.
     void scheduleLanguagePackRetry() noexcept;
+
+    // Everything else TDLib announces exactly once, replayed into a UI that was not there
+    // to hear it. Only ever called under the daemon transport, which is the only one where
+    // "exactly once" can land in a process that has already exited - but declared
+    // unconditionally so moc never has to agree with the build about which slots exist.
+    // See the note in AppManager.cpp.
+    void restoreState() noexcept;
 
     // Fires once, a few seconds in. Silent unless startup is incomplete, in which case it
     // names the half that is missing and releases the UI from waiting on the language
@@ -149,12 +165,13 @@ private:
     // only announces changes. See Client::injectUpdate.
     void requestAuthorizationState() noexcept;
 
-    // The same problem, for everything else TDLib announces exactly once. Only built under
-    // the daemon transport, which is the only one where "exactly once" can land in a
-    // process that has already exited. See the note in AppManager.cpp.
-#ifdef MEEGRAM_JSON_TRANSPORT
-    void restoreState() noexcept;
-#endif
+    // Arms restoreState. A notification tap has to reach the socket before the replay does,
+    // and the two are not ordered by anything - see the comment in AppManager.cpp.
+    void scheduleStateRestore() noexcept;
+
+    // Whether the cached language pack is old enough to be worth 1.8 MB. See
+    // LanguagePackMaxAgeSeconds.
+    bool languagePackIsStale() const noexcept;
 
     void checkInitializationStatus() noexcept;
 
@@ -183,6 +200,11 @@ private:
     // Seeded in the constructor from Settings::wasAuthorized, not default-initialised: the
     // whole point is to be right before TDLib answers.
     bool m_signedOut{true};
+
+    // Whether Locale answered from its disk cache, which is what makes the 1.8 MB pack
+    // request skippable for this launch. Set in the constructor, read from a reader-thread
+    // callback and never written again, so no synchronisation.
+    bool m_localeFromCache{false};
 
     QString m_connectionStateString;
 

@@ -17,6 +17,10 @@ Settings::Settings(QObject *parent)
     // Defaults false, so a first launch shows the sign-in screen with no round trip - which
     // is the correct screen for it, and the one case where guessing wrong costs nothing.
     m_wasAuthorized = m_settings->value("wasAuthorized", false).toBool();
+
+    // Defaults 0, which reads as "never", so an install that predates this setting refreshes
+    // once and then settles into the interval.
+    m_languagePackFetchedAt = m_settings->value("languagePackFetchedAt", 0).toLongLong();
 }
 
 bool Settings::invertedTheme() const
@@ -45,6 +49,20 @@ void Settings::setWasAuthorized(bool value)
     {
         m_wasAuthorized = value;
         m_settings->setValue("wasAuthorized", m_wasAuthorized);
+    }
+}
+
+qint64 Settings::languagePackFetchedAt() const
+{
+    return m_languagePackFetchedAt;
+}
+
+void Settings::setLanguagePackFetchedAt(qint64 value)
+{
+    if (m_languagePackFetchedAt != value)
+    {
+        m_languagePackFetchedAt = value;
+        m_settings->setValue("languagePackFetchedAt", m_languagePackFetchedAt);
     }
 }
 

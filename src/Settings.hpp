@@ -32,6 +32,14 @@ public:
     bool wasAuthorized() const;
     void setWasAuthorized(bool value);
 
+    // When the whole language pack was last pulled from the server, as a Unix time in
+    // seconds, or 0 if it never has been. The pack answers with 1.8 MB on one line and the
+    // disk cache already has every string the UI asks for, so a launch that refreshed it
+    // would be spending the socket - and the reader thread that decodes it - on strings
+    // that change a few times a year. See AppManager::LanguagePackMaxAgeSeconds.
+    qint64 languagePackFetchedAt() const;
+    void setLanguagePackFetchedAt(qint64 value);
+
 signals:
     void invertedThemeChanged();
 
@@ -43,6 +51,8 @@ private:
 
     bool m_invertedTheme;
     bool m_wasAuthorized;
+
+    qint64 m_languagePackFetchedAt;
 
     QString m_languagePackId;
     QString m_languagePluralId;
