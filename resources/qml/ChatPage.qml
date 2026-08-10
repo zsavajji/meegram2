@@ -363,11 +363,20 @@ Page {
 
                 property int ticks: 0
 
+                // Which position the settle is chasing: where the chat opens, or the end
+                // of the list after a message landed. A message arriving needs the same
+                // bounded retry the opening slice does, and for the same reason - see the
+                // note above goToInitialPosition.
+                property bool toEnd: false
+
                 interval: 60
                 repeat: true
 
                 onTriggered: {
-                    listView.goToInitialPosition()
+                    if (toEnd)
+                        listView.positionViewAtEnd()
+                    else
+                        listView.goToInitialPosition()
                     // Also the only reliable point to report what has been read: on
                     // countChanged the delegates do not exist yet, so indexAt fails,
                     // and onMovementEnded needs the user to actually drag.
@@ -380,7 +389,8 @@ Page {
                 }
             }
 
-            function beginSettle() {
+            function beginSettle(atEnd) {
+                settleTimer.toEnd = atEnd === true
                 settleTimer.ticks = 0
                 settleTimer.restart()
             }
@@ -1057,14 +1067,23 @@ Page {
         onMessageAppended: {
             // A live message ends the opening sequence, whether or not the user has
             // touched the list yet - otherwise the two would fight over contentY.
-            settleTimer.stop()
-
-            if (listView.followLast) {
-                listView.positionViewAtEnd()
-                // Arrived while you are looking at the bottom of the chat, so it has
-                // been read the moment it lands.
-                listView.markVisibleAsRead()
+            if (!listView.followLast) {
+                settleTimer.stop()
+                return
             }
+
+            listView.positionViewAtEnd()
+            // Arrived while you are looking at the bottom of the chat, so it has
+            // been read the moment it lands.
+            listView.markVisibleAsRead()
+
+            // One call was not enough. The row that just landed is a MessageDelegate
+            // whose Loader has not instantiated its bubble yet, so at this moment the
+            // list is sizing it from the running average - and contentHeight grows again
+            // as soon as the bubble is laid out, leaving the view short of the bottom
+            // with the new message off screen. Exactly the problem the opening position
+            // already solves by repositioning a few times, so it settles the same way.
+            listView.beginSettle(true)
         }
     }
 

@@ -987,12 +987,28 @@ void MessageModel::loadMessages() noexcept
     // unread than one slice loaded a window that did not contain the newest message at
     // all - the bottom of the list was not the last message received.
     //
-    // A chat can have no last message - freshly created, or its history cleared - and
-    // this dereferenced it unconditionally. from_message_id 0 means "from the newest",
-    // which is what is wanted anyway.
-    const auto *lastMessage = m_chat->lastMessage();
-
-    requestHistory(lastMessage ? lastMessage->id() : 0, 0, MessageSliceLimit);
+    // 0, not the chat's last message id. With offset 0 getChatHistory returns messages
+    // strictly *older* than from_message_id: OrderedMessages::get_history steps the
+    // iterator back one as soon as it lands on that id (td/telegram/OrderedMessage.cpp,
+    // the `--it` under `(*it)->message_id_ == from_message_id`), which is what makes
+    // fetchMoreBack's "from the oldest loaded" paging work without duplicating a row.
+    // Anchoring the opening request on the last message therefore asked for everything
+    // except the message the user opened the chat to read. It only appeared later - when
+    // a live updateNewMessage appended it, or when something newer had arrived by the
+    // time the chat was reopened.
+    //
+    // 0 means "from the newest" and includes it. It also covers the chat that has no last
+    // message at all - freshly created, or its history cleared - which is why this
+    // stopped dereferencing lastMessage().
+    //
+    // Not the smaller-looking fix, which is to keep the anchor and pass offset -1: that is
+    // inclusive too, and it keeps the 50-message server request the old call made. It also
+    // reaches CHECK(!have_a_gap) in OrderedMessages::get_history, which aborts the process
+    // when the anchor is the dialog's last message and that message is not in TDLib's
+    // loaded set. ChatManager sends closeChat on minimise, which is what arms the dialog
+    // unload that produces exactly that state - see handleDeleteMessages on from_cache. 0
+    // takes the from-the-end path and never runs that code.
+    requestHistory(0, 0, MessageSliceLimit);
 }
 
 int MessageModel::lastMessageIndex() const noexcept
