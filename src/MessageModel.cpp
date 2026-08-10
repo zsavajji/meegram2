@@ -164,6 +164,26 @@ QVariant MessageModel::data(const QModelIndex &index, int role) const
 
             return photos;
         }
+        case AlbumCaptionRole: {
+            // The same run AlbumRole walks, and the same head-only condition: only that
+            // row draws the batch, so only it has anywhere to put the caption.
+            if (sameAlbum(index.row() - 1, index.row()) || !sameAlbum(index.row(), index.row() + 1))
+                return QString();
+
+            for (int row = index.row(); row < static_cast<int>(m_messages.size()); ++row)
+            {
+                // sameAlbum has already established every member of the run is a photo.
+                const auto caption = static_cast<const MessagePhoto *>(m_messageMap.at(m_messages[row])->content())->caption();
+
+                if (!caption.isEmpty())
+                    return caption;
+
+                if (!sameAlbum(row, row + 1))
+                    break;
+            }
+
+            return QString();
+        }
         case ContentTypeRole: {
             // The delegate picks its component off this role already, so grouping rides on
             // it rather than on two more roles the view would have to read for every row.
@@ -371,6 +391,7 @@ QHash<int, QByteArray> MessageModel::roleNames() const noexcept
     roles[EditDateRole] = "editDate";
     roles[ContentRole] = "content";
     roles[AlbumRole] = "album";
+    roles[AlbumCaptionRole] = "albumCaption";
     // Custom
     roles[ContentTypeRole] = "contentType";
     roles[IsServiceRole] = "isService";

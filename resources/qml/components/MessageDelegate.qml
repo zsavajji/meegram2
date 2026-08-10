@@ -70,12 +70,12 @@ Item {
         id: photoMessageComponent
 
         MessageBubble {
-            // ponytail: opens the size that was downloaded for the bubble, which only
-            // has to cover 480px - so 4x zoom is soft. Keeping the largest photoSize's
-            // file in MessagePhoto and fetching it here is the upgrade.
+            // The bubble's own copy fills the viewer immediately; the original goes with
+            // it and the viewer swaps to it once it has downloaded, which is what makes
+            // zooming worth anything.
             onClicked: {
                 if (model.content.file && model.content.file.isDownloadingCompleted)
-                    appWindow.openPhoto(model.content.file.localPath)
+                    appWindow.openPhoto(model.content.file.localPath, model.content.originalFile)
             }
 
             // originalFile, not file: file is the size picked to cover the screen, which
@@ -191,10 +191,20 @@ Item {
             // Save, on the other hand, is per photo: the cell that was held passes its own
             // original, the same one the photo bubble hands over.
             function openMenu(originalFile) {
-                menuTarget.open(model.id, model.sender, albumColumn.caption, model.isOutgoing, originalFile)
+                menuTarget.open(model.id, model.sender, albumColumn.caption, model.isOutgoing, originalFile, "",
+                                albumColumn.photos)
             }
 
-            onPressAndHold: openMenu(albumColumn.photos[0].originalFile)
+            // This row's own content, not photos[0] - the same object, but reached
+            // through the role rather than through the list, where an inline property
+            // read comes back undefined and quietly hid the Save entry.
+            onPressAndHold: openMenu(model.content.originalFile)
+
+            // The caption rides on whichever message of the batch happens to carry it,
+            // which is rarely the head this bubble is bound to - so the default preview,
+            // read off this row's own content, comes back empty. Same value openMenu
+            // hands the menu, so a swipe and a long-press quote the same thing.
+            replyPreview: albumColumn.caption
 
             childrenWidth: albumColumn.width
 
@@ -229,19 +239,13 @@ Item {
                     return offset;
                 }
 
-                // Telegram puts an album's caption on one message of the batch rather than
-                // on all of them, so it is whichever member happens to carry it.
-                function firstCaption() {
-                    for (var i = 0; i < photos.length; ++i) {
-                        if (photos[i].caption !== "")
-                            return photos[i].caption;
-                    }
-
-                    return "";
-                }
-
                 property variant rows: split(photos.length)
-                property string caption: firstCaption()
+                // Found by the model, over the same run it built `photos` from. Scanning
+                // the list here instead read photos[i].caption off a QVariant QML1 never
+                // unwrapped - undefined, so the caption silently became an empty string
+                // and the bubble drew no text. The cells get away with it because they
+                // put their element in a variant property first, which is what converts.
+                property string caption: model.albumCaption
 
                 width: isPortrait ? 380 : 754
                 spacing: 6
@@ -303,11 +307,28 @@ Item {
                                 MouseArea {
                                     anchors.fill: parent
 
+                                    // A cell covers the bubble's own MouseArea, so without
+                                    // this the mosaic is a dead zone for swipe-to-reply.
+                                    // The drag moves the whole bubble and the decision
+                                    // stays in MessageBubble.
+                                    drag {
+                                        target: albumBubble
+                                        axis: Drag.XAxis
+                                        minimumX: 0
+                                        maximumX: 90
+                                    }
+
                                     onClicked: {
+                                        // With this cell's own original, so the viewer's
+                                        // Save keeps the full size rather than the copy
+                                        // that was downloaded to fill a 480px screen.
                                         if (cellImage.ready)
-                                            appWindow.openPhoto(photo.file.localPath)
+                                            appWindow.openPhoto(photo.file.localPath, photo.originalFile)
                                     }
                                     onPressAndHold: albumBubble.openMenu(photo.originalFile)
+                                    onPressed: albumBubble.beginSwipe()
+                                    onReleased: albumBubble.endSwipe(true)
+                                    onCanceled: albumBubble.endSwipe(false)
                                 }
                             }
                         }

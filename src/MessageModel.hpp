@@ -43,6 +43,13 @@ public:
         ContentRole,
         // The photos of an album, for the one row that draws it. Empty on every other row.
         AlbumRole,
+        // The caption of an album, on that same row. Telegram puts it on whichever member
+        // of the batch happens to carry it, so the row that draws the mosaic usually is
+        // not the one holding the text - and the delegate cannot read it off its own
+        // content. Walked here rather than in QML: reading a property off an element of
+        // the AlbumRole list inline gives undefined in QML1, which is how the caption
+        // went missing from the bubble while the model had it all along.
+        AlbumCaptionRole,
         // Custom role
         ContentTypeRole,
         IsServiceRole,

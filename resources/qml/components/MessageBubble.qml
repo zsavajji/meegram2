@@ -24,22 +24,46 @@ Item {
     // Where the sender label ends and everything below it begins.
     property int stackTop: senderLabel.text === "" ? 16 : 46
 
-    // What the reply banner previews. Every content type keeps its wording under a
-    // different name, and reading a property a QObject does not have gives undefined
-    // rather than throwing - so this is the first one that exists, or nothing.
-    property string replyPreview: model.content ? (model.content.text || model.content.caption || "") : ""
+    // Only set by a delegate whose text lives somewhere this cannot reach - an album's
+    // caption is on another message of the batch. Everything else is read off the content
+    // when a swipe actually commits, rather than for every bubble the list builds.
+    property string replyPreview: ""
 
-    // Springs the bubble back after a swipe. An explicit animation rather than a
-    // Behavior: during the drag the Behavior would have to be switched off, and
-    // whether drag.active is already false inside onReleased is not worth relying on.
-    NumberAnimation {
-        id: springBack
+    // True while the view has just jumped here from a quote block. The empty test is what
+    // makes this free: with no flash in flight the id is never even read, so building a
+    // screenful of these costs one string comparison each.
+    //
+    // Loose ==: the flashed id is a string from the model and this one crosses as a
+    // number.
+    property bool flashing: listView.flashMessageId !== "" && listView.flashMessageId == model.id
 
-        target: root
-        property: "x"
-        to: 0
-        duration: 150
-        easing.type: Easing.OutQuad
+    // The two halves of the swipe, so any MouseArea covering part of the bubble - the
+    // quote block, an album cell - can hand its drag to this one instead of repeating
+    // the decision. commit is false when the gesture was cancelled rather than released.
+    //
+    // The spring-back animation itself belongs to the list: one bubble is under a finger
+    // at a time, and an animation per delegate is four objects built per row while the
+    // page is still sliding in.
+    function beginSwipe() {
+        listView.stopSwipeSpring(root)
+    }
+
+    function endSwipe(commit) {
+        // 56px is far enough to have been meant rather than a flick that wandered.
+        if (commit && root.x >= 56) {
+            var content = model.content;
+
+            // Each content type keeps its wording under a different name, and reading a
+            // property a QObject does not have gives undefined rather than throwing - so
+            // this is the first one that exists, or nothing.
+            var preview = replyPreview !== ""
+                              ? replyPreview
+                              : content ? (content.text || content.caption || "") : "";
+
+            composeState.reply(model.id, model.sender, preview);
+        }
+
+        listView.swipeSpringTo(root);
     }
 
     BorderImage {
@@ -65,7 +89,10 @@ Item {
 
         border { left: 22; right: 22; bottom: 22; top: 22; }
 
-        opacity: 1.0
+        // Dips and comes back when the view jumps here, driven by the list's one shared
+        // animation. Not a highlight colour: this is a BorderImage, and its rounded
+        // corners would show through any overlay drawn on top.
+        opacity: root.flashing ? listView.flashOpacity : 1.0
 
         MouseArea {
             id: mouseArea
@@ -83,17 +110,11 @@ Item {
 
             onClicked: root.clicked()
             onPressAndHold: root.pressAndHold()
-            onPressed: springBack.stop()
-            onReleased: {
-                // Far enough to have been meant. composeState lives on ChatPage, the
-                // same place the long-press menu's Reply calls into.
-                if (root.x >= 56)
-                    composeState.reply(model.id, model.sender, root.replyPreview)
-
-                springBack.start()
-            }
-            // The list stealing the grab mid-drag leaves the bubble offset otherwise.
-            onCanceled: springBack.start()
+            onPressed: root.beginSwipe()
+            onReleased: root.endSwipe(true)
+            // The list stealing the grab mid-drag leaves the bubble offset otherwise,
+            // and a cancelled gesture is not a reply.
+            onCanceled: root.endSwipe(false)
         }
     }
 
@@ -148,7 +169,21 @@ Item {
         MouseArea {
             anchors.fill: parent
             enabled: model.replyToMessageId !== ""
+
+            // Covering the quote would otherwise be a dead strip for the swipe. Same
+            // drag as the bubble's own area, handed to the same two functions - and a
+            // gesture that dragged emits no clicked(), so the two do not collide.
+            drag {
+                target: root
+                axis: Drag.XAxis
+                minimumX: 0
+                maximumX: 90
+            }
+
             onClicked: listView.goToMessage(model.replyToMessageId)
+            onPressed: root.beginSwipe()
+            onReleased: root.endSwipe(true)
+            onCanceled: root.endSwipe(false)
         }
 
         Rectangle {

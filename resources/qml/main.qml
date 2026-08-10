@@ -119,7 +119,10 @@ PageStackWindow {
 
     // Lives here rather than on ChatPage so the delegate can reach it by a unique name -
     // "root" inside MessageDelegate resolves to ChatPage's root and is easy to get wrong.
-    function openPhoto(path) {
+    //
+    // original is the full-size File behind the photo, for the viewer's Save. Optional:
+    // a caller with nothing to save opens a picture that simply cannot be kept.
+    function openPhoto(path, original) {
         var component = Qt.createComponent("PhotoViewPage.qml");
 
         if (component.status !== Component.Ready) {
@@ -127,7 +130,122 @@ PageStackWindow {
             return;
         }
 
-        pageStack.push(component, { source: "file://" + path });
+        pageStack.push(component, { source: "file://" + path, original: original || null });
+    }
+
+    // Saving lives here rather than on ChatPage: the bubble menu, the fullscreen viewer
+    // and the album batch all save the same way, and only this object is reachable from
+    // all three.
+    //
+    // The original size is what gets kept - the bubble only ever downloaded the size that
+    // covers the screen - so a save usually has to wait for a download first. Null when
+    // nothing is pending.
+    property QtObject pendingSave: null
+
+    // The name the pending save has to land under; see menuTarget.saveName on ChatPage.
+    property string pendingSaveName: ""
+
+    // One place decides where a file goes and what the banner says, so the save that
+    // happens immediately and the one that waits for a download cannot drift apart.
+    function commitSave(file, name) {
+        var saved = name !== "" ? utils.saveDocument(file.localPath, name) : utils.saveToGallery(file.localPath);
+
+        if (!saved) {
+            showInfoBanner(qsTr("ErrorOccurred"));
+            albumIndex = -1;
+            return;
+        }
+
+        // One banner per batch rather than one per photo: a dozen of them queue up and
+        // sit on the screen long after the last save.
+        if (albumIndex < 0)
+            // ponytail: SavedToDownloads is a real language-pack key but an unusual one,
+            // so it may fall back to showing its own name. Swap it if that turns up.
+            showInfoBanner(name !== "" ? qsTr("SavedToDownloads") : qsTr("PhotoSavedHint"));
+        else
+            saveNextOfAlbum();
+    }
+
+    function saveOriginal(file, name) {
+        if (!file)
+            return;
+
+        name = name || "";
+
+        if (file.isDownloadingCompleted) {
+            commitSave(file, name);
+            return;
+        }
+
+        pendingSave = file;
+        pendingSaveName = name;
+        showInfoBanner(qsTr("Loading"));
+
+        if (file.canBeDownloaded && !file.isDownloadingActive)
+            appManager.downloadFile(file.id, 1, 0, 0, false);
+    }
+
+    Connections {
+        target: pendingSave
+
+        onFileChanged: {
+            // Fires on the download starting as well as on it finishing, so completion
+            // has to be checked rather than assumed.
+            if (pendingSave && pendingSave.isDownloadingCompleted) {
+                var file = pendingSave;
+                var name = pendingSaveName;
+                pendingSave = null;
+                pendingSaveName = "";
+                commitSave(file, name);
+            }
+        }
+    }
+
+    // The album being saved photo by photo, and how far through it is. Serial because
+    // pendingSave is one slot: firing every photo at once would leave all but the last
+    // download unsaved, and a dozen parallel downloads is not what this radio wants
+    // anyway. Held as the list the model handed over, untouched.
+    property variant albumPhotos
+    property int albumIndex: -1
+
+    function saveAlbum(photos) {
+        if (!photos || photos.length === 0)
+            return;
+
+        albumPhotos = photos;
+        albumIndex = 0;
+        saveNextOfAlbum();
+    }
+
+    function saveNextOfAlbum() {
+        if (albumIndex < 0 || albumIndex >= albumPhotos.length) {
+            albumIndex = -1;
+            showInfoBanner(qsTr("PhotoSavedHint"));
+            return;
+        }
+
+        // Through a variant property, not albumPhotos[i].originalFile: an element read
+        // straight out of a model list is a QVariant QML1 never unwraps, so the property
+        // comes back undefined. Same route the album's own cells take.
+        albumCursor.photo = albumPhotos[albumIndex];
+        ++albumIndex;
+
+        var file = albumCursor.photo ? albumCursor.photo.originalFile : null;
+
+        // A photo with nothing behind it must not end the batch: saveOriginal returns
+        // on a null file, and the chain is driven from its completion.
+        if (!file) {
+            saveNextOfAlbum();
+            return;
+        }
+
+        saveOriginal(file, "");
+    }
+
+    QtObject {
+        id: albumCursor
+
+        property variant photo
     }
 
     function openChat(chatId) {

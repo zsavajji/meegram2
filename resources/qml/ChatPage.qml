@@ -72,7 +72,12 @@ Page {
         // cache name is as good as any, and which goes to the gallery instead.
         property string saveName: ""
 
-        function open(id, sender, text, outgoing, file, name) {
+        // The photos of an album, for the entry that saves the lot. Empty for every
+        // other bubble, which is what hides it.
+        property variant albumPhotos
+        property int albumCount: 0
+
+        function open(id, sender, text, outgoing, file, name, photos) {
             messageId = id;
             menuTarget.sender = sender;
             menuTarget.text = text;
@@ -80,66 +85,14 @@ Page {
             // Callers with nothing to save omit the argument entirely.
             saveFile = file || null;
             saveName = name || "";
+            albumPhotos = photos;
+            albumCount = photos ? photos.length : 0;
             messageMenu.open();
         }
     }
 
-    // Saving waits on the original size, which the bubble never needed and so has not
-    // downloaded. Null once the save has gone through or when none is pending.
-    property QtObject pendingSave: null
-
-    // The name the pending save has to land under; see menuTarget.saveName.
-    property string pendingSaveName: ""
-
-    // One place decides where a file goes and what the banner says, so the save that
-    // happens immediately and the one that waits for a download cannot drift apart.
-    function commitSave(file, name) {
-        var saved = name !== "" ? utils.saveDocument(file.localPath, name) : utils.saveToGallery(file.localPath);
-
-        if (!saved) {
-            appWindow.showInfoBanner(qsTr("ErrorOccurred"));
-            return;
-        }
-
-        // ponytail: SavedToDownloads is a real language-pack key but an unusual one, so
-        // it may fall back to showing its own name. Swap it if that turns up on device.
-        appWindow.showInfoBanner(name !== "" ? qsTr("SavedToDownloads") : qsTr("PhotoSavedHint"));
-    }
-
-    function saveOriginal(file, name) {
-        if (!file)
-            return;
-
-        name = name || "";
-
-        if (file.isDownloadingCompleted) {
-            commitSave(file, name);
-            return;
-        }
-
-        pendingSave = file;
-        pendingSaveName = name;
-        appWindow.showInfoBanner(qsTr("Loading"));
-
-        if (file.canBeDownloaded && !file.isDownloadingActive)
-            appManager.downloadFile(file.id, 1, 0, 0, false);
-    }
-
-    Connections {
-        target: pendingSave
-
-        onFileChanged: {
-            // Fires on the download starting as well as on it finishing, so completion
-            // has to be checked rather than assumed.
-            if (pendingSave && pendingSave.isDownloadingCompleted) {
-                var file = pendingSave;
-                var name = pendingSaveName;
-                pendingSave = null;
-                pendingSaveName = "";
-                commitSave(file, name);
-            }
-        }
-    }
+    // Saving - of one file, or of a whole album - lives on appWindow: the fullscreen
+    // viewer saves too, and it is a page of its own with no way back to here.
 
     property bool loading: true
 
@@ -358,25 +311,129 @@ Page {
                     listView.positionViewAtEnd()
             }
 
-            // Where a tapped quote block goes. Only reaches messages in the loaded slice:
-            // the model holds one window ending at the newest message, and a reply can
-            // point arbitrarily far back.
-            //
-            // ponytail: says so rather than fetching. Asking getChatHistory for a slice
-            // centred on that id, and rebuilding the window around it, is the upgrade -
-            // and it is the same work per-chat message caching would need.
+            // The message a quote block was tapped on, while it is being flashed. Read by
+            // every visible bubble, which is why it is an id and not a row: a page of
+            // history landing underneath renumbers the rows.
+            property string flashMessageId: ""
+
+            // What that bubble's opacity follows. Here rather than in the delegate: a
+            // SequentialAnimation and its two children built per row is four objects a
+            // message costs before it has drawn anything, and rows are built by the
+            // dozen while the page is still sliding in. Only the flashed bubble reads it.
+            property real flashOpacity: 1.0
+
+            SequentialAnimation {
+                id: flashAnimation
+
+                NumberAnimation { target: listView; property: "flashOpacity"; to: 0.75; duration: 150 }
+                NumberAnimation { target: listView; property: "flashOpacity"; to: 1.0; duration: 300 }
+
+                // Ends the flash where the animation already left it, so nothing jumps -
+                // and a second jump to the same message flashes it again.
+                onCompleted: listView.flashMessageId = ""
+            }
+
+            // The swipe's spring-back, shared for the same reason. One bubble is under a
+            // finger at a time, so one animation retargeted is enough.
+            NumberAnimation {
+                id: swipeSpring
+
+                property: "x"
+                to: 0
+                duration: 150
+                easing.type: Easing.OutQuad
+            }
+
+            function swipeSpringTo(item) {
+                // A second swipe starting before the first has sprung back would leave
+                // that bubble parked off-centre when the animation retargets.
+                if (swipeSpring.running && swipeSpring.target && swipeSpring.target !== item)
+                    swipeSpring.target.x = 0
+
+                swipeSpring.stop()
+                swipeSpring.target = item
+                swipeSpring.start()
+            }
+
+            function stopSwipeSpring(item) {
+                if (swipeSpring.target === item)
+                    swipeSpring.stop()
+            }
+
+            // Where a tapped quote block goes. The reply may point outside the loaded
+            // window, so anything not there yet is chased by jumpTimer.
             function goToMessage(messageId) {
                 var index = messageModel.indexOf(messageId)
 
-                if (index < 0) {
-                    appWindow.showInfoBanner(qsTr("MessageNotFound"))
+                if (index >= 0) {
+                    arriveAt(index, messageId)
                     return
                 }
 
                 // Reading back is deliberate, so a message landing must not yank the
                 // view to the end again - the same thing scrolling up by hand does.
-                listView.followLast = false
-                listView.positionViewAtIndex(index, ListView.Center)
+                followLast = false
+                jumpTimer.targetId = messageId
+                jumpTimer.pagesLeft = 12
+                jumpTimer.lastCount = -1
+                jumpTimer.restart()
+            }
+
+            function arriveAt(index, messageId) {
+                followLast = false
+                flashMessageId = messageId
+                flashAnimation.restart()
+                // Through the settle rather than a single call: the row was very likely
+                // built moments ago, and one positionViewAtIndex lands on an estimate.
+                beginSettleAt(index)
+            }
+
+            // Pages back the way scrolling up does, until the message turns up. Deliberately
+            // not a slice centred on the target: that lands a block of ids disjoint from the
+            // loaded window, and insertMessages would have to reset the model and leave a
+            // hole in the middle of the history. Polling rather than hanging off
+            // fetchedPosition, which is not emitted when a page comes back empty.
+            //
+            // ponytail: 12 pages is 240 messages at MessageSliceLimit 20, and each page is a
+            // round trip. A quote pointing further back than that says so instead. The
+            // centred-slice fetch is the upgrade, and it is the same work per-chat message
+            // caching would need.
+            Timer {
+                id: jumpTimer
+
+                property string targetId: ""
+                property int pagesLeft: 0
+                // What the model held when the last page was asked for. Unchanged after a
+                // fetch means the chat has no more history, which ends the chase early
+                // rather than spending the rest of the budget re-asking for nothing.
+                property int lastCount: -1
+
+                interval: 200
+                repeat: true
+
+                onTriggered: {
+                    var index = messageModel.indexOf(targetId)
+
+                    if (index >= 0) {
+                        stop()
+                        listView.arriveAt(index, targetId)
+                        return
+                    }
+
+                    // A page is still in flight; loading covers both directions.
+                    if (messageModel.loading)
+                        return
+
+                    if (pagesLeft <= 0 || messageModel.count === lastCount) {
+                        stop()
+                        appWindow.showInfoBanner(qsTr("MessageNotFound"))
+                        return
+                    }
+
+                    --pagesLeft
+                    lastCount = messageModel.count
+                    messageModel.fetchMoreBack()
+                }
             }
 
             Timer {
@@ -390,11 +447,17 @@ Page {
                 // note above goToInitialPosition.
                 property bool toEnd: false
 
+                // Or one particular row, for a jump from a quote block. -1 when the
+                // settle is chasing one of the other two.
+                property int toIndex: -1
+
                 interval: 60
                 repeat: true
 
                 onTriggered: {
-                    if (toEnd)
+                    if (toIndex >= 0)
+                        listView.positionViewAtIndex(toIndex, ListView.Center)
+                    else if (toEnd)
                         listView.positionViewAtEnd()
                     else
                         listView.goToInitialPosition()
@@ -411,7 +474,14 @@ Page {
             }
 
             function beginSettle(atEnd) {
+                settleTimer.toIndex = -1
                 settleTimer.toEnd = atEnd === true
+                settleTimer.ticks = 0
+                settleTimer.restart()
+            }
+
+            function beginSettleAt(index) {
+                settleTimer.toIndex = index
                 settleTimer.ticks = 0
                 settleTimer.restart()
             }
@@ -933,7 +1003,18 @@ Page {
             MenuItem {
                 text: qsTr("Save")
                 visible: menuTarget.saveFile !== null
-                onClicked: root.saveOriginal(menuTarget.saveFile, menuTarget.saveName)
+                onClicked: appWindow.saveOriginal(menuTarget.saveFile, menuTarget.saveName)
+            }
+
+            MenuItem {
+                // The whole batch, one photo at a time. A single photo of an album is
+                // saved by opening it and using the viewer's Save.
+                //
+                // ponytail: SaveAllPhotos is an unverified language-pack key, same caveat
+                // as SavedToDownloads - it shows its own name if the pack has no entry.
+                text: qsTr("SaveAllPhotos")
+                visible: menuTarget.albumCount > 1
+                onClicked: appWindow.saveAlbum(menuTarget.albumPhotos)
             }
 
             MenuItem {

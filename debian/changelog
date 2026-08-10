@@ -1,3 +1,33 @@
+meegram (0.3.3) unstable; urgency=low
+
+  * Photos sent together are drawn as one bubble, laid out as a mosaic, the way the
+    official clients do it. A set of eight photos used to arrive as eight bubbles and
+    filled the screen on its own.
+  * The text sent with a batch of photos is no longer lost. Telegram attaches it to one
+    photo of the batch rather than to all of them, and that was never the one the bubble
+    read, so the photos arrived and the words did not.
+  * Replying by swipe: push a message to the right and it becomes the reply. Anywhere on
+    the bubble, on any photo of an album, or on the quote of a message that is itself a
+    reply. Holding a message still offers Reply as before.
+  * Tapping the quote at the top of a reply jumps to the message it points at, and that
+    message dims and comes back so it can be picked out. If it is further back than the
+    part of the conversation already loaded, the chat pages back through its history to
+    find it instead of saying it cannot.
+  * Photos open at full size. The viewer showed the copy that had been downloaded for the
+    bubble, which only has to cover a 480-pixel screen, so zooming into it was soft. It
+    now fills the page with that copy immediately and swaps to the real photo as soon as
+    it has been fetched.
+  * Saving a photo from the viewer, as an action on its toolbar. It saves the full-size
+    photo, not the copy on screen. A whole batch can be saved at once with Save all
+    photos when holding an album, one photo at a time so a dozen downloads do not go out
+    together.
+  * A message arriving while you are reading further up no longer drags the conversation
+    down to it. It waits at the bottom, where it was already going.
+  * Opening the keyboard no longer pushes the newest message behind the text field. The
+    same thing happened when the reply banner appeared above the composer.
+
+ -- Andrea Faggin <hellothere@andreafagg.in>  Mon, 10 Aug 2026 19:30:00 +0200
+
 meegram (0.3.2) unstable; urgency=low
 
   * Tapping a notification opens the chat in about four seconds, where it used to take
