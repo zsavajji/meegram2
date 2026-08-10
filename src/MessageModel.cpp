@@ -593,12 +593,50 @@ void MessageModel::send(td::td_api::object_ptr<td::td_api::InputMessageContent> 
     m_client->send(std::move(request));
 }
 
-void MessageModel::sendMessage(const QString &message, const QString &replyToMessageId) noexcept
+void MessageModel::sendMessage(const QString &message, const QString &replyToMessageId, const QString &mentionUserIds,
+                               const QString &mentionNames) noexcept
 {
     auto content = td::td_api::make_object<td::td_api::inputMessageText>();
 
     content->text_ = td::td_api::make_object<td::td_api::formattedText>();
     content->text_->text_ = message.toStdString();
+
+    const auto ids = mentionUserIds.split(QLatin1Char('\n'), QString::SkipEmptyParts);
+    const auto names = mentionNames.split(QLatin1Char('\n'), QString::SkipEmptyParts);
+
+    // Where each picked name ended up, found now rather than tracked while the message
+    // was being typed. A name the user has since edited finds no match and goes out as
+    // plain text, which is the right answer for words that are no longer that person's.
+    QList<int> taken;
+
+    for (int i = 0; i < ids.size() && i < names.size(); ++i)
+    {
+        int offset = 0;
+
+        // Two people with the same name, or one mentioned twice: each entity takes the
+        // next occurrence rather than all of them landing on the first.
+        for (int from = 0; (offset = message.indexOf(names.at(i), from)) >= 0 && taken.contains(offset); from = offset + 1)
+        {
+        }
+
+        if (offset < 0)
+            continue;
+
+        taken.append(offset);
+
+        auto entity = td::td_api::make_object<td::td_api::textEntity>();
+
+        // TDLib counts in UTF-16 code units, which is exactly what QString indexes in.
+        entity->offset_ = offset;
+        entity->length_ = names.at(i).length();
+        entity->type_ = td::td_api::make_object<td::td_api::textEntityTypeMentionName>(ids.at(i).toLongLong());
+
+        content->text_->entities_.push_back(std::move(entity));
+    }
+
+    // TDLib rejects a formattedText whose entities are out of order, and the picked
+    // names are in the order they were chosen rather than where they sit.
+    std::ranges::sort(content->text_->entities_, {}, [](const auto &entity) { return entity->offset_; });
 
     send(std::move(content), toId(replyToMessageId));
 }

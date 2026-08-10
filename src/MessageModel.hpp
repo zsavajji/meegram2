@@ -91,7 +91,12 @@ public:
     Q_INVOKABLE void openMessageContent(const QString &messageId) noexcept;
     Q_INVOKABLE void deleteMessage(const QString &messageId, bool revoke = false) noexcept;
 
-    Q_INVOKABLE void sendMessage(const QString &message, const QString &replyToMessageId = {}) noexcept;
+    // mentionUserIds and mentionNames are newline-joined and paired by index: the people
+    // picked from the composer's autocomplete who have no username, whose names went into
+    // the text as ordinary words. Each one that is still present in the message goes out
+    // with an entity pointing at the id, which is what makes it a real mention.
+    Q_INVOKABLE void sendMessage(const QString &message, const QString &replyToMessageId = {}, const QString &mentionUserIds = {},
+                                 const QString &mentionNames = {}) noexcept;
     Q_INVOKABLE void sendPhoto(const QString &filePath, const QString &caption = {}, const QString &replyToMessageId = {}) noexcept;
     // Several photos as one album, up to the server's limit of ten. The paths arrive
     // newline-joined rather than as a QStringList: the picker holds its selection as one

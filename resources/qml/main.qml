@@ -119,10 +119,16 @@ PageStackWindow {
         // A tapped mention, or the chat header's own profile button - both go through
         // openProfile and land here once there is a profile to show.
         onProfileReady: {
-            if (ok)
+            if (ok) {
                 openProfilePage()
-            else
-                showInfoBanner(qsTr("NoResult"))
+                return
+            }
+
+            // The reason as ChatManager gives it, untranslated, rather than a tidy
+            // "No results": this device collects no log and its daemon socket refuses
+            // every peer but the app, so a failure that is not on screen cannot be
+            // looked into at all. Swap for qsTr("NoResult") once it stops failing.
+            showInfoBanner(reason !== "" ? reason : qsTr("NoResult"))
         }
     }
 

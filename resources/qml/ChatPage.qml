@@ -329,7 +329,7 @@ Page {
                 // easy to miss, and a second one costs nothing but time.
                 loops: 2
 
-                NumberAnimation { target: listView; property: "flashOpacity"; to: 0.75; duration: 150 }
+                NumberAnimation { target: listView; property: "flashOpacity"; to: 0.45; duration: 150 }
                 NumberAnimation { target: listView; property: "flashOpacity"; to: 1.0; duration: 300 }
 
                 // Ends the flash where the animation already left it, so nothing jumps -
@@ -666,15 +666,17 @@ Page {
                                 rightMargin: 16
                                 verticalCenter: parent.verticalCenter
                             }
-                            // A member whose name TDLib has not filled in gets no dash
-                            // left dangling after their username.
-                            text: name !== "" ? "@" + username + " - " + name : "@" + username
+                            // A member with no username is offered by name alone - that
+                            // is what gets inserted for them, and there is no @handle to
+                            // put in front of it.
+                            text: username === "" ? name
+                                                  : name !== "" ? "@" + username + " - " + name : "@" + username
                             font.pixelSize: 22
                             elide: Text.ElideRight
                             maximumLineCount: 1
                         }
 
-                        onClicked: root.applyMention(username)
+                        onClicked: root.applyMention(username, name, userId)
                     }
                 }
 
@@ -952,7 +954,11 @@ Page {
                             if (composeState.editId !== 0) {
                                 messageModel.editMessage(composeState.editId, textArea.text)
                             } else {
-                                messageModel.sendMessage(textArea.text, composeState.replyId)
+                                // The pending mentions ride along: the model matches each
+                                // name against the text as it goes out, so anything the
+                                // user has since edited away simply finds no place to be.
+                                messageModel.sendMessage(textArea.text, composeState.replyId, root.pendingMentionIds,
+                                                         root.pendingMentionNames)
                                 // Your own message is always worth jumping to, even
                                 // from halfway up the history. It arrives back as an
                                 // update, so the follow flag is what carries this.
@@ -961,6 +967,7 @@ Page {
 
                             textArea.text = ""
                             composeState.clear()
+                            root.clearPendingMentions()
                         }
 
                         // Outside the guard on purpose. Tapping the button moves focus
@@ -1145,7 +1152,13 @@ Page {
         mentionTimer.restart();
     }
 
-    function applyMention(username) {
+    // People picked from the list who have no username, newline-joined and paired by
+    // index. Their names went into the message as ordinary words, so the ids have to
+    // ride along to the send for the entity that makes them mentions.
+    property string pendingMentionIds: ""
+    property string pendingMentionNames: ""
+
+    function applyMention(username, name, userId) {
         var head = textArea.text.substring(0, textArea.cursorPosition);
         var start = head.lastIndexOf("@");
 
@@ -1154,11 +1167,27 @@ Page {
 
         var tail = textArea.text.substring(textArea.cursorPosition);
 
-        textArea.text = head.substring(0, start) + "@" + username + " " + tail;
+        // With a username the @handle is the mention and Telegram resolves it on its own.
+        // Without one the person's name goes in as plain text and the entity sent with
+        // the message is the only thing pointing at them - which is how the official
+        // clients do it too.
+        var inserted = username !== "" ? "@" + username : name;
+
+        textArea.text = head.substring(0, start) + inserted + " " + tail;
         // After the space, so the next word is typed rather than the mention re-edited.
-        textArea.cursorPosition = start + username.length + 2;
+        textArea.cursorPosition = start + inserted.length + 1;
+
+        if (username === "") {
+            pendingMentionIds += userId + "\n";
+            pendingMentionNames += name + "\n";
+        }
 
         mentionModel.clear();
+    }
+
+    function clearPendingMentions() {
+        pendingMentionIds = "";
+        pendingMentionNames = "";
     }
 
     Timer {
@@ -1182,7 +1211,7 @@ Page {
 
             // Paired by index, as ChatManager sends them.
             for (var i = 0; i < usernames.length; ++i)
-                mentionModel.append({ username: usernames[i], name: names[i] });
+                mentionModel.append({ username: usernames[i], name: names[i], userId: userIds[i] });
         }
     }
 

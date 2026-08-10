@@ -502,7 +502,7 @@ void ChatManager::openProfile(const QString &target) noexcept
         if (auto chat = m_storage->chat(chatId))
         {
             setProfileChat(std::move(chat));
-            emit profileReady(true);
+            emit profileReady(true, QString());
             return;
         }
     }
@@ -517,8 +517,9 @@ void ChatManager::openProfile(const QString &target) noexcept
                                           td::td_api::make_object<td::td_api::createPrivateChat>(chatId, false))
                                     : td::td_api::object_ptr<td::td_api::Function>(td::td_api::make_object<td::td_api::getChat>(chatId));
 
-    m_client->send(std::move(request), [this](auto &&response) {
+    m_client->send(std::move(request), [this, target](auto &&response) {
         qlonglong resolvedId = 0;
+        QString reason;
 
         if (response->get_id() == td::td_api::chat::ID)
         {
@@ -534,24 +535,42 @@ void ChatManager::openProfile(const QString &target) noexcept
         else if (response->get_id() == td::td_api::error::ID)
         {
             const auto *error = static_cast<const td::td_api::error *>(response.get());
-            qWarning() << "opening profile failed:" << error->code_ << QString::fromStdString(error->message_);
+
+            reason = QString::fromStdString(error->message_) + QLatin1String(" (") + QString::number(error->code_) + QLatin1Char(')');
+            qWarning() << "opening profile" << target << "failed:" << reason;
+        }
+        else
+        {
+            // Neither a chat nor an error: the reply decoded as something this does not
+            // know what to do with, which is worth seeing rather than swallowing.
+            reason = QLatin1String("unexpected reply ") + QString::number(response->get_id());
+            qWarning() << "opening profile" << target << reason;
         }
 
         // Queued behind the injected update, which Qt delivers in the order posted, so
         // StorageManager holds the chat by the time this runs.
         QMetaObject::invokeMethod(this, "handleProfileFetched", Qt::QueuedConnection, Q_ARG(qlonglong, resolvedId),
-                                  Q_ARG(bool, resolvedId != 0));
+                                  Q_ARG(QString, reason));
     });
 }
 
-void ChatManager::handleProfileFetched(qlonglong chatId, bool ok) noexcept
+void ChatManager::handleProfileFetched(qlonglong chatId, const QString &reason) noexcept
 {
-    auto chat = ok ? m_storage->chat(chatId) : nullptr;
+    if (chatId != 0)
+    {
+        if (auto chat = m_storage->chat(chatId))
+        {
+            setProfileChat(std::move(chat));
+            emit profileReady(true, QString());
+            return;
+        }
+    }
 
-    if (chat)
-        setProfileChat(std::move(chat));
-
-    emit profileReady(chat != nullptr);
+    // The two failures are worth telling apart: the request itself came back with
+    // something, and separately StorageManager did or did not end up holding the chat it
+    // was told about. The second one means the injected update was not taken, which is
+    // the daemon-shaped bug fetchChat exists to work around.
+    emit profileReady(false, !reason.isEmpty() ? reason : QString::fromLatin1("chat %1 resolved but not in store").arg(chatId));
 }
 
 void ChatManager::searchMentions(const QString &query) noexcept
@@ -562,7 +581,7 @@ void ChatManager::searchMentions(const QString &query) noexcept
     // person and you are not going to mention them by name.
     if (type != Chat::Type::BasicGroup && type != Chat::Type::Supergroup)
     {
-        emit mentionsFound({}, {});
+        emit mentionsFound({}, {}, {});
         return;
     }
 
@@ -580,10 +599,10 @@ void ChatManager::handleChatMembers(void *responseObject) noexcept
 {
     const td::td_api::object_ptr<td::td_api::Object> response(static_cast<td::td_api::Object *>(responseObject));
 
-    // Paired by index: the username is what gets inserted, the name is what makes the
-    // row recognisable - half the people in a group have a username nobody would know
-    // them by.
-    QStringList usernames, names;
+    // Paired by index. The username is what gets inserted when there is one; the name is
+    // what makes the row recognisable, and is itself what gets inserted for a member with
+    // no username, with the id carried alongside so the message can point at them.
+    QStringList usernames, names, userIds;
 
     if (response && response->get_id() == td::td_api::chatMembers::ID)
     {
@@ -596,20 +615,31 @@ void ChatManager::handleChatMembers(void *responseObject) noexcept
 
             const auto userId = static_cast<const td::td_api::messageSenderUser *>(member->member_id_.get())->user_id_;
 
-            // Skipped rather than shown greyed out: a name that cannot be inserted as a
-            // working mention is worse than one that is simply not offered.
             const auto user = m_storage->user(userId);
 
-            if (!user || user->activeUsernames().isEmpty())
+            if (!user)
                 continue;
 
-            usernames.append(user->activeUsernames().first());
-            // false: the linked form is for message text, and this is a plain row.
-            names.append(Utils::getUserName(user, false));
+            // First and last together, not getUserName - that one gives the short name,
+            // which is the first name alone and tells two Andreas apart from nothing.
+            auto name = (user->firstName() + QLatin1Char(' ') + user->lastName()).trimmed();
+
+            if (name.isEmpty())
+                name = Utils::getUserShortName(user);
+
+            const auto username = user->activeUsernames().isEmpty() ? QString() : user->activeUsernames().first();
+
+            // Nothing to show and nothing to insert.
+            if (username.isEmpty() && name.isEmpty())
+                continue;
+
+            usernames.append(username);
+            names.append(name);
+            userIds.append(QString::number(userId));
         }
     }
 
-    emit mentionsFound(usernames, names);
+    emit mentionsFound(usernames, names, userIds);
 }
 
 bool ChatManager::openChat(const QString &rawChatId) noexcept

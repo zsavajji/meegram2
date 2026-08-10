@@ -150,8 +150,6 @@ public:
     // Mention autocomplete: members of the selected chat whose name or username matches
     // what is being typed. Answers on mentionsFound, with an empty list for anything that
     // is not a group - so the composer does not have to know what kind of chat it is in.
-    // Usernames only: mentioning somebody without one takes a text entity, which the
-    // plain-text send path cannot carry.
     Q_INVOKABLE void searchMentions(const QString &query) noexcept;
 
     // False when the chat is not in StorageManager, in which case nothing was selected
@@ -177,13 +175,23 @@ signals:
 
     // openProfile() has finished, successfully or not. The page is pushed from here
     // rather than by the caller, which cannot know whether the chat had to be fetched.
-    void profileReady(bool ok);
+    //
+    // reason is empty on success and says what went wrong otherwise - TDLib's own error,
+    // or the lookup that followed it. It is shown in the banner because this device has
+    // nowhere else to say it: qWarning goes to a stderr nothing collects, and the daemon
+    // socket refuses any peer that is not the app itself, so a failure that is not
+    // reported here cannot be investigated at all.
+    void profileReady(bool ok, const QString &reason);
 
     // The answer to searchMentions(), oldest request wins nothing - a later reply simply
-    // replaces the list. Two lists paired by index rather than one of pairs: QStringList
-    // is the one list type that crosses into QML1 as a plain array, and a list of objects
-    // is exactly the conversion that has bitten this codebase before.
-    void mentionsFound(const QStringList &usernames, const QStringList &names);
+    // replaces the list. Lists paired by index rather than one of objects: QStringList is
+    // the one list type that crosses into QML1 as a plain array, and a list of objects is
+    // exactly the conversion that has bitten this codebase before.
+    //
+    // A username is empty for a member who has none. They are still offered: picking one
+    // puts their name in as ordinary text and the message carries an entity pointing at
+    // the id, which is how the official clients mention somebody without a username.
+    void mentionsFound(const QStringList &usernames, const QStringList &names, const QStringList &userIds);
 
     // A chat that openChat() refused has finished being fetched. ok says whether it can
     // be opened now; the caller retries openChat() or reports the failure.
@@ -207,7 +215,7 @@ private slots:
     // queued Q_ARG needs a registered metatype and td_api::object_ptr is move-only -
     // the same handover MessageModel::handleHistoryResponse makes, and for the same
     // reason: StorageManager must not be read from the TDLib worker thread.
-    void handleProfileFetched(qlonglong chatId, bool ok) noexcept;
+    void handleProfileFetched(qlonglong chatId, const QString &reason) noexcept;
     void handleChatMembers(void *responseObject) noexcept;
 
 private:
