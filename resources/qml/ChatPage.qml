@@ -397,6 +397,17 @@ Page {
 
             onMovementStarted: settleTimer.stop()
 
+            // The viewport shrinking leaves contentY where it was, so the newest message
+            // slides down behind the composer. Covers all three ways it shrinks: the
+            // keyboard raising windowContent's heightDelta, the controls row expanding
+            // with focus, and the reply banner appearing. Settling rather than a single
+            // positionViewAtEnd because rows either side are rebuilt as the height
+            // changes and contentHeight keeps moving - same reason a new message settles.
+            onHeightChanged: {
+                if (!loading && followLast)
+                    beginSettle(true)
+            }
+
             // Telling the server what has actually been seen. Without this the other
             // side never saw a message go read until it was replied to.
             function markVisibleAsRead() {
