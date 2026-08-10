@@ -187,6 +187,11 @@ QVariant MessageModel::data(const QModelIndex &index, int role) const
             return formattedRow(messageId, message.get()).replyToSender;
         case ReplyToTextRole:
             return formattedRow(messageId, message.get()).replyToText;
+        case ReplyToMessageIdRole: {
+            const auto *reply = message->replyTo();
+            // A string, like every other id crossing into QML - see toId() in Common.hpp.
+            return reply ? QString::number(reply->messageId) : QString();
+        }
         case SendStateRole:
             return sendState(message.get());
     }
@@ -373,6 +378,7 @@ QHash<int, QByteArray> MessageModel::roleNames() const noexcept
     roles[SectionRole] = "section";
     roles[ReplyToSenderRole] = "replyToSender";
     roles[ReplyToTextRole] = "replyToText";
+    roles[ReplyToMessageIdRole] = "replyToMessageId";
     roles[SendStateRole] = "sendState";
     return roles;
 }
@@ -1096,6 +1102,16 @@ int MessageModel::lastMessageIndex() const noexcept
     // loaded slice, which is exactly when the view must fall back to the newest
     // message rather than anchor on whatever happens to be loaded.
     return std::distance(m_messages.begin(), std::ranges::find(m_messages, m_chat->lastReadInboxMessageId()));
+}
+
+int MessageModel::indexOf(const QString &messageId) const noexcept
+{
+    // -1 rather than count(): the caller jumps to the row, and "not loaded" has to be
+    // distinguishable from a real one. Ids are sorted ascending and only ever grow, but
+    // a linear scan over one loaded slice is not worth a binary search.
+    const auto it = std::ranges::find(m_messages, toId(messageId));
+
+    return it == m_messages.end() ? -1 : static_cast<int>(std::distance(m_messages.begin(), it));
 }
 
 void MessageModel::itemChanged(size_t index) noexcept

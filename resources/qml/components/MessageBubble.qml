@@ -24,6 +24,24 @@ Item {
     // Where the sender label ends and everything below it begins.
     property int stackTop: senderLabel.text === "" ? 16 : 46
 
+    // What the reply banner previews. Every content type keeps its wording under a
+    // different name, and reading a property a QObject does not have gives undefined
+    // rather than throwing - so this is the first one that exists, or nothing.
+    property string replyPreview: model.content ? (model.content.text || model.content.caption || "") : ""
+
+    // Springs the bubble back after a swipe. An explicit animation rather than a
+    // Behavior: during the drag the Behavior would have to be switched off, and
+    // whether drag.active is already false inside onReleased is not worth relying on.
+    NumberAnimation {
+        id: springBack
+
+        target: root
+        property: "x"
+        to: 0
+        duration: 150
+        easing.type: Easing.OutQuad
+    }
+
     BorderImage {
         id: bubble
 
@@ -53,8 +71,29 @@ Item {
             id: mouseArea
             anchors.fill: parent
 
+            // Swipe right to reply, the way Telegram does. The whole bubble follows the
+            // finger: an axis-locked drag only takes the mouse grab once it has crossed
+            // the threshold sideways, so a vertical flick still reaches the list.
+            drag {
+                target: root
+                axis: Drag.XAxis
+                minimumX: 0
+                maximumX: 90
+            }
+
             onClicked: root.clicked()
             onPressAndHold: root.pressAndHold()
+            onPressed: springBack.stop()
+            onReleased: {
+                // Far enough to have been meant. composeState lives on ChatPage, the
+                // same place the long-press menu's Reply calls into.
+                if (root.x >= 56)
+                    composeState.reply(model.id, model.sender, root.replyPreview)
+
+                springBack.start()
+            }
+            // The list stealing the grab mid-drag leaves the bubble offset otherwise.
+            onCanceled: springBack.start()
         }
     }
 
@@ -101,6 +140,15 @@ Item {
             leftMargin: bubble.x + 10
             top: parent.top
             topMargin: root.stackTop
+        }
+
+        // Tapping the quote jumps to the message it points at. On the block rather than
+        // on the bubble's MouseArea, which sits behind the whole bubble and would have
+        // to work out whether the tap landed on the quote or on the message itself.
+        MouseArea {
+            anchors.fill: parent
+            enabled: model.replyToMessageId !== ""
+            onClicked: listView.goToMessage(model.replyToMessageId)
         }
 
         Rectangle {

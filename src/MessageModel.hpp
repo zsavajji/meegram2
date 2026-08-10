@@ -50,6 +50,9 @@ public:
         SectionRole,
         ReplyToSenderRole,
         ReplyToTextRole,
+        // The message a reply points at, as a string - what the quote block hands to
+        // indexOf to jump there. Empty when the message is not a reply.
+        ReplyToMessageIdRole,
         // Delivery state of an outgoing message, for the tick on the bubble. Empty for
         // anything incoming.
         SendStateRole
@@ -93,6 +96,11 @@ public:
 
     // Row of the last read message, or count() when it is not in the loaded slice.
     Q_INVOKABLE int lastMessageIndex() const noexcept;
+
+    // Row holding a message id, or -1 when it is not in the loaded slice - which is the
+    // answer for a reply pointing further back than the loaded window, and for one
+    // pointing into another chat.
+    Q_INVOKABLE int indexOf(const QString &messageId) const noexcept;
 
 signals:
     void countChanged();

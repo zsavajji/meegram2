@@ -358,6 +358,27 @@ Page {
                     listView.positionViewAtEnd()
             }
 
+            // Where a tapped quote block goes. Only reaches messages in the loaded slice:
+            // the model holds one window ending at the newest message, and a reply can
+            // point arbitrarily far back.
+            //
+            // ponytail: says so rather than fetching. Asking getChatHistory for a slice
+            // centred on that id, and rebuilding the window around it, is the upgrade -
+            // and it is the same work per-chat message caching would need.
+            function goToMessage(messageId) {
+                var index = messageModel.indexOf(messageId)
+
+                if (index < 0) {
+                    appWindow.showInfoBanner(qsTr("MessageNotFound"))
+                    return
+                }
+
+                // Reading back is deliberate, so a message landing must not yank the
+                // view to the end again - the same thing scrolling up by hand does.
+                listView.followLast = false
+                listView.positionViewAtIndex(index, ListView.Center)
+            }
+
             Timer {
                 id: settleTimer
 
