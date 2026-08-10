@@ -29,23 +29,18 @@ Item {
     // when a swipe actually commits, rather than for every bubble the list builds.
     property string replyPreview: ""
 
-    // True while the view has just jumped here from a quote block. The empty test is what
-    // makes this free: with no flash in flight the id is never even read, so building a
-    // screenful of these costs one string comparison each.
-    //
-    // Loose ==: the flashed id is a string from the model and this one crosses as a
-    // number.
-    property bool flashing: listView.flashMessageId !== "" && listView.flashMessageId == model.id
+    // True while the view has just jumped here from a quote block. Two strings, both from
+    // the model: comparing against model.id meant comparing a string to a qlonglong that
+    // had crossed into QML1 as a number, which is not a trip this codebase trusts. The
+    // empty test is what keeps it free - with no flash in flight the id is never read,
+    // so a screenful of these costs one string comparison each.
+    property bool flashing: listView.flashMessageId !== "" && listView.flashMessageId === model.idString
 
     // The two halves of the swipe, so any MouseArea covering part of the bubble - the
     // quote block, an album cell - can hand its drag to this one instead of repeating
     // the decision. commit is false when the gesture was cancelled rather than released.
-    //
-    // The spring-back animation itself belongs to the list: one bubble is under a finger
-    // at a time, and an animation per delegate is four objects built per row while the
-    // page is still sliding in.
     function beginSwipe() {
-        listView.stopSwipeSpring(root)
+        springBack.stop()
     }
 
     function endSwipe(commit) {
@@ -63,7 +58,24 @@ Item {
             composeState.reply(model.id, model.sender, preview);
         }
 
-        listView.swipeSpringTo(root);
+        // Only if the bubble actually moved: a tap fires released before clicked, so this
+        // otherwise animated x from 0 to 0 on every tap of the quote block.
+        if (root.x !== 0)
+            springBack.start();
+    }
+
+    // Owned by the bubble rather than shared with the list, deliberately. A shared one
+    // holds its target as a plain pointer, and a tap on a quote block destroys this very
+    // delegate a moment later - the jump rebuilds the rows - so the animation went on
+    // writing x into freed memory. An animation that dies with what it animates cannot.
+    NumberAnimation {
+        id: springBack
+
+        target: root
+        property: "x"
+        to: 0
+        duration: 150
+        easing.type: Easing.OutQuad
     }
 
     BorderImage {

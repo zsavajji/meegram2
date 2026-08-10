@@ -10,12 +10,48 @@ import "components"
 Page {
     id: root
 
-    signal fileSelected(string path)
+    // The picked files, newline-joined.
+    signal picked(string paths)
 
     // Folders deep below the starting point, so the "up one directory" row only shows
     // when there is somewhere to go. A counter rather than comparing folder urls: QUrl
     // normalisation makes string equality on those unreliable.
     property int depth: 0
+
+    // What has been ticked, as "\npath1\npath2\n" - see the note on the photo picker's
+    // copy of this. Ticks survive browsing into another folder and back, which is the
+    // whole point of keeping them here rather than in the delegates.
+    property string selection: ""
+    property int selectionCount: 0
+
+    // Not a server limit here - each file is its own message - but the same number, so
+    // there is one rule for how many attachments go at once.
+    property int maxSelection: 10
+
+    function isPicked(path) {
+        return selection.indexOf("\n" + path + "\n") !== -1;
+    }
+
+    function toggle(path) {
+        if (isPicked(path)) {
+            selection = selection.replace("\n" + path + "\n", "\n");
+            --selectionCount;
+
+            if (selectionCount === 0)
+                selection = "";
+
+            return;
+        }
+
+        if (selectionCount >= maxSelection) {
+            // Plain English, same reasoning as "Up one directory" below.
+            appWindow.showInfoBanner(qsTr("Up to 10 files at once"));
+            return;
+        }
+
+        selection = (selection === "" ? "\n" : selection) + path + "\n";
+        ++selectionCount;
+    }
 
     // ChatPage keeps this page alive between attachments, so closing it is really a hide
     // and reopening would otherwise land wherever the last browse ended. Inactive fires
@@ -26,6 +62,8 @@ Page {
         if (status === PageStatus.Inactive) {
             root.depth = 0;
             folderModel.folder = utils.toFileUrl(utils.documentsPath());
+            root.selection = "";
+            root.selectionCount = 0;
         }
     }
 
@@ -121,15 +159,24 @@ Page {
             // isFolder is a method, not a role, in this version of the model.
             property bool isFolder: folderModel.isFolder(index)
 
+            // This model hands out filePath as a file:// url, not a plain path, so
+            // feeding it straight to toFileUrl wrapped it twice and produced a directory
+            // that does not exist - which setFolder ignores in silence. Normalising here
+            // works whichever of the two it turns out to be, and is also the plain path
+            // sendDocument wants.
+            property string path: utils.toLocalFile(String(filePath))
+
             subItemIndicator: isFolder
+            isSelected: !isFolder && root.isPicked(path)
 
             Label {
                 anchors {
                     left: parent.left
                     leftMargin: 16
                     right: parent.right
-                    // Clear of the drilldown arrow on a folder row.
-                    rightMargin: parent.subItemIndicator ? 60 : 16
+                    // Clear of the drilldown arrow on a folder row, and of the tick on
+                    // a file row - both sit in the same 60px.
+                    rightMargin: 60
                     verticalCenter: parent.verticalCenter
                 }
                 text: fileName
@@ -138,19 +185,22 @@ Page {
                 maximumLineCount: 1
             }
 
-            onClicked: {
-                // This model hands out filePath as a file:// url, not a plain path, so
-                // feeding it straight to toFileUrl wrapped it twice and produced a
-                // directory that does not exist - which setFolder ignores in silence.
-                // Normalising first works whichever of the two it turns out to be.
-                var path = utils.toLocalFile(String(filePath));
+            Image {
+                anchors { right: parent.right; rightMargin: 12; verticalCenter: parent.verticalCenter }
+                visible: !parent.isFolder
+                // The same pair NewGroupPage uses, which are known to exist in the
+                // Harmattan theme.
+                source: parent.isSelected
+                            ? "image://theme/meegotouch-button-radiobutton-background-selected"
+                            : "image://theme/meegotouch-button-checkbox-background"
+            }
 
+            onClicked: {
                 if (isFolder) {
                     root.depth++;
                     folderModel.folder = utils.toFileUrl(path);
                 } else {
-                    // A plain path, which is what sendDocument wants.
-                    root.fileSelected(path);
+                    root.toggle(path);
                 }
             }
         }
@@ -162,6 +212,13 @@ Page {
         ToolIcon {
             iconId: "toolbar-back"
             onClicked: pageStack.pop()
+        }
+
+        // Same as the photo picker: tapping a row ticks it, and this is what sends.
+        ToolButton {
+            text: root.selectionCount > 1 ? qsTr("Send") + " (" + root.selectionCount + ")" : qsTr("Send")
+            enabled: root.selectionCount > 0
+            onClicked: root.picked(root.selection)
         }
     }
 }

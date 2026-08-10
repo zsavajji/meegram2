@@ -31,6 +31,10 @@ public:
 
     enum Role {
         IdRole = Qt::UserRole + 1,
+        // The same id as a string, for comparing against one. IdRole crosses into QML1 as
+        // a number, and this codebase does not trust what happens to a qlonglong on that
+        // trip - see the note in Chat.hpp. Only read while a bubble is being flashed.
+        IdStringRole,
         SenderRole,
         // The sender name with emoji replaced by <img> tags, for the bubble to display.
         // Separate from SenderRole because the plain one is carried into the reply
@@ -89,6 +93,12 @@ public:
 
     Q_INVOKABLE void sendMessage(const QString &message, const QString &replyToMessageId = {}) noexcept;
     Q_INVOKABLE void sendPhoto(const QString &filePath, const QString &caption = {}, const QString &replyToMessageId = {}) noexcept;
+    // Several photos as one album, up to the server's limit of ten. The paths arrive
+    // newline-joined rather than as a QStringList: the picker holds its selection as one
+    // string for the same reason - a JS array crossing the QML1 boundary is the class of
+    // conversion that already cost this codebase an album caption.
+    Q_INVOKABLE void sendPhotos(const QString &filePaths, const QString &caption = {},
+                                const QString &replyToMessageId = {}) noexcept;
     // Any file, as a document - including an image, which is what "send as file" means
     // to Telegram and is why this does not sniff the type and reroute to sendPhoto.
     Q_INVOKABLE void sendDocument(const QString &filePath, const QString &caption = {}, const QString &replyToMessageId = {}) noexcept;

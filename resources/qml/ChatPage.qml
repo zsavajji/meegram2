@@ -333,32 +333,6 @@ Page {
                 onCompleted: listView.flashMessageId = ""
             }
 
-            // The swipe's spring-back, shared for the same reason. One bubble is under a
-            // finger at a time, so one animation retargeted is enough.
-            NumberAnimation {
-                id: swipeSpring
-
-                property: "x"
-                to: 0
-                duration: 150
-                easing.type: Easing.OutQuad
-            }
-
-            function swipeSpringTo(item) {
-                // A second swipe starting before the first has sprung back would leave
-                // that bubble parked off-centre when the animation retargets.
-                if (swipeSpring.running && swipeSpring.target && swipeSpring.target !== item)
-                    swipeSpring.target.x = 0
-
-                swipeSpring.stop()
-                swipeSpring.target = item
-                swipeSpring.start()
-            }
-
-            function stopSwipeSpring(item) {
-                if (swipeSpring.target === item)
-                    swipeSpring.stop()
-            }
 
             // Where a tapped quote block goes. The reply may point outside the loaded
             // window, so anything not there yet is chased by jumpTimer.
@@ -381,8 +355,8 @@ Page {
 
             function arriveAt(index, messageId) {
                 followLast = false
+                // Marked now, flashed when the settle below has finished moving the view.
                 flashMessageId = messageId
-                flashAnimation.restart()
                 // Through the settle rather than a single call: the row was very likely
                 // built moments ago, and one positionViewAtIndex lands on an estimate.
                 beginSettleAt(index)
@@ -468,6 +442,15 @@ Page {
 
                     if (++ticks >= 5) {
                         stop()
+
+                        // The flash waits for the jump to land. Started back when the
+                        // quote was tapped, it ran while the view was still repositioning
+                        // and the bubble it marks was usually built by one of the last of
+                        // these passes - so the dip was over, or had never had anything
+                        // to dip, by the time you were looking at it.
+                        if (toIndex >= 0 && listView.flashMessageId !== "")
+                            flashAnimation.restart()
+
                         listView.fillViewport()
                     }
                 }
@@ -1110,16 +1093,19 @@ Page {
             }
 
             photoPicker = component.createObject(root);
-            photoPicker.photoSelected.connect(sendPhoto);
+            photoPicker.picked.connect(sendPhotos);
         }
 
         pageStack.push(photoPicker);
     }
 
-    function sendPhoto(path) {
+    // paths is newline-joined, straight from the picker: one string all the way to
+    // sendPhotos, which is the only representation that crosses QML1 without question.
+    // One photo goes out as an ordinary message, several as one album.
+    function sendPhotos(paths) {
         // Whatever is in the composer rides along as the caption, which is how
         // Telegram behaves and costs nothing here.
-        messageModel.sendPhoto(path, textArea.text, composeState.replyId);
+        messageModel.sendPhotos(paths, textArea.text, composeState.replyId);
 
         textArea.text = "";
         composeState.clear();
@@ -1145,14 +1131,28 @@ Page {
             }
 
             filePicker = component.createObject(root);
-            filePicker.fileSelected.connect(sendDocument);
+            filePicker.picked.connect(sendDocuments);
         }
 
         pageStack.push(filePicker);
     }
 
-    function sendDocument(path) {
-        messageModel.sendDocument(path, textArea.text, composeState.replyId);
+    // ponytail: one message per file rather than one album carrying the lot. TDLib does
+    // group documents, but this client draws them as separate bubbles either way, and a
+    // loop over the send path that already works beats a second album builder.
+    function sendDocuments(paths) {
+        var list = paths.split("\n");
+        // Only the first carries the composer's text, the way an album's caption does.
+        // Repeating it under every file would be noise.
+        var caption = textArea.text;
+
+        for (var i = 0; i < list.length; ++i) {
+            if (list[i] === "")
+                continue;
+
+            messageModel.sendDocument(list[i], caption, composeState.replyId);
+            caption = "";
+        }
 
         textArea.text = "";
         composeState.clear();

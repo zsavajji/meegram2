@@ -8,9 +8,56 @@ import QtMobility.gallery 1.1
 Page {
     id: root
 
-    signal photoSelected(string path)
+    // The picked photos, newline-joined - the same string sendPhotos takes.
+    signal picked(string paths)
 
     property int columns: width > height ? 5 : 3
+
+    // What has been ticked, as "\npath1\npath2\n". A string rather than a list: a JS
+    // array in a variant property is exactly the QML1 conversion that lost the album
+    // caption, and no path on this device contains a newline. Empty when nothing is
+    // ticked, so the delegates' test is a plain substring search.
+    property string selection: ""
+    property int selectionCount: 0
+
+    // The server's limit on one album; MessageModel enforces it too.
+    property int maxSelection: 10
+
+    function isPicked(path) {
+        return selection.indexOf("\n" + path + "\n") !== -1;
+    }
+
+    function toggle(path) {
+        if (isPicked(path)) {
+            selection = selection.replace("\n" + path + "\n", "\n");
+            --selectionCount;
+
+            if (selectionCount === 0)
+                selection = "";
+
+            return;
+        }
+
+        if (selectionCount >= maxSelection) {
+            // Plain English on purpose: the locale hands back a key it does not know as
+            // itself, so this degrades to something readable. Same choice as the file
+            // picker's "Up one directory".
+            appWindow.showInfoBanner(qsTr("Up to 10 photos at once"));
+            return;
+        }
+
+        selection = (selection === "" ? "\n" : selection) + path + "\n";
+        ++selectionCount;
+    }
+
+    // ChatPage keeps this page alive between attachments, so what was ticked last time
+    // would otherwise still be ticked. Inactive fires once the pop animation is over.
+    onStatusChanged: {
+        if (status === PageStatus.Inactive) {
+            selection = "";
+            selectionCount = 0;
+        }
+    }
 
     Item {
         id: header
@@ -73,6 +120,16 @@ Page {
             width: grid.cellWidth
             height: grid.cellHeight
 
+            // String(url) rather than url: the role is a QML url type, and stringifying
+            // it here is deterministic instead of relying on how a QUrl coerces into a
+            // QString parameter.
+            property string path: utils.toLocalFile(String(url))
+
+            // Off the page's selection rather than off any state in here: a thumbnail
+            // scrolled past is rebuilt from scratch when it comes back, and picking
+            // several photos is exactly the case where that happens.
+            property bool ticked: root.isPicked(path)
+
             Image {
                 id: thumbnail
 
@@ -97,14 +154,30 @@ Page {
                 visible: mouseArea.pressed
             }
 
+            // A ticked thumbnail reads as picked from across the grid, which a small
+            // corner mark on its own does not.
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: 2
+                color: "#0077A8"
+                opacity: 0.35
+                visible: parent.ticked
+            }
+
+            Image {
+                anchors { right: parent.right; top: parent.top; margins: 6 }
+                // The same pair NewGroupPage uses, which are known to exist in the
+                // Harmattan theme.
+                source: parent.ticked
+                            ? "image://theme/meegotouch-button-radiobutton-background-selected"
+                            : "image://theme/meegotouch-button-checkbox-background"
+            }
+
             MouseArea {
                 id: mouseArea
 
                 anchors.fill: parent
-                // String(url) rather than url: the role is a QML url type, and
-                // stringifying it here is deterministic instead of relying on how a
-                // QUrl coerces into a QString parameter.
-                onClicked: root.photoSelected(utils.toLocalFile(String(url)))
+                onClicked: root.toggle(parent.path)
             }
         }
 
@@ -130,6 +203,15 @@ Page {
         ToolIcon {
             iconId: "toolbar-back"
             onClicked: pageStack.pop()
+        }
+
+        // Tapping a thumbnail ticks it rather than sending it, so the send is a button -
+        // the same shape NewGroupPage's Create has. The count only appears once there is
+        // more than one, where it is the part worth checking before sending.
+        ToolButton {
+            text: root.selectionCount > 1 ? qsTr("Send") + " (" + root.selectionCount + ")" : qsTr("Send")
+            enabled: root.selectionCount > 0
+            onClicked: root.picked(root.selection)
         }
     }
 }

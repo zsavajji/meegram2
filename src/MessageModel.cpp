@@ -16,6 +16,43 @@
 #include <algorithm>
 #include <ranges>
 
+namespace {
+
+// One photo, ready to be sent - on its own or as one item of an album.
+td::td_api::object_ptr<td::td_api::inputMessagePhoto> makeInputPhoto(const QString &filePath, const QString &caption)
+{
+    // The file and its dimensions live on a nested inputPhoto; only the caption sits
+    // on inputMessagePhoto itself.
+    auto photo = td::td_api::make_object<td::td_api::inputPhoto>();
+
+    photo->photo_ = td::td_api::make_object<td::td_api::inputFileLocal>(filePath.toStdString());
+
+    // Read from the header rather than decoded: QImageReader::size() only parses far
+    // enough to find the dimensions, which matters for an 8MP shot on this hardware.
+    // Zero is acceptable to TDLib; it just means the recipient sees no placeholder
+    // geometry until the photo arrives.
+    const QImageReader reader(filePath);
+    if (const auto size = reader.size(); size.isValid())
+    {
+        photo->width_ = size.width();
+        photo->height_ = size.height();
+    }
+
+    auto content = td::td_api::make_object<td::td_api::inputMessagePhoto>();
+
+    content->photo_ = std::move(photo);
+    content->caption_ = td::td_api::make_object<td::td_api::formattedText>();
+    content->caption_->text_ = caption.toStdString();
+
+    return content;
+}
+
+// The server's limit on one album, enforced by TDLib - it rejects the whole request
+// past it rather than trimming. The picker stops at the same number.
+constexpr int MaxAlbumSize = 10;
+
+}  // namespace
+
 MessageModel::MessageModel(std::shared_ptr<Chat> chat, std::shared_ptr<Locale> locale, std::shared_ptr<StorageManager> storage)
     : m_client(storage->client())
     , m_locale(std::move(locale))
@@ -93,6 +130,8 @@ QVariant MessageModel::data(const QModelIndex &index, int role) const
     {
         case IdRole:
             return message->id();
+        case IdStringRole:
+            return QString::number(message->id());
         case SenderRole:
             return formattedRow(messageId, message.get()).sender;
         case SenderHtmlRole:
@@ -383,6 +422,7 @@ QHash<int, QByteArray> MessageModel::roleNames() const noexcept
 {
     QHash<int, QByteArray> roles;
     roles[IdRole] = "id";
+    roles[IdStringRole] = "idString";
     roles[SenderRole] = "sender";
     roles[SenderHtmlRole] = "senderHtml";
     roles[ChatIdRole] = "chatId";
@@ -565,30 +605,43 @@ void MessageModel::sendMessage(const QString &message, const QString &replyToMes
 
 void MessageModel::sendPhoto(const QString &filePath, const QString &caption, const QString &replyToMessageId) noexcept
 {
-    // The file and its dimensions live on a nested inputPhoto; only the caption sits
-    // on inputMessagePhoto itself.
-    auto photo = td::td_api::make_object<td::td_api::inputPhoto>();
+    send(makeInputPhoto(filePath, caption), toId(replyToMessageId));
+}
 
-    photo->photo_ = td::td_api::make_object<td::td_api::inputFileLocal>(filePath.toStdString());
+void MessageModel::sendPhotos(const QString &filePaths, const QString &caption, const QString &replyToMessageId) noexcept
+{
+    const auto paths = filePaths.split(QLatin1Char('\n'), QString::SkipEmptyParts);
 
-    // Read from the header rather than decoded: QImageReader::size() only parses far
-    // enough to find the dimensions, which matters for an 8MP shot on this hardware.
-    // Zero is acceptable to TDLib; it just means the recipient sees no placeholder
-    // geometry until the photo arrives.
-    const QImageReader reader(filePath);
-    if (const auto size = reader.size(); size.isValid())
+    if (paths.isEmpty())
+        return;
+
+    // One photo is an ordinary message rather than an album of one - and it is what the
+    // picker sends when only one thumbnail was ticked.
+    if (paths.size() == 1)
     {
-        photo->width_ = size.width();
-        photo->height_ = size.height();
+        sendPhoto(paths.first(), caption, replyToMessageId);
+        return;
     }
 
-    auto content = td::td_api::make_object<td::td_api::inputMessagePhoto>();
+    auto request = td::td_api::make_object<td::td_api::sendMessageAlbum>();
 
-    content->photo_ = std::move(photo);
-    content->caption_ = td::td_api::make_object<td::td_api::formattedText>();
-    content->caption_->text_ = caption.toStdString();
+    request->chat_id_ = m_chat->id();
 
-    send(std::move(content), toId(replyToMessageId));
+    if (const auto replyTo = toId(replyToMessageId); replyTo != 0)
+    {
+        // Same shape as send() above: the reply target is always in the chat being sent to.
+        request->reply_to_ = td::td_api::make_object<td::td_api::inputMessageReplyToMessage>(replyTo, nullptr, 0, "");
+    }
+
+    for (int i = 0; i < paths.size() && i < MaxAlbumSize; ++i)
+    {
+        // The caption goes on the first photo alone. That is where Telegram puts an
+        // album's text, and where the bubble looks for it - putting it on every one
+        // would repeat it under the mosaic.
+        request->input_message_contents_.push_back(makeInputPhoto(paths.at(i), i == 0 ? caption : QString()));
+    }
+
+    m_client->send(std::move(request));
 }
 
 void MessageModel::sendDocument(const QString &filePath, const QString &caption, const QString &replyToMessageId) noexcept
