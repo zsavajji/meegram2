@@ -562,7 +562,7 @@ void ChatManager::searchMentions(const QString &query) noexcept
     // person and you are not going to mention them by name.
     if (type != Chat::Type::BasicGroup && type != Chat::Type::Supergroup)
     {
-        emit mentionsFound({});
+        emit mentionsFound({}, {});
         return;
     }
 
@@ -580,7 +580,10 @@ void ChatManager::handleChatMembers(void *responseObject) noexcept
 {
     const td::td_api::object_ptr<td::td_api::Object> response(static_cast<td::td_api::Object *>(responseObject));
 
-    QStringList usernames;
+    // Paired by index: the username is what gets inserted, the name is what makes the
+    // row recognisable - half the people in a group have a username nobody would know
+    // them by.
+    QStringList usernames, names;
 
     if (response && response->get_id() == td::td_api::chatMembers::ID)
     {
@@ -595,12 +598,18 @@ void ChatManager::handleChatMembers(void *responseObject) noexcept
 
             // Skipped rather than shown greyed out: a name that cannot be inserted as a
             // working mention is worse than one that is simply not offered.
-            if (const auto user = m_storage->user(userId); user && !user->activeUsernames().isEmpty())
-                usernames.append(user->activeUsernames().first());
+            const auto user = m_storage->user(userId);
+
+            if (!user || user->activeUsernames().isEmpty())
+                continue;
+
+            usernames.append(user->activeUsernames().first());
+            // false: the linked form is for message text, and this is a plain row.
+            names.append(Utils::getUserName(user, false));
         }
     }
 
-    emit mentionsFound(usernames);
+    emit mentionsFound(usernames, names);
 }
 
 bool ChatManager::openChat(const QString &rawChatId) noexcept

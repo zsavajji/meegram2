@@ -180,9 +180,10 @@ signals:
     void profileReady(bool ok);
 
     // The answer to searchMentions(), oldest request wins nothing - a later reply simply
-    // replaces the list. QStringList rather than a QVariantList: it is the one list type
-    // that crosses into QML1 as a plain array of strings.
-    void mentionsFound(const QStringList &usernames);
+    // replaces the list. Two lists paired by index rather than one of pairs: QStringList
+    // is the one list type that crosses into QML1 as a plain array, and a list of objects
+    // is exactly the conversion that has bitten this codebase before.
+    void mentionsFound(const QStringList &usernames, const QStringList &names);
 
     // A chat that openChat() refused has finished being fetched. ok says whether it can
     // be opened now; the caller retries openChat() or reports the failure.

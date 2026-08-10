@@ -654,6 +654,10 @@ Page {
                         width: parent.width
                         height: 64
 
+                        // The username first - it is what gets inserted - then the name,
+                        // which is what makes the row recognisable. One label rather than
+                        // two: it elides as one piece of text, so a long name is what
+                        // gets cut rather than the part being completed.
                         Label {
                             anchors {
                                 left: parent.left
@@ -662,9 +666,12 @@ Page {
                                 rightMargin: 16
                                 verticalCenter: parent.verticalCenter
                             }
-                            text: "@" + username
-                            font.pixelSize: 24
+                            // A member whose name TDLib has not filled in gets no dash
+                            // left dangling after their username.
+                            text: name !== "" ? "@" + username + " - " + name : "@" + username
+                            font.pixelSize: 22
                             elide: Text.ElideRight
+                            maximumLineCount: 1
                         }
 
                         onClicked: root.applyMention(username)
@@ -1173,8 +1180,9 @@ Page {
             if (root.mentionQuery === "" && usernames.length > 0)
                 return;
 
+            // Paired by index, as ChatManager sends them.
             for (var i = 0; i < usernames.length; ++i)
-                mentionModel.append({ username: usernames[i] });
+                mentionModel.append({ username: usernames[i], name: names[i] });
         }
     }
 
