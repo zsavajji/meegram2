@@ -41,6 +41,8 @@ public:
         DateRole,
         EditDateRole,
         ContentRole,
+        // The photos of an album, for the one row that draws it. Empty on every other row.
+        AlbumRole,
         // Custom role
         ContentTypeRole,
         IsServiceRole,
@@ -148,6 +150,19 @@ private:
     // so the download reaches the object the delegate is bound to. Must run before
     // the message becomes visible to the view.
     void linkContentFile(Message *message) noexcept;
+
+    // Photos sent in one batch share a media_album_id and land in consecutive rows, since
+    // they are consecutive ids. The first of the run draws the whole album and the rest
+    // draw nothing, which is what ContentTypeRole reports as messageAlbum /
+    // messageAlbumChild. Photos only: an album can also carry videos, and mixing two
+    // content types into one mosaic buys nothing here.
+    bool sameAlbum(int firstRow, int secondRow) const noexcept;
+    int albumHead(int row) const noexcept;
+
+    // Rows appearing or disappearing next to an album change which row is its head and
+    // how many photos it holds, and neither is a value the row itself carries - so the
+    // whole run has to be told to re-read. Called from every structural change.
+    void refreshAlbumAt(int row) noexcept;
 
     // Reply previews. Both return an empty string when the message is not a reply,
     // which is what the delegate tests to decide whether to show a quote block.

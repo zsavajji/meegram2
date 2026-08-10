@@ -53,6 +53,8 @@ Message::Message(td::td_api::object_ptr<td::td_api::message> message, QObject *p
     m_isPending = m_message->sending_state_ != nullptr;
     m_isFailed = m_isPending && m_message->sending_state_->get_id() == td::td_api::messageSendingStateFailed::ID;
 
+    m_mediaAlbumId = m_message->media_album_id_;
+
     m_date = QDateTime::fromMSecsSinceEpoch(static_cast<qlonglong>(m_message->date_) * 1000);
     m_editDate = QDateTime::fromMSecsSinceEpoch(static_cast<qlonglong>(m_message->edit_date_) * 1000);
 
@@ -221,6 +223,11 @@ bool Message::isService() const noexcept
 int Message::contentType() const
 {
     return m_contentType;
+}
+
+qlonglong Message::mediaAlbumId() const noexcept
+{
+    return m_mediaAlbumId;
 }
 
 QString Message::contentTypeString() const

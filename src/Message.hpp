@@ -64,6 +64,12 @@ public:
     int contentType() const;
     QString contentTypeString() const;
 
+    // Non-zero when the message was sent as part of an album - every message of the batch
+    // carries the same value. Deliberately not a Q_PROPERTY: a qlonglong crossing into
+    // QML1 is the corruption trap described in Chat.hpp, so MessageModel groups the rows
+    // in C++ and QML never sees the id.
+    qlonglong mediaAlbumId() const noexcept;
+
     SenderType senderType() const;
 
     void setContent(td::td_api::object_ptr<td::td_api::MessageContent> content);
@@ -85,6 +91,7 @@ private:
 
     int m_contentType;
     SenderType m_senderType;
+    qlonglong m_mediaAlbumId;
 
     std::unique_ptr<MessageContent> m_content;
     std::unique_ptr<ReplyInfo> m_replyTo;

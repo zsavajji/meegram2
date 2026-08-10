@@ -25,6 +25,8 @@ Item {
     property int stackTop: senderLabel.text === "" ? 16 : 46
 
     BorderImage {
+        id: bubble
+
         height: parent.height + (isOutgoing ? 0 : 2)
         // The quote block has to widen the bubble too, or a short message replying
         // to a long one would have its quote clipped. 11 = accent bar + its margin.
@@ -91,18 +93,12 @@ Item {
 
         anchors {
             left: parent.left
-            // Same problem the sticker had: leftMargin 80 only looks right-aligned for
-            // content that spans the full width and sets AlignRight. The quote is a bar
-            // plus left-aligned labels, so it stayed on the incoming side while its
-            // bubble sat on the right. 11 is the bar and its margin; 20 puts the right
-            // edge where every other outgoing element's lands.
-            //
-            // Deliberately computed from paintedWidth rather than by sizing this Item to
-            // its content: the labels anchor to this Item's right edge, so making the
-            // width depend on them would be a binding loop. leftMargin feeds nothing.
-            leftMargin: model.isOutgoing
-                            ? parent.width - 31 - Math.max(replySender.paintedWidth, replyText.paintedWidth)
-                            : 20
+            // The bar hangs off the bubble's own left edge, on both sides: sizing this
+            // from the quote's paintedWidth instead left a short quote floating in the
+            // middle of a wide outgoing bubble. Reading bubble.x is safe - it depends on
+            // paintedWidth, but nothing here feeds paintedWidth back (the labels are
+            // capped by this Item's fixed width), so there is no binding loop.
+            leftMargin: bubble.x + 10
             top: parent.top
             topMargin: root.stackTop
         }

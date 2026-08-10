@@ -172,6 +172,177 @@ Item {
         }
     }
 
+    // Photos sent as one batch, drawn as a single bubble. The model hands the whole run to
+    // its first row and reports the rest as messageAlbumChild, which loads nothing - so one
+    // sender label, one date and one quote block cover the lot, the way Telegram does it.
+    Component {
+        id: albumMessageComponent
+
+        MessageBubble {
+            id: albumBubble
+
+            // Every cell needs this too, and the bubble's own MouseArea sits behind the
+            // content where a cell's covers it. The menu acts on the first message of the
+            // batch: a reply to one photo of an album is a reply to the album.
+            //
+            // ponytail: so is a delete - it removes that one photo, not the batch. Telegram
+            // asks; deleting all of them means a list of ids the menu does not carry yet.
+            //
+            // Save, on the other hand, is per photo: the cell that was held passes its own
+            // original, the same one the photo bubble hands over.
+            function openMenu(originalFile) {
+                menuTarget.open(model.id, model.sender, albumColumn.caption, model.isOutgoing, originalFile)
+            }
+
+            onPressAndHold: openMenu(albumColumn.photos[0].originalFile)
+
+            childrenWidth: albumColumn.width
+
+            content: Column {
+                id: albumColumn
+
+                property variant photos: model.album
+                property int cellSpacing: 4
+
+                // Rows of at most three, never leaving one photo alone on the last line.
+                // Telegram weighs the aspect ratios as well; this balances the count only,
+                // which is the part that shows.
+                function split(count) {
+                    var rows = [];
+
+                    while (count > 0) {
+                        var take = count <= 3 ? count : (count === 4 || count % 3 === 1 ? 2 : 3);
+
+                        rows.push(take);
+                        count -= take;
+                    }
+
+                    return rows;
+                }
+
+                function offsetOf(row) {
+                    var offset = 0;
+
+                    for (var i = 0; i < row; ++i)
+                        offset += rows[i];
+
+                    return offset;
+                }
+
+                // Telegram puts an album's caption on one message of the batch rather than
+                // on all of them, so it is whichever member happens to carry it.
+                function firstCaption() {
+                    for (var i = 0; i < photos.length; ++i) {
+                        if (photos[i].caption !== "")
+                            return photos[i].caption;
+                    }
+
+                    return "";
+                }
+
+                property variant rows: split(photos.length)
+                property string caption: firstCaption()
+
+                width: isPortrait ? 380 : 754
+                spacing: 6
+
+                anchors {
+                    left: parent.left
+                    // Fixed-width content, so the outgoing offset is computed rather than
+                    // left to alignment - same as the photo bubble above.
+                    leftMargin: model.isOutgoing ? listView.width - width - 20 : 20
+                }
+
+                Repeater {
+                    model: albumColumn.rows
+
+                    Row {
+                        id: albumRow
+
+                        property int cells: modelData
+                        property int offset: albumColumn.offsetOf(index)
+                        property int cellSize: (albumColumn.width - albumColumn.cellSpacing * (cells - 1)) / cells
+
+                        spacing: albumColumn.cellSpacing
+
+                        Repeater {
+                            model: albumRow.cells
+
+                            Item {
+                                // Nothing inside here may read `model`: a Repeater over a
+                                // plain list shadows it. Everything comes off an id instead.
+                                property variant photo: albumColumn.photos[albumRow.offset + index]
+
+                                width: albumRow.cellSize
+                                height: albumRow.cellSize
+                                clip: true
+
+                                Rectangle {
+                                    anchors.fill: parent
+                                    // The photo bubble's scrim, without its BusyIndicator: ten
+                                    // of those spinning at once is not what the N9 has to spare.
+                                    color: "#30000000"
+                                    visible: !cellImage.ready
+                                }
+
+                                Image {
+                                    id: cellImage
+
+                                    property bool ready: photo.file && photo.file.isDownloadingCompleted
+
+                                    anchors.fill: parent
+                                    sourceSize.width: width
+                                    asynchronous: true
+                                    smooth: true
+                                    // Cropped, not fitted: a mosaic only reads as one block if
+                                    // every cell is filled edge to edge.
+                                    fillMode: Image.PreserveAspectCrop
+                                    source: ready ? "file://" + photo.file.localPath : ""
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+
+                                    onClicked: {
+                                        if (cellImage.ready)
+                                            appWindow.openPhoto(photo.file.localPath)
+                                    }
+                                    onPressAndHold: albumBubble.openMenu(photo.originalFile)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Label {
+                    // Same plain-text fast path as every other caption.
+                    property string html: utils.replaceEmoji(albumColumn.caption)
+
+                    width: parent.width
+                    visible: text !== ""
+                    textFormat: /[<&\n\r\t]|\s\s/.test(html) ? Text.RichText : Text.PlainText
+                    text: html
+                    color: model.isOutgoing ? "white" : "black"
+                    wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                    font.pixelSize: 23
+                    horizontalAlignment: model.isOutgoing ? Text.AlignRight : Text.AlignLeft
+                    onLinkActivated: Qt.openUrlExternally(link)
+                }
+            }
+
+            // Downloads on sight, once per photo of the batch. Same trade as the photo
+            // bubble's - see the note there.
+            Component.onCompleted: {
+                for (var i = 0; i < albumColumn.photos.length; ++i) {
+                    var file = albumColumn.photos[i].file;
+
+                    if (file && file.canBeDownloaded && !file.isDownloadingActive && !file.isDownloadingCompleted)
+                        appManager.downloadFile(file.id, 1, 0, 0, false);
+                }
+            }
+        }
+    }
+
     Component {
         id: animatedStickerComponent
 
@@ -761,6 +932,12 @@ Item {
                 return textMessageComponent;
             case "messagePhoto":
                 return photoMessageComponent;
+            case "messageAlbum":
+                return albumMessageComponent;
+            // Drawn by the first message of its batch, so this row loads nothing at all and
+            // collapses to zero height.
+            case "messageAlbumChild":
+                return null;
             case "messageVideo":
             // Through the video delegate: a GIF is a soundless mp4, so it downloads and
             // opens exactly the same way and only wants a different badge.

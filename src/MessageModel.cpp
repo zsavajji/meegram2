@@ -146,8 +146,37 @@ QVariant MessageModel::data(const QModelIndex &index, int role) const
             }
             return QVariant();
         }
-        case ContentTypeRole:
+        case AlbumRole: {
+            QVariantList photos;
+
+            // Only the head of a run of two or more carries the list; the others are drawn
+            // by it, and a lone photo stays an ordinary photo bubble.
+            if (!sameAlbum(index.row() - 1, index.row()) && sameAlbum(index.row(), index.row() + 1))
+            {
+                for (int row = index.row(); row < static_cast<int>(m_messages.size()); ++row)
+                {
+                    photos.append(QVariant::fromValue(static_cast<MessagePhoto *>(m_messageMap.at(m_messages[row])->content())));
+
+                    if (!sameAlbum(row, row + 1))
+                        break;
+                }
+            }
+
+            return photos;
+        }
+        case ContentTypeRole: {
+            // The delegate picks its component off this role already, so grouping rides on
+            // it rather than on two more roles the view would have to read for every row.
+            static const QString Album("messageAlbum"), AlbumChild("messageAlbumChild");
+
+            if (sameAlbum(index.row() - 1, index.row()))
+                return AlbumChild;
+
+            if (sameAlbum(index.row(), index.row() + 1))
+                return Album;
+
             return message->contentTypeString();
+        }
         case IsServiceRole:
             return message->isService();
         case ServiceMessageRole:
@@ -163,6 +192,43 @@ QVariant MessageModel::data(const QModelIndex &index, int role) const
     }
 
     return QVariant();
+}
+
+bool MessageModel::sameAlbum(int firstRow, int secondRow) const noexcept
+{
+    const auto rows = static_cast<int>(m_messages.size());
+    if (firstRow < 0 || secondRow < 0 || firstRow >= rows || secondRow >= rows)
+        return false;
+
+    const auto &first = m_messageMap.at(m_messages[firstRow]);
+    const auto &second = m_messageMap.at(m_messages[secondRow]);
+
+    if (!first || !second || first->mediaAlbumId() == 0 || first->mediaAlbumId() != second->mediaAlbumId())
+        return false;
+
+    return first->contentType() == td::td_api::messagePhoto::ID && second->contentType() == td::td_api::messagePhoto::ID;
+}
+
+int MessageModel::albumHead(int row) const noexcept
+{
+    while (sameAlbum(row - 1, row))
+        --row;
+
+    return row;
+}
+
+void MessageModel::refreshAlbumAt(int row) noexcept
+{
+    if (!sameAlbum(row - 1, row) && !sameAlbum(row, row + 1))
+        return;
+
+    const auto first = albumHead(row);
+
+    auto last = first;
+    while (sameAlbum(last, last + 1))
+        ++last;
+
+    emit dataChanged(createIndex(first, 0), createIndex(last, 0));
 }
 
 QString MessageModel::replyToSender(const Message *message) const noexcept
@@ -299,6 +365,7 @@ QHash<int, QByteArray> MessageModel::roleNames() const noexcept
     roles[DateRole] = "date";
     roles[EditDateRole] = "editDate";
     roles[ContentRole] = "content";
+    roles[AlbumRole] = "album";
     // Custom
     roles[ContentTypeRole] = "contentType";
     roles[IsServiceRole] = "isService";
@@ -787,6 +854,10 @@ void MessageModel::handleNewMessage(td::td_api::object_ptr<td::td_api::message> 
 
     endInsertRows();
 
+    // An album arrives as one updateNewMessage per photo, so the row above may have just
+    // become an album, or grown by one.
+    refreshAlbumAt(pos);
+
     emit countChanged();
 
     // Messages sort by id and a new one always has the highest, so this is the last
@@ -860,7 +931,11 @@ void MessageModel::handleMessageContent(qlonglong chatId, qlonglong messageId, t
         // setContent builds a fresh content object, so its File needs linking again.
         linkContentFile(it->second.get());
 
-        itemChanged(std::distance(m_messages.begin(), std::ranges::find(m_messages, messageId)));
+        const auto row = static_cast<int>(std::distance(m_messages.begin(), std::ranges::find(m_messages, messageId)));
+
+        itemChanged(row);
+        // An album member is drawn by the head row, not by its own.
+        refreshAlbumAt(row);
     }
 }
 
@@ -946,6 +1021,10 @@ void MessageModel::handleDeleteMessages(qlonglong chatId, std::vector<int64_t> &
     std::erase_if(m_formatted, [&idsToDelete](const auto &pair) { return idsToDelete.contains(pair.first); });
 
     endRemoveRows();
+
+    // Deleting one photo of an album leaves the rest of the run to redraw - and if the
+    // head went, the row that took its place is the new head.
+    refreshAlbumAt(indicesToRemove.front());
 }
 
 void MessageModel::reloadHistory() noexcept
@@ -1084,6 +1163,12 @@ void MessageModel::insertMessages(std::vector<qlonglong> &&newIds, bool prepend)
         m_messages.insert(m_messages.end(), newIds.begin(), newIds.end());
         endInsertRows();
     }
+
+    // A page can land with an album split across its edge: older history bringing the first
+    // photos of a run whose tail was already loaded, or the reverse. The row where the block
+    // meets what was already there is the one whose album changed shape. (The reset branch
+    // above needs nothing - the view re-reads every row anyway.)
+    refreshAlbumAt(prepend ? static_cast<int>(newIds.size()) : static_cast<int>(m_messages.size() - newIds.size()));
 
     if (prepend)
     {
