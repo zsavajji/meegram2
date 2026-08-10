@@ -49,6 +49,12 @@ public:
 
     static const std::array<Emoji, 3773> &emojis();
 
+    // The emoji offered as message reactions, in Telegram's own order. Here rather than
+    // in Utils or in QML because this is emoji data and it is the one list two places
+    // have to agree on - the picker draws it and tools/emoji_reaction_check.cpp walks it
+    // against the table above, which it can only do by linking this file alone.
+    static const std::array<std::u16string_view, 12> &quickReactions();
+
 private:
     std::u16string_view m_unicode;
     std::u16string_view m_filename;

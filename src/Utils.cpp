@@ -522,6 +522,51 @@ QVariantList Utils::emojiCategory(int category) noexcept
     return result;
 }
 
+QString Utils::emojiFilename(const QString &emoji) noexcept
+{
+    const auto &table = emojiTable();
+
+    // Telegram's reaction strings are not always spelled the way the emoji table keys
+    // them: the heart reaction arrives as a bare U+2764 while the asset it draws is
+    // 2764-fe0f.png. Try what came, then with the variation selector added, then with it
+    // taken off - the mismatch is otherwise silent, and a pill that resolves to nothing
+    // draws nothing at all.
+    static const QChar VariationSelector(0xFE0F);
+
+    const QString candidates[] = {emoji, emoji % VariationSelector,
+                                  emoji.endsWith(VariationSelector) ? emoji.left(emoji.size() - 1) : QString()};
+
+    for (const auto &candidate : candidates)
+    {
+        if (candidate.isEmpty())
+            continue;
+
+        if (const auto it = table.map.find(candidate); it != table.map.end())
+            return it->second.emoji->filename();
+    }
+
+    // No asset here. The caller draws the character itself rather than an empty pill.
+    return {};
+}
+
+QVariantList Utils::quickReactions() noexcept
+{
+    QVariantList result;
+
+    for (const auto &reaction : Emoji::quickReactions())
+    {
+        const auto emoji = QString::fromUtf16(reinterpret_cast<const ushort *>(reaction.data()), reaction.size());
+
+        QVariantMap entry;
+        entry.insert("emoji", emoji);
+        entry.insert("icon", emojiFilename(emoji));
+
+        result.append(entry);
+    }
+
+    return result;
+}
+
 namespace {
 
 // MyDocs explicitly, not QDesktopServices::PicturesLocation - on Harmattan that

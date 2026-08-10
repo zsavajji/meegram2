@@ -18,15 +18,27 @@ Item {
     // which on an incoming bubble is a near-white graphic on a near-white page.
     opacity: flashing ? listView.flashOpacity : 1.0
 
-    // Vertical stack: sender, optional reply quote, content, date. Each term is
-    // conditional on its part being present, so a plain message keeps exactly the
-    // height it had before replies existed.
+    // Vertical stack: sender, optional reply quote, content, reactions, date. Each term
+    // is conditional on its part being present, so a plain message keeps exactly the
+    // height it had before replies existed. reactionsRow is already zero when the message
+    // has none, so it needs no test of its own.
     height: contentItem.children[0].height
           + messageDate.height
           + (senderLabel.text !== "" ? senderLabel.height : 0)
           + (replyBlock.visible ? replyBlock.height + 6 : 0)
+          + reactionsRow.height
           + (model.isOutgoing ? 30 : 28);
     width: parent.width
+
+    // Both read once here because the pills below live inside a Repeater, where `model`
+    // is the Repeater's own and the row's roles are out of reach - the same shadowing the
+    // album delegate documents. The id goes as a string rather than through the number
+    // role, which is the trip Common.hpp does not trust.
+    property bool outgoing: model.isOutgoing
+    property string messageId: model.idString
+    // Empty for the messages nobody reacted to, which is nearly all of them - the model
+    // answers that case without building anything, so a screenful costs a null check each.
+    property variant reactionList: model.reactions
 
     // Where the sender label ends and everything below it begins.
     property int stackTop: senderLabel.text === "" ? 16 : 46
@@ -96,7 +108,11 @@ Item {
                             + (model.isOutgoing ? 0 : 28),
                         senderLabel.paintedWidth,
                         replyBlock.visible ? replySender.paintedWidth + 11 : 0,
-                        replyBlock.visible ? replyText.paintedWidth + 11 : 0) + 26
+                        replyBlock.visible ? replyText.paintedWidth + 11 : 0,
+                        // A row of pills widens the bubble the same way a quote does, so a
+                        // one-word message reacted to three times is not clipped. No loop:
+                        // the pills are sized by their own content, never by this.
+                        reactionsRow.width) + 26
         anchors {
             left: parent.left
             leftMargin: model.isOutgoing ? parent.width - width - 10 : 10
@@ -251,6 +267,120 @@ Item {
         }
     }
 
+    // Reaction pills, between the content and the date. Collapses to nothing when the
+    // message has none - it is still anchored to contentItem.bottom with no margin, so
+    // the date below lands exactly where it did before reactions existed.
+    Item {
+        id: reactionsRow
+
+        // The 6 is the gap above the pills, and it only exists when there are pills.
+        height: reactionsRepeater.count > 0 ? pills.height + 6 : 0
+        width: pills.width
+
+        anchors {
+            left: parent.left
+            // Fixed-width content cannot lean on AlignRight the way the date does, so the
+            // outgoing offset is computed - same as the photo delegate. 20 puts the right
+            // edge exactly where the date's lands.
+            leftMargin: root.outgoing ? parent.width - width - 20 : 20
+            top: contentItem.bottom
+        }
+
+        Row {
+            id: pills
+
+            y: 6
+            spacing: 6
+
+            Repeater {
+                id: reactionsRepeater
+
+                // Off root, not off `model` directly: a Repeater resolving its own model
+                // property against itself is the binding loop that costs nothing to avoid.
+                model: root.reactionList
+
+                // ponytail: one line of pills. A message carrying more distinct reactions
+                // than fit runs past the bubble rather than wrapping - it takes six or so
+                // in portrait, which no ordinary chat reaches. A Flow with a measured
+                // width is the fix if it bites.
+                Rectangle {
+                    height: 24
+                    width: pill.width + 16
+                    radius: 12
+                    // Yours is filled, everyone else's is a tint of the bubble it sits on.
+                    color: modelData.chosen
+                               ? (root.outgoing ? "white" : "#0077A8")
+                               : (root.outgoing ? "#40ffffff" : "#20000000")
+
+                    Row {
+                        id: pill
+
+                        anchors.centerIn: parent
+                        spacing: 3
+
+                        Image {
+                            anchors.verticalCenter: parent.verticalCenter
+                            // 16, the smaller of the two sizes replaceEmoji draws at. A
+                            // pill is a footnote on the message rather than part of it, so
+                            // it reads better well under the body text. Decoded straight to
+                            // size: sourceSize means the 32px asset is scaled once on load
+                            // rather than on every paint, the same trade the sticker and
+                            // thumbnail images make.
+                            width: 16
+                            height: 16
+                            sourceSize.width: 16
+                            sourceSize.height: 16
+                            visible: modelData.icon !== ""
+                            source: modelData.icon !== "" ? "qrc:/emoji/" + modelData.icon : ""
+                            asynchronous: true
+                        }
+
+                        Label {
+                            // Only for an emoji this build ships no asset for - the
+                            // character itself beats a pill with a bare number in it.
+                            // A Row skips invisible children, so it costs no space.
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: modelData.icon === ""
+                            text: modelData.emoji
+                            font.pixelSize: 16
+                            color: modelData.chosen && !root.outgoing ? "white" : "black"
+                        }
+
+                        Label {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: modelData.count
+                            // The same 16 the date and the tick use - the pill and the
+                            // line under it are the one band of small text on a bubble.
+                            font.pixelSize: 16
+                            color: modelData.chosen
+                                       ? (root.outgoing ? "#0077A8" : "white")
+                                       : (root.outgoing ? "white" : "black")
+                        }
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+
+                        // A pill covers the bubble's own MouseArea, so without this it is
+                        // a dead strip for swipe-to-reply. Same handoff the album cells
+                        // make - the decision stays in beginSwipe/endSwipe.
+                        drag {
+                            target: root
+                            axis: Drag.XAxis
+                            minimumX: 0
+                            maximumX: 90
+                        }
+
+                        onClicked: messageModel.toggleReaction(root.messageId, modelData.emoji)
+                        onPressed: root.beginSwipe()
+                        onReleased: root.endSwipe(true)
+                        onCanceled: root.endSwipe(false)
+                    }
+                }
+            }
+        }
+    }
+
     Label {
         id: messageDate
 
@@ -261,7 +391,7 @@ Item {
         anchors {
             left: parent.left
             leftMargin: isOutgoing ? 80 : 20
-            top: contentItem.bottom
+            top: reactionsRow.bottom
             topMargin: 4
         }
         text: model.date

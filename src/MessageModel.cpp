@@ -51,6 +51,21 @@ td::td_api::object_ptr<td::td_api::inputMessagePhoto> makeInputPhoto(const QStri
 // past it rather than trimming. The picker stops at the same number.
 constexpr int MaxAlbumSize = 10;
 
+// The emoji of one reaction, or an empty string for the kinds this client cannot draw.
+//
+// ponytail: emoji reactions only. A custom-emoji reaction is a sticker that has to be
+// downloaded before it can be shown and a paid one is a star count with its own UI, so
+// both are dropped rather than drawn as a blank pill with a number beside it. That does
+// mean a message reacted to only with those looks unreacted here. Resolve the sticker
+// through getCustomEmojiStickers if it bites.
+QString reactionEmoji(const td::td_api::messageReaction &reaction) noexcept
+{
+    if (!reaction.type_ || reaction.type_->get_id() != td::td_api::reactionTypeEmoji::ID)
+        return {};
+
+    return QString::fromStdString(static_cast<const td::td_api::reactionTypeEmoji *>(reaction.type_.get())->emoji_);
+}
+
 }  // namespace
 
 MessageModel::MessageModel(std::shared_ptr<Chat> chat, std::shared_ptr<Locale> locale, std::shared_ptr<StorageManager> storage)
@@ -253,6 +268,8 @@ QVariant MessageModel::data(const QModelIndex &index, int role) const
         }
         case SendStateRole:
             return sendState(message.get());
+        case ReactionsRole:
+            return reactions(message.get());
     }
 
     return QVariant();
@@ -374,6 +391,36 @@ QString MessageModel::sendState(const Message *message) const noexcept
     return message->id() <= m_chat->lastReadOutboxMessageId() ? Read : Sent;
 }
 
+QVariantList MessageModel::reactions(const Message *message) const noexcept
+{
+    const auto *info = message->reactions();
+    if (!info)
+        return {};
+
+    QVariantList result;
+
+    // TDLib hands these back already ordered the way Telegram shows them - by count, with
+    // yours pulled forward - so the order they arrive in is the order the pills take.
+    for (const auto &reaction : info->reactions_)
+    {
+        const auto emoji = reactionEmoji(*reaction);
+        if (emoji.isEmpty())
+            continue;
+
+        QVariantMap pill;
+        pill.insert("emoji", emoji);
+        // Resolved here rather than in QML: the delegate would otherwise call into Utils
+        // once per pill per rebind, and this row is rebuilt on every flick.
+        pill.insert("icon", Utils::emojiFilename(emoji));
+        pill.insert("count", reaction->total_count_);
+        pill.insert("chosen", reaction->is_chosen_);
+
+        result.append(pill);
+    }
+
+    return result;
+}
+
 const MessageModel::FormattedRow &MessageModel::formattedRow(qlonglong messageId, const Message *message) const noexcept
 {
     auto &entry = m_formatted[messageId];
@@ -441,6 +488,7 @@ QHash<int, QByteArray> MessageModel::roleNames() const noexcept
     roles[ReplyToTextRole] = "replyToText";
     roles[ReplyToMessageIdRole] = "replyToMessageId";
     roles[SendStateRole] = "sendState";
+    roles[ReactionsRole] = "reactions";
     return roles;
 }
 
@@ -810,6 +858,51 @@ void MessageModel::deleteMessage(const QString &rawMessageId, bool revoke) noexc
     m_client->send(std::move(request));
 }
 
+void MessageModel::toggleReaction(const QString &rawMessageId, const QString &emoji) noexcept
+{
+    const auto messageId = toId(rawMessageId);
+
+    const auto it = m_messageMap.find(messageId);
+    if (it == m_messageMap.end())
+        return;
+
+    bool chosen = false;
+
+    if (const auto *reactions = it->second->reactions())
+    {
+        const auto &all = reactions->reactions_;
+        const auto found = std::ranges::find_if(all, [&emoji](const auto &reaction) { return reactionEmoji(*reaction) == emoji; });
+
+        chosen = found != all.end() && (*found)->is_chosen_;
+    }
+
+    if (chosen)
+    {
+        auto request = td::td_api::make_object<td::td_api::removeMessageReaction>();
+
+        request->chat_id_ = m_chat->id();
+        request->message_id_ = messageId;
+        request->reaction_type_ = td::td_api::make_object<td::td_api::reactionTypeEmoji>(emoji.toStdString());
+
+        m_client->send(std::move(request));
+        return;
+    }
+
+    auto request = td::td_api::make_object<td::td_api::addMessageReaction>();
+
+    request->chat_id_ = m_chat->id();
+    request->message_id_ = messageId;
+    request->reaction_type_ = td::td_api::make_object<td::td_api::reactionTypeEmoji>(emoji.toStdString());
+    // The big one is the full-screen animation other clients play. Nothing here plays it,
+    // and asking for it would only make the other end louder than the sender meant.
+    request->is_big_ = false;
+    // Puts it at the front of the recent list on every client, which is what makes the
+    // picker on a phone learn what you actually use.
+    request->update_recent_reactions_ = true;
+
+    m_client->send(std::move(request));
+}
+
 void MessageModel::linkLoadedContentFiles() noexcept
 {
     for (const auto &[messageId, message] : m_messageMap)
@@ -958,6 +1051,11 @@ void MessageModel::handleResult(td::td_api::Object *object) noexcept
             handleMessageEdited(update->chat_id_, update->message_id_, update->edit_date_, std::move(update->reply_markup_));
             break;
         }
+        case td::td_api::updateMessageInteractionInfo::ID: {
+            auto update = static_cast<td::td_api::updateMessageInteractionInfo *>(object);
+            handleMessageInteractionInfo(update->chat_id_, update->message_id_, std::move(update->interaction_info_));
+            break;
+        }
         case td::td_api::updateChatReadOutbox::ID: {
             auto update = static_cast<td::td_api::updateChatReadOutbox *>(object);
             handleChatReadOutbox(update->chat_id_, update->last_read_outbox_message_id_);
@@ -1091,6 +1189,23 @@ void MessageModel::handleMessageEdited(qlonglong chatId, qlonglong messageId, in
     {
         it->second->setEditDate(editDate);
 
+        itemChanged(std::distance(m_messages.begin(), std::ranges::find(m_messages, messageId)));
+    }
+}
+
+void MessageModel::handleMessageInteractionInfo(qlonglong chatId, qlonglong messageId,
+                                                td::td_api::object_ptr<td::td_api::messageInteractionInfo> &&interactionInfo) noexcept
+{
+    if (chatId != m_chat->id())
+        return;
+
+    if (auto it = m_messageMap.find(messageId); it != m_messageMap.end())
+    {
+        it->second->setInteractionInfo(std::move(interactionInfo));
+
+        // ponytail: an album child gets its row repainted and nothing shows, because the
+        // head row draws the whole batch and only its own reactions. Reacting to one photo
+        // of an album is rare enough to leave; merging them means the head walking the run.
         itemChanged(std::distance(m_messages.begin(), std::ranges::find(m_messages, messageId)));
     }
 }

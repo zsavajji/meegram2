@@ -1091,6 +1091,13 @@ Page {
             }
 
             MenuItem {
+                // Reacting from the menu is the way to add one that is not on the bubble
+                // yet; a reaction already there is toggled by tapping its pill.
+                text: qsTr("Reactions")
+                onClicked: reactionMenu.open()
+            }
+
+            MenuItem {
                 text: qsTr("Copy")
                 visible: menuTarget.text !== ""
                 onClicked: utils.copyToClipboard(menuTarget.text)
@@ -1140,6 +1147,67 @@ Page {
                 onClicked: {
                     deleteDialog.revoke = true;
                     deleteDialog.open();
+                }
+            }
+        }
+    }
+
+    // The reaction picker. A ContextMenu rather than a Dialog because its content property
+    // takes anything - this one holds a grid of emoji instead of a MenuLayout - and it
+    // brings the platform's dimming, its dismissal and its rounded corners with it.
+    ContextMenu {
+        id: reactionMenu
+
+        // Built once here rather than bound per cell: resolving twelve emoji to their
+        // assets is a table lookup each, and the list never changes while the page lives.
+        //
+        // ponytail: Telegram's standard set, the same one in every chat that has not
+        // restricted reactions. The correct list is per chat and comes from
+        // getMessageAvailableReactions - a request, a response handler and a role, for an
+        // answer that is this list nearly always. Wire it up if a restricted chat bites:
+        // TDLib rejects the add and the error is swallowed, so the tap looks like it did
+        // nothing.
+        property variant reactions: utils.quickReactions()
+
+        Grid {
+            id: reactionGrid
+
+            width: parent.width
+            columns: 6
+
+            Repeater {
+                model: reactionMenu.reactions
+
+                Item {
+                    width: reactionGrid.width / reactionGrid.columns
+                    // A full platform touch target, unlike the emoji panel's 48px cells:
+                    // twelve of these fit on two rows either way, so there is no reason to
+                    // make them small.
+                    height: 80
+
+                    Image {
+                        anchors.centerIn: parent
+                        // Native size. The assets are 32px, so drawing them larger to fill
+                        // the cell would only upscale them - the touch target is the Item
+                        // around this, which is full size either way.
+                        width: 32
+                        height: 32
+                        sourceSize.width: 32
+                        sourceSize.height: 32
+                        source: modelData.icon !== "" ? "qrc:/emoji/" + modelData.icon : ""
+                        asynchronous: true
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: {
+                            // Toggle, not add: picking the one you already gave takes it
+                            // back, which is the only way to remove a reaction whose pill
+                            // is off the bubble's single line.
+                            messageModel.toggleReaction(menuTarget.messageId, modelData.emoji);
+                            reactionMenu.close();
+                        }
+                    }
                 }
             }
         }

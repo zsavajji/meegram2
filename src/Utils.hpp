@@ -63,6 +63,17 @@ public:
     // recipient's default.
     Q_INVOKABLE static QVariantList emojiCategory(int category) noexcept;
 
+    // The image an emoji is drawn with, or an empty string when this build ships no asset
+    // for it. Reaction pills need the filename rather than the <img> tag replaceEmoji
+    // hands back: a pill draws one emoji at a fixed size, and an Image bound to a path
+    // costs a cached pixmap where a RichText Label would cost a QTextDocument per pill.
+    Q_INVOKABLE static QString emojiFilename(const QString &emoji) noexcept;
+
+    // Emoji::quickReactions() as the picker wants it: a list of { emoji, icon }, the same
+    // shape emojiCategory produces and for the same reason - a QVariantMap reached through
+    // a Repeater's modelData is the one way this codebase trusts a list into QML1.
+    Q_INVOKABLE static QVariantList quickReactions() noexcept;
+
     // QML1 has no Clipboard element, so the "Copy" message action goes through here.
     Q_INVOKABLE static void copyToClipboard(const QString &text) noexcept;
 

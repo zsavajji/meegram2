@@ -61,6 +61,13 @@ public:
     // Null when this message is not a reply.
     const ReplyInfo *replyTo() const noexcept;
 
+    // The reactions on this message, or null when nobody has reacted. Handed out as the
+    // td_api object rather than copied into a struct of its own: MessageModel is the only
+    // reader and it walks this straight into a role, so a parallel type would be a second
+    // spelling of the same thing - unlike ReplyInfo above, which exists because the reply
+    // has to survive the update that replaces it.
+    const td::td_api::messageReactions *reactions() const noexcept;
+
     int contentType() const;
     QString contentTypeString() const;
 
@@ -75,6 +82,10 @@ public:
     void setContent(td::td_api::object_ptr<td::td_api::MessageContent> content);
     void setReplyTo(td::td_api::object_ptr<td::td_api::MessageReplyTo> replyTo);
     void setEditDate(int editDate);
+
+    // Replaces the whole block wholesale, which is what updateMessageInteractionInfo
+    // delivers - including a null one, when the last reaction was taken away.
+    void setInteractionInfo(td::td_api::object_ptr<td::td_api::messageInteractionInfo> interactionInfo);
 
 signals:
     void messageChanged();

@@ -14,7 +14,7 @@ Read this alongside [Architecture](/architecture) for how the pieces connect, an
 | Area | Works | Not implemented |
 |---|---|---|
 | Chats | list, title search, folders, archive, pin, mute, mark read/unread, delete/leave, profile page | drafts, chat creation, message search |
-| Messages | text with entities, emoji picker, big emoji, replies, edit, copy, delete for me / for everyone, read receipts, delivery ticks | forward, pinned messages, reactions |
+| Messages | text with entities, emoji picker, big emoji, replies, edit, copy, delete for me / for everyone, read receipts, delivery ticks, reactions | forward, pinned messages, custom-emoji and paid reactions |
 | Media | photo receive + send with pinch-zoom view and save, animated and static stickers, voice notes recorded and played in-app, documents sent and received, video and GIF bubbles that hand off to the platform player | inline video playback, location, contacts, polls |
 | Presence | typing indicators, online status, connection state | sending your own typing action |
 | System | notifications with avatar, tap-to-open, D-Bus activation, resident daemon | — |
@@ -181,6 +181,7 @@ Long press a bubble:
 | Action | Notes |
 |---|---|
 | Reply | Fills the composer's reply banner |
+| Reactions | Opens the emoji picker below — see [Reactions](#reactions) |
 | Copy | `Utils::copyToClipboard` — QML1 has no `Clipboard` element |
 | Edit | `editMessageText` for text, `editMessageCaption` for a photo — TDLib rejects the former for anything that is not a text message |
 | Save | Photos only, once downloaded — copies to `~/MyDocs/Pictures` |
@@ -189,6 +190,32 @@ Long press a bubble:
 
 Items hide rather than grey out, which is what Harmattan does. Edit is offered on your
 own messages only.
+
+### Reactions
+
+Pills sit between the content and the date, inside the bubble. Each one is the emoji at
+16px, its total count, and a fill that says whether the reaction is yours. Tapping a pill
+toggles that reaction; **Reactions** in the long-press menu opens a grid of twelve to add
+one that is not on the bubble yet, and picking one already yours takes it back.
+
+Nothing is drawn optimistically. `addMessageReaction` / `removeMessageReaction` go out and
+TDLib answers with `updateMessageInteractionInfo`, which is what repaints the row — the
+same update that carries everyone else's reactions.
+
+Which of the two requests goes out is decided in `MessageModel::toggleReaction` from the
+message rather than from the pill that was tapped: the two can be one update apart.
+
+::: warning The offered set is hardcoded
+`Emoji::quickReactions()` is Telegram's standard twelve, not the per-chat list
+`getMessageAvailableReactions` returns. In a chat that has restricted reactions TDLib
+rejects the add and the error is swallowed, so the tap looks like it did nothing.
+:::
+
+Telegram's reaction strings are not always spelled the way the emoji table keys them — the
+heart arrives as a bare `U+2764` while the asset is `2764-fe0f.png` — so
+`Utils::emojiFilename` tries the string as it came, then with the variation selector added,
+then with it removed. `tools/emoji_reaction_check.cpp` walks the offered set through the
+same rule and fails if any of them would draw nothing.
 
 ### Read receipts
 
@@ -676,7 +703,12 @@ Honest list, so nobody goes looking:
   it downloads and saves, and opening it is the platform's job. Only *voice* notes play
   here.
 - **Video notes** (the round ones). `MessageVideoNote` is a bare class with no properties.
-- **Drafts, chat creation, reactions, pinned messages.**
+- **Drafts, chat creation, pinned messages.**
+- **Custom-emoji and paid reactions.** Ordinary emoji reactions work; a custom-emoji one is
+  a sticker that has to be downloaded before it can be drawn and a paid one is a star count
+  with its own UI, so both are dropped rather than shown as a blank pill. A message reacted
+  to with nothing but those looks unreacted here.
+- **Unread reaction badges.** `unread_reaction_count` is on the chat and nothing reads it.
 - **Sending your own typing action.**
 - **Skin-tone emoji variants** in the picker, and a recents tab.
 

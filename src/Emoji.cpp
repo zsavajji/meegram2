@@ -3783,3 +3783,30 @@ const std::array<Emoji, 3773> &Emoji::emojis()
 
     return table;
 }
+// Telegram's own quick-reaction set, in the order its clients show it. Written as escapes
+// like the table above: an astral character sitting literally in a source file depends on
+// the whole toolchain agreeing about the encoding, and this one has to survive the
+// cross-build as well.
+//
+// The strings are what goes to the server, so they are Telegram's spelling rather than the
+// table's: the heart is a bare U+2764 here while the emoji it draws is keyed U+2764 U+FE0F.
+// Utils::emojiFilename is what bridges the two.
+const std::array<std::u16string_view, 12> &Emoji::quickReactions()
+{
+    static const std::array<std::u16string_view, 12> reactions = {
+        u"\U0001F44D",  // thumbs up
+        u"\U0001F44E",  // thumbs down
+        u"\U00002764",  // red heart
+        u"\U0001F525",  // fire
+        u"\U0001F970",  // smiling face with hearts
+        u"\U0001F44F",  // clapping hands
+        u"\U0001F601",  // beaming face with smiling eyes
+        u"\U0001F914",  // thinking face
+        u"\U0001F389",  // party popper
+        u"\U0001F929",  // star-struck
+        u"\U0001F622",  // crying face
+        u"\U0001F4A9",  // pile of poo
+    };
+
+    return reactions;
+}

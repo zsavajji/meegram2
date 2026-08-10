@@ -380,3 +380,20 @@ void Message::setEditDate(int editDate)
 
     emit messageChanged();
 }
+
+const td::td_api::messageReactions *Message::reactions() const noexcept
+{
+    // Two levels of null: a message nobody has touched carries no interaction info at
+    // all, and one with views but no reactions carries the block with an empty slot.
+    if (!m_message->interaction_info_)
+        return nullptr;
+
+    return m_message->interaction_info_->reactions_.get();
+}
+
+void Message::setInteractionInfo(td::td_api::object_ptr<td::td_api::messageInteractionInfo> interactionInfo)
+{
+    m_message->interaction_info_ = std::move(interactionInfo);
+
+    emit messageChanged();
+}

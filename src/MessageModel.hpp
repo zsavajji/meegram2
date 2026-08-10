@@ -31,9 +31,11 @@ public:
 
     enum Role {
         IdRole = Qt::UserRole + 1,
-        // The same id as a string, for comparing against one. IdRole crosses into QML1 as
-        // a number, and this codebase does not trust what happens to a qlonglong on that
-        // trip - see the note in Chat.hpp. Only read while a bubble is being flashed.
+        // The same id as a string, for comparing against one and for handing back to a
+        // model call. IdRole crosses into QML1 as a number, and this codebase does not
+        // trust what happens to a qlonglong on that trip - see the note in Chat.hpp.
+        // Read by every bubble now that reacting to one sends this id back; it is a
+        // QString::number, which is not what a row read costs.
         IdStringRole,
         SenderRole,
         // The sender name with emoji replaced by <img> tags, for the bubble to display.
@@ -66,7 +68,10 @@ public:
         ReplyToMessageIdRole,
         // Delivery state of an outgoing message, for the tick on the bubble. Empty for
         // anything incoming.
-        SendStateRole
+        SendStateRole,
+        // Reaction pills: a list of { emoji, icon, count, chosen }. Empty for the
+        // messages nobody has reacted to, which is nearly all of them.
+        ReactionsRole
     };
 
     int rowCount(const QModelIndex &parent = QModelIndex()) const override;
@@ -90,6 +95,13 @@ public:
     // on the other clients. viewMessages only moves the read pointer, it does not do this.
     Q_INVOKABLE void openMessageContent(const QString &messageId) noexcept;
     Q_INVOKABLE void deleteMessage(const QString &messageId, bool revoke = false) noexcept;
+
+    // Adds your reaction, or takes it away when it is already yours - what one tap on a
+    // pill does. Which of the two goes out is decided here rather than passed in from
+    // QML: the pill the user tapped and the message can be one update apart, and the
+    // message is the one that is right. Nothing is drawn optimistically either; TDLib
+    // answers with updateMessageInteractionInfo and that is what repaints the row.
+    Q_INVOKABLE void toggleReaction(const QString &messageId, const QString &emoji) noexcept;
 
     // mentionUserIds and mentionNames are newline-joined and paired by index: the people
     // picked from the composer's autocomplete who have no username, whose names went into
@@ -164,6 +176,11 @@ private:
     void handleChatReadOutbox(qlonglong chatId, qlonglong lastReadOutboxMessageId) noexcept;
     void handleMessageContent(qlonglong chatId, qlonglong messageId, td::td_api::object_ptr<td::td_api::MessageContent> &&newContent) noexcept;
     void handleMessageEdited(qlonglong chatId, qlonglong messageId, int editDate, td::td_api::object_ptr<td::td_api::ReplyMarkup> &&replyMarkup) noexcept;
+    // Reactions appearing, changing or going away - yours and everyone else's arrive the
+    // same way. Only repaints the row: the counts live on the message, and this update
+    // replaces that block whole.
+    void handleMessageInteractionInfo(qlonglong chatId, qlonglong messageId,
+                                      td::td_api::object_ptr<td::td_api::messageInteractionInfo> &&interactionInfo) noexcept;
     void handleDeleteMessages(qlonglong chatId, std::vector<int64_t> &&messageIds, bool isPermanent, bool fromCache) noexcept;
 
     void loadMessages() noexcept;
@@ -203,6 +220,12 @@ private:
     // is the one value here that changes without the message changing, when the other
     // side reads the chat.
     QString sendState(const Message *message) const noexcept;
+
+    // Reaction pills for one message. Not part of FormattedRow: the values are ints and
+    // one already-resolved filename, so there is no date format and no storage lookup to
+    // cache, and a message with no reactions - which is most of them - falls out on the
+    // first line.
+    QVariantList reactions(const Message *message) const noexcept;
 
     // The roles whose values cost a date format, a storage lookup or a content
     // preview. QML1 has no per-row role cache, so a bubble reading six properties
