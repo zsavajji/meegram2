@@ -1,3 +1,26 @@
+meegram (0.3.4) unstable; urgency=low
+
+  * Several photos at once. Tapping a thumbnail in the gallery now ticks it instead of
+    sending it straight away, and the toolbar sends everything ticked as one batch - a
+    mosaic at the other end, the same way an incoming one is drawn. Ten at a time, which
+    is Telegram's own limit on a batch.
+  * Several files at once, the same way, from the file browser. Ticks survive browsing
+    into another folder and back, so a set can be gathered from more than one place.
+  * Tapping somebody's @name in a message opens their profile, whether or not you have
+    ever written to them - it did nothing at all before. From there, Send message opens
+    the conversation with them.
+  * Typing @ in a group offers the members it could be, and picking one completes it.
+    Only members with a username are offered: mentioning somebody without one takes a
+    kind of message this client cannot send yet.
+  * Fixed a crash from 0.3.3: tapping the quote on a reply to a photo closed the app.
+    The jump rebuilt the conversation while the message that had been tapped was still
+    animating, and the animation went on writing to it after it was gone.
+  * The message you land on after tapping a quote now marks itself, which it was meant
+    to do in 0.3.3 and never did: it dimmed the balloon behind the words rather than the
+    message, and it did so while the list was still moving to it.
+
+ -- Andrea Faggin <hellothere@andreafagg.in>  Mon, 10 Aug 2026 20:45:00 +0200
+
 meegram (0.3.3) unstable; urgency=low
 
   * Photos sent together are drawn as one bubble, laid out as a mosaic, the way the

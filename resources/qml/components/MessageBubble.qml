@@ -11,6 +11,13 @@ Item {
     signal clicked
     signal pressAndHold
 
+    // Dips and comes back when the view jumps here, driven by the list's one shared
+    // animation. On the whole message, not on the bubble graphic below: the text, the
+    // sender and the content are siblings of that BorderImage rather than children of
+    // it, so dimming it faded the balloon behind the words and left the words alone -
+    // which on an incoming bubble is a near-white graphic on a near-white page.
+    opacity: flashing ? listView.flashOpacity : 1.0
+
     // Vertical stack: sender, optional reply quote, content, date. Each term is
     // conditional on its part being present, so a plain message keeps exactly the
     // height it had before replies existed.
@@ -101,10 +108,7 @@ Item {
 
         border { left: 22; right: 22; bottom: 22; top: 22; }
 
-        // Dips and comes back when the view jumps here, driven by the list's one shared
-        // animation. Not a highlight colour: this is a BorderImage, and its rounded
-        // corners would show through any overlay drawn on top.
-        opacity: root.flashing ? listView.flashOpacity : 1.0
+        opacity: 1.0
 
         MouseArea {
             id: mouseArea

@@ -325,6 +325,10 @@ Page {
             SequentialAnimation {
                 id: flashAnimation
 
+                // Twice: one dip of 450ms on a message you have just been carried to is
+                // easy to miss, and a second one costs nothing but time.
+                loops: 2
+
                 NumberAnimation { target: listView; property: "flashOpacity"; to: 0.75; duration: 150 }
                 NumberAnimation { target: listView; property: "flashOpacity"; to: 1.0; duration: 300 }
 
@@ -355,11 +359,23 @@ Page {
 
             function arriveAt(index, messageId) {
                 followLast = false
-                // Marked now, flashed when the settle below has finished moving the view.
+                // Marked now, dipped once the view has stopped moving.
                 flashMessageId = messageId
+                flashTimer.restart()
                 // Through the settle rather than a single call: the row was very likely
                 // built moments ago, and one positionViewAtIndex lands on an estimate.
                 beginSettleAt(index)
+            }
+
+            Timer {
+                id: flashTimer
+
+                // Just past the settle's bounded run of five 60ms passes. Started when
+                // the quote was tapped, the dip ran while the view was still jumping and
+                // the row it marks had usually not been built yet. Its own timer rather
+                // than a branch in the settle, so an interrupted settle still flashes.
+                interval: 320
+                onTriggered: flashAnimation.restart()
             }
 
             // Pages back the way scrolling up does, until the message turns up. Deliberately
@@ -442,14 +458,6 @@ Page {
 
                     if (++ticks >= 5) {
                         stop()
-
-                        // The flash waits for the jump to land. Started back when the
-                        // quote was tapped, it ran while the view was still repositioning
-                        // and the bubble it marks was usually built by one of the last of
-                        // these passes - so the dip was over, or had never had anything
-                        // to dip, by the time you were looking at it.
-                        if (toIndex >= 0 && listView.flashMessageId !== "")
-                            flashAnimation.restart()
 
                         listView.fillViewport()
                     }
