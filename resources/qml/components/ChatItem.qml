@@ -68,9 +68,10 @@ Item {
             // "down" with the background fill alone.
             color: "#282828"
             elide: Text.ElideRight
-            // titleHtml, not utils.replaceEmoji(model.title): the substitution is cached
-            // in the model now, so it runs once a row instead of on every rebind.
-            text: model.titleHtml
+            // elideEmoji, not replaceEmoji: emoji markup makes this rich text, and
+            // rich text ignores the elide above. Plain titles come back untouched and
+            // still elide here.
+            text: utils.elideEmoji(model.title, font, width)
         }
 
         Label {

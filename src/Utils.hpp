@@ -4,6 +4,7 @@
 
 #include <td/telegram/td_api.h>
 
+#include <QFont>
 #include <QObject>
 #include <QVariant>
 
@@ -43,6 +44,12 @@ public:
     // entry for a one-argument call, the second slot in the argument array was never
     // filled in. size <= 0 means the default body-text size.
     Q_INVOKABLE static QString replaceEmojiSized(const QString &text, int size) noexcept;
+
+    // replaceEmoji() for a single-line label that has to fit: the result is rich text,
+    // and Qt Quick 1's Text ignores elide on rich text, so the truncation happens here.
+    // Takes the label's own font and width; hands back the text untouched when it has no
+    // emoji in it, leaving Text to elide plain text the way it always did.
+    Q_INVOKABLE static QString elideEmoji(const QString &text, const QFont &font, int width) noexcept;
 
     // The image size a message consisting of nothing but one to three emoji should be
     // drawn at, or 0 for anything else - pass straight to replaceEmoji(). Takes the

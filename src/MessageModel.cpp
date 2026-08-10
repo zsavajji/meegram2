@@ -386,9 +386,9 @@ const MessageModel::FormattedRow &MessageModel::formattedRow(qlonglong messageId
 
         entry.sender = Utils::getSenderName(message, m_storage);
 
-        // Same reason as ChatModel's titleHtml: this ran from a QML binding in the
-        // bubble, so it re-ran on every rebind regardless of this cache
-        // (docs/profiling.md).
+        // Measured at 380us a call, and it used to run from a QML binding in the bubble,
+        // so it re-ran on every rebind regardless of this cache (docs/profiling.md).
+        // Here it runs once a row.
         entry.senderHtml = Utils::replaceEmoji(entry.sender);
 
         entry.date = message->date().toString(QObject::tr("formatterDay12H"));
@@ -547,8 +547,6 @@ void MessageModel::handleHistoryResponse(void *responseObject, bool fetchPreviou
         return;
     }
 
-    m_historyRetries = 0;
-
     std::vector<qlonglong> newMessageIds;
     for (auto &&message : messagesResponse->messages_)
     {
@@ -560,7 +558,11 @@ void MessageModel::handleHistoryResponse(void *responseObject, bool fetchPreviou
         }
     }
 
-    if (!newMessageIds.empty())
+    // Kept before the move: a page of nothing but messages already held means TDLib has
+    // no more to give, whatever its size.
+    const bool broughtNew = !newMessageIds.empty();
+
+    if (broughtNew)
     {
         insertMessages(std::move(newMessageIds), fetchPrevious);
     }
@@ -570,6 +572,26 @@ void MessageModel::handleHistoryResponse(void *responseObject, bool fetchPreviou
     // reader walking a broken bucket chain forever. That is no longer a risk now this runs
     // on the GUI thread, so the hop it used to need is gone.
     linkLoadedContentFiles();
+
+    // A short answer is no more final than an empty one, and was believed where the empty
+    // one was not: a request for twenty coming back with two left the chat holding two.
+    // Ask again, on the retry the empty answer already uses - reloadHistory counts the
+    // attempts, asks the same end of the chat, and gives up on its own.
+    //
+    // Only while a page still brings something new. A reply carrying nothing but messages
+    // already held is TDLib saying there is no more, which is how a chat genuinely shorter
+    // than this stops asking rather than spending every retry on it.
+    if (broughtNew && static_cast<int>(m_messages.size()) < MinLoadedMessages)
+    {
+        // What did arrive is worth showing while the rest is asked for. m_loading stays
+        // set, so the view still says it is working.
+        emit countChanged();
+
+        m_historyRetryTimer.start();
+        return;
+    }
+
+    m_historyRetries = 0;
 
     cleanupFlags();
 }

@@ -49,6 +49,12 @@ constexpr auto ContactListLimit = 200;
 constexpr auto MaxImportedContacts = 5000u;
 constexpr auto MessageSliceLimit = 20;
 
+// The fewest messages a chat should open with. TDLib answers getChatHistory from what it
+// holds locally and fetches the rest behind the reply, so the first slice of a request for
+// twenty is often one or two - which is what left a chat showing its last message alone
+// until it was touched. Below this the model asks again instead of believing the answer.
+constexpr auto MinLoadedMessages = 10;
+
 constexpr auto MutedValueMax = 2147483647;  // int32.max = 2^32 - 1
 constexpr auto MutedValueMin = 0;
 

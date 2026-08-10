@@ -143,7 +143,7 @@ Item {
             leftMargin: isOutgoing ? 80 : 20
         }
         color: model.isOutgoing ? "white" : "black"
-        // Cached in the model; see ChatItem's titleHtml.
+        // Cached in the model, so the emoji substitution runs once a row.
         text: model.senderHtml
         font.pixelSize: 20
         font.bold: true

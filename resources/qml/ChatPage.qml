@@ -186,7 +186,9 @@ Page {
                         anchors.verticalCenter: parent.verticalCenter
 
                         Label {
-                            text: utils.replaceEmoji(chatInfo.title)
+                            // elideEmoji, not replaceEmoji: emoji markup makes this rich
+                            // text, and rich text ignores the elide below.
+                            text: utils.elideEmoji(chatInfo.title, font, width)
                             font.bold: true
                             elide: Text.ElideRight
                             width: chatInfoRow.width - profilePhotoImage.width - chatInfoRow.spacing
@@ -459,7 +461,7 @@ Page {
                     if (++ticks >= 5) {
                         stop()
 
-                        listView.fillViewport()
+                        listView.beginFill()
                     }
                 }
             }
@@ -565,13 +567,21 @@ Page {
             // followLast true and blocks fetchOlder for good; the chat paged no further
             // until it was closed and reopened, by which point the slice came back full.
             //
-            // Re-armed only by fetchedPosition, i.e. by a page that actually brought rows,
-            // so a chat with no more history asks once and stops.
+            // Asked for by fillTimer below, which is what keeps asking until the screen
+            // is covered or there is nothing older left.
             function fillViewport() {
                 if (loading || settleTimer.running || count === 0 || contentHeight > height)
                     return
 
                 messageModel.fetchMoreBack()
+            }
+
+            // Starts the retry above from scratch. Every path that might have left the
+            // list shorter than the screen goes through here.
+            function beginFill() {
+                fillTimer.ticks = 0
+                fillTimer.lastCount = -1
+                fillTimer.restart()
             }
 
             // fetchedPosition is emitted from inside insertMessages, which runs before
@@ -580,13 +590,53 @@ Page {
             // Calling fillViewport() straight from the handler therefore did nothing at
             // all, and the chain above stopped after the single page settleTimer started.
             //
-            // interval 0 fires on the next event-loop turn, by which point the response
-            // handler has run to completion and the flag is clear.
+            // A deferred tick fires on a later event-loop turn, by which point the
+            // response handler has run to completion and the flag is clear.
+            //
+            // Bounded retry rather than the single deferred call this was. Two ways the
+            // chain died and left a chat showing its last message or two until it was
+            // touched: a page that comes back empty - which is what TDLib answers while
+            // its own fetch is still in flight - emits no fetchedPosition, and
+            // fetchMoreBack does nothing at all when a page is already on its way. Neither
+            // re-armed anything, and only a drag reached fetchOlder afterwards.
             Timer {
                 id: fillTimer
 
-                interval: 0
-                onTriggered: listView.fillViewport()
+                property int ticks: 0
+
+                // What the list held when the last page was asked for; -1 before the first
+                // ask. Unchanged after a fetch has completed means there is nothing older,
+                // which is how a chat genuinely shorter than the screen stops asking.
+                property int lastCount: -1
+
+                interval: 250
+                repeat: true
+
+                onTriggered: {
+                    // Enough to cover TDLib fetching the slice from the network, and no
+                    // more: this must not become a poll for the life of the page.
+                    if (++ticks > 12) {
+                        stop()
+                        return
+                    }
+
+                    // A page is on its way. Its arrival re-arms this anyway.
+                    if (messageModel.loading)
+                        return
+
+                    if (listView.count > 0 && listView.contentHeight > listView.height) {
+                        stop()
+                        return
+                    }
+
+                    if (listView.count === lastCount) {
+                        stop()
+                        return
+                    }
+
+                    lastCount = listView.count
+                    listView.fillViewport()
+                }
             }
         }
 
@@ -1323,8 +1373,8 @@ Page {
         onFetchedPosition: {
             listView.positionViewAtIndex(numItems, ListView.Beginning);
             // Keep pulling while the loaded slice still does not fill the screen.
-            // Deferred by a turn; see fillTimer for why calling it directly is a no-op.
-            fillTimer.restart();
+            // Deferred; see fillTimer for why calling it directly is a no-op.
+            listView.beginFill();
         }
 
         // Not onCountChanged: that also fires when a page of older messages is

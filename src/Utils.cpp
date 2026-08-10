@@ -17,6 +17,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QFontMetrics>
 #include <QStringBuilder>
 #include <QTextStream>
 #include <QUrl>
@@ -98,6 +99,40 @@ const EmojiTable &emojiTable()
     }();
 
     return table;
+}
+
+// The emoji starting at pos, or {0, nullptr} for an ordinary character. Longest match
+// first, so a keycap sequence beats its bare base character.
+std::pair<int, const EmojiEntry *> matchEmoji(const EmojiTable &table, const QString &text, int pos) noexcept
+{
+    if (!table.canStart[text.at(pos).unicode() >> 8])
+        return {0, nullptr};
+
+    const int remaining = text.size() - pos;
+
+    for (const int length : table.keyLengthsDesc)
+    {
+        if (length > remaining)
+            continue;
+
+        if (const auto it = table.map.find(text.mid(pos, length)); it != table.map.end())
+            return {length, &it->second};
+    }
+
+    return {0, nullptr};
+}
+
+// One array index per code unit, and the overwhelming majority of chat titles and
+// messages fall out of here with no allocation at all.
+bool mayContainEmoji(const EmojiTable &table, const QString &text) noexcept
+{
+    for (int i = 0; i < text.size(); ++i)
+    {
+        if (table.canStart[text.at(i).unicode() >> 8])
+            return true;
+    }
+
+    return false;
 }
 
 }  // namespace
@@ -303,19 +338,8 @@ QString Utils::replaceEmojiSized(const QString &text, int size) noexcept
         size = EmojiSize24;
 
     // Fast path: the overwhelming majority of chat titles and messages contain no
-    // emoji at all. One array index per code unit, and we hand back the original
-    // string with no allocation at all.
-    bool mayContainEmoji = false;
-    for (int i = 0; i < text.size(); ++i)
-    {
-        if (table.canStart[text.at(i).unicode() >> 8])
-        {
-            mayContainEmoji = true;
-            break;
-        }
-    }
-
-    if (!mayContainEmoji)
+    // emoji at all, and we hand back the original string untouched.
+    if (!mayContainEmoji(table, text))
         return text;
 
     // Only the substitution below is memoised, never the fast path above: that one is a
@@ -351,32 +375,17 @@ QString Utils::replaceEmojiSized(const QString &text, int size) noexcept
 
     while (i < text.size())
     {
-        bool replaced = false;
+        const auto [length, entry] = matchEmoji(table, text, i);
 
-        if (table.canStart[text.at(i).unicode() >> 8])
+        if (entry)
         {
-            const int remaining = text.size() - i;
+            result.append(text.midRef(lastPos, i - lastPos));
+            result.append(size == EmojiSize24 ? entry->tag : emojiTag(entry->emoji->filename(), size));
 
-            // Longest match first, so a keycap sequence beats its bare base character.
-            for (const int length : table.keyLengthsDesc)
-            {
-                if (length > remaining)
-                    continue;
-
-                if (const auto it = table.map.find(text.mid(i, length)); it != table.map.end())
-                {
-                    result.append(text.midRef(lastPos, i - lastPos));
-                    result.append(size == EmojiSize24 ? it->second.tag : emojiTag(it->second.emoji->filename(), size));
-
-                    i += length;
-                    lastPos = i;
-                    replaced = true;
-                    break;
-                }
-            }
+            i += length;
+            lastPos = i;
         }
-
-        if (!replaced)
+        else
         {
             ++i;
         }
@@ -390,6 +399,47 @@ QString Utils::replaceEmojiSized(const QString &text, int size) noexcept
     bySize.insert(text, result);
 
     return result;
+}
+
+QString Utils::elideEmoji(const QString &text, const QFont &font, int width) noexcept
+{
+    MEEGRAM_SCOPE("Utils::elideEmoji");
+
+    const auto &table = emojiTable();
+
+    // No emoji means no markup, so the label stays plain text and Text's own elide
+    // does the job. This is nearly every row, and it costs one scan.
+    if (width <= 0 || !mayContainEmoji(table, text))
+        return text;
+
+    // Qt Quick 1's Text never elides rich text: once replaceEmoji() turns a title into
+    // <img> markup, elide is ignored, NoWrap lays the document out at its ideal width
+    // and a long title runs straight past the item. So find the cut here instead -
+    // ordinary characters through the font metrics, emoji at the pixel size of their
+    // image rather than whatever the font makes of an unrenderable code point.
+    const QFontMetrics metrics(font);
+    const int ellipsisWidth = metrics.width(QChar(0x2026));
+
+    int used = 0;
+    int i = 0;
+    int cut = 0;  // last position that still leaves room for the ellipsis
+
+    while (i < text.size())
+    {
+        const int length = matchEmoji(table, text, i).first;
+
+        used += length > 0 ? EmojiSize24 : metrics.width(text.at(i));
+
+        if (used > width)
+            return replaceEmoji(text.left(cut)) % QChar(0x2026);
+
+        i += length > 0 ? length : 1;
+
+        if (used + ellipsisWidth <= width)
+            cut = i;
+    }
+
+    return replaceEmoji(text);
 }
 
 int Utils::emojiOnlySize(const QString &text) noexcept
@@ -411,26 +461,7 @@ int Utils::emojiOnlySize(const QString &text) noexcept
             continue;
         }
 
-        int matched = 0;
-
-        if (table.canStart[text.at(i).unicode() >> 8])
-        {
-            const int remaining = text.size() - i;
-
-            // Longest match first, same as replaceEmoji, so a keycap sequence is one
-            // emoji rather than its base character plus leftovers.
-            for (const int length : table.keyLengthsDesc)
-            {
-                if (length > remaining)
-                    continue;
-
-                if (table.map.find(text.mid(i, length)) != table.map.end())
-                {
-                    matched = length;
-                    break;
-                }
-            }
-        }
+        const int matched = matchEmoji(table, text, i).first;
 
         // One non-emoji character is enough to make this a normal message. Bailing
         // here is also what keeps this cheap for ordinary text: it stops at the
