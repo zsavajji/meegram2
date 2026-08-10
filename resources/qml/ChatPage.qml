@@ -624,6 +624,53 @@ Page {
             anchors.right: parent.right
             anchors.bottom: parent.bottom
 
+            // Mention autocomplete. Appears while an @name is being typed and there is
+            // somebody to suggest; ChatManager answers with nothing for anything that is
+            // not a group, so this does not have to know what kind of chat it is in.
+            Rectangle {
+                id: mentionPanel
+
+                visible: mentionModel.count > 0
+                width: parent.width
+                // Three rows at most: it sits over the conversation, and a longer list
+                // says less than typing one more letter does.
+                height: visible ? Math.min(mentionModel.count, 3) * 64 : 0
+                color: "white"
+
+                ListView {
+                    anchors.fill: parent
+                    clip: true
+                    model: ListModel { id: mentionModel }
+
+                    delegate: ListItem {
+                        width: parent.width
+                        height: 64
+
+                        Label {
+                            anchors {
+                                left: parent.left
+                                leftMargin: 16
+                                right: parent.right
+                                rightMargin: 16
+                                verticalCenter: parent.verticalCenter
+                            }
+                            text: "@" + username
+                            font.pixelSize: 24
+                            elide: Text.ElideRight
+                        }
+
+                        onClicked: root.applyMention(username)
+                    }
+                }
+
+                Rectangle {
+                    anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                    height: 1
+                    opacity: 0.5
+                    color: "#cccccc"
+                }
+            }
+
             // Sits above the text field while a reply or an edit is pending. Collapses
             // to zero height otherwise, so it costs nothing the rest of the time.
             Rectangle {
@@ -736,6 +783,9 @@ Page {
                     if (activeFocus)
                         emojiPanel.open = false;
                 }
+
+                onTextChanged: root.updateMentions()
+                onCursorPositionChanged: root.updateMentions()
             }
 
             Rectangle {
@@ -1058,17 +1108,74 @@ Page {
         onAccepted: messageModel.deleteMessage(menuTarget.messageId, revoke)
     }
 
-    // Pushed fresh each time and destroyed by the stack on the way back, like every
-    // other page that is not a picker: there is no state on it worth keeping.
-    function openProfile() {
-        var component = Qt.createComponent("ProfilePage.qml");
+    // The @name currently being typed, without its @. Empty when the cursor is not in
+    // one, which is what closes the panel.
+    property string mentionQuery: ""
 
-        if (component.status !== Component.Ready) {
-            console.debug("Error loading component:", component.errorString());
+    // Only the word the cursor is sitting in, and only when it starts a word: an address
+    // inside an email is not somebody being mentioned.
+    function updateMentions() {
+        var head = textArea.text.substring(0, textArea.cursorPosition);
+        var match = /(?:^|\s)@([A-Za-z0-9_]*)$/.exec(head);
+
+        if (!match) {
+            mentionQuery = "";
+            mentionTimer.stop();
+            mentionModel.clear();
             return;
         }
 
-        pageStack.push(component);
+        mentionQuery = match[1];
+        // One request per pause rather than one per keystroke - each is a round trip.
+        mentionTimer.restart();
+    }
+
+    function applyMention(username) {
+        var head = textArea.text.substring(0, textArea.cursorPosition);
+        var start = head.lastIndexOf("@");
+
+        if (start < 0)
+            return;
+
+        var tail = textArea.text.substring(textArea.cursorPosition);
+
+        textArea.text = head.substring(0, start) + "@" + username + " " + tail;
+        // After the space, so the next word is typed rather than the mention re-edited.
+        textArea.cursorPosition = start + username.length + 2;
+
+        mentionModel.clear();
+    }
+
+    Timer {
+        id: mentionTimer
+
+        interval: 250
+        onTriggered: chatManager.searchMentions(root.mentionQuery)
+    }
+
+    Connections {
+        target: chatManager || null
+        ignoreUnknownSignals: true
+
+        onMentionsFound: {
+            mentionModel.clear();
+
+            // A reply that arrived after the cursor left the mention is stale - the list
+            // is already cleared and must stay that way.
+            if (root.mentionQuery === "" && usernames.length > 0)
+                return;
+
+            for (var i = 0; i < usernames.length; ++i)
+                mentionModel.append({ username: usernames[i] });
+        }
+    }
+
+    // Through ChatManager, which fills its profile slot and answers on profileReady -
+    // main.qml pushes the page from there. The same path a tapped mention takes, so the
+    // profile page has one thing to bind to however it was reached. openedChatId is the
+    // chat this page was opened for, not the live selection.
+    function openProfile() {
+        chatManager.openProfile(openedChatId);
     }
 
     // Built on demand: the page imports QtMobility.gallery, and if that module is

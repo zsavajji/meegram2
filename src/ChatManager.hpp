@@ -110,6 +110,17 @@ class ChatManager : public QObject
     Q_PROPERTY(QObject *chatInfo READ chatInfoFormatter NOTIFY selectedChatChanged)
     Q_PROPERTY(QObject *messageModel READ messageModel NOTIFY selectedChatChanged)
 
+    // Whose profile is being looked at, which is not always the chat being viewed: a
+    // mention is tapped from inside somebody else's conversation, and both ChatPage and
+    // the profile page bind to what is selected. Its own slot, so opening a profile
+    // leaves the page underneath showing what it was showing.
+    Q_PROPERTY(Chat *profileChat READ profileChat NOTIFY profileChanged)
+    Q_PROPERTY(QObject *profileInfo READ profileInfoFormatter NOTIFY profileChanged)
+
+    // Both as strings, to hand back to openChat(). See the note on ids in Chat.hpp.
+    Q_PROPERTY(QString profileChatId READ profileChatId NOTIFY profileChanged)
+    Q_PROPERTY(QString selectedChatId READ selectedChatId NOTIFY selectedChatChanged)
+
 public:
     explicit ChatManager(std::shared_ptr<StorageManager> storageManager, std::shared_ptr<Locale> locale);
 
@@ -125,6 +136,23 @@ public:
 
     QObject *chatInfoFormatter() const noexcept;
     QObject *messageModel() const noexcept;
+
+    Chat *profileChat() const noexcept;
+    QObject *profileInfoFormatter() const noexcept;
+    QString profileChatId() const noexcept;
+    QString selectedChatId() const noexcept;
+
+    // Opens a profile for a chat id or an @username - a tapped mention carries one or the
+    // other - without touching the selection. Answers on profileReady: at once when the
+    // chat is already known, after a round trip when it has to be resolved or created.
+    Q_INVOKABLE void openProfile(const QString &target) noexcept;
+
+    // Mention autocomplete: members of the selected chat whose name or username matches
+    // what is being typed. Answers on mentionsFound, with an empty list for anything that
+    // is not a group - so the composer does not have to know what kind of chat it is in.
+    // Usernames only: mentioning somebody without one takes a text entity, which the
+    // plain-text send path cannot carry.
+    Q_INVOKABLE void searchMentions(const QString &query) noexcept;
 
     // False when the chat is not in StorageManager, in which case nothing was selected
     // and the caller must not push a page that would bind to nothing. A fetch is started
@@ -144,6 +172,18 @@ public:
 signals:
     void selectedChatChanged();
 
+    // The profile slot now holds somebody else.
+    void profileChanged();
+
+    // openProfile() has finished, successfully or not. The page is pushed from here
+    // rather than by the caller, which cannot know whether the chat had to be fetched.
+    void profileReady(bool ok);
+
+    // The answer to searchMentions(), oldest request wins nothing - a later reply simply
+    // replaces the list. QStringList rather than a QVariantList: it is the one list type
+    // that crosses into QML1 as a plain array of strings.
+    void mentionsFound(const QStringList &usernames);
+
     // A chat that openChat() refused has finished being fetched. ok says whether it can
     // be opened now; the caller retries openChat() or reports the failure.
     // chatId is a decimal string: main.qml feeds it straight back into openChat(), and
@@ -161,9 +201,19 @@ private slots:
     void onChatFoldersUpdated() noexcept;
     void handleChatFetched(qlonglong chatId, bool ok) noexcept;
 
+    // The two halves of openProfile() and searchMentions() that must run on the main
+    // thread. handleChatMembers takes ownership of the raw pointer; void* because a
+    // queued Q_ARG needs a registered metatype and td_api::object_ptr is move-only -
+    // the same handover MessageModel::handleHistoryResponse makes, and for the same
+    // reason: StorageManager must not be read from the TDLib worker thread.
+    void handleProfileFetched(qlonglong chatId, bool ok) noexcept;
+    void handleChatMembers(void *responseObject) noexcept;
+
 private:
     void updateFolderModels() noexcept;
     void fetchChat(qlonglong chatId) noexcept;
+
+    void setProfileChat(std::shared_ptr<Chat> chat) noexcept;
 
     // The one chat currently being fetched by fetchChat(), so a fetch that succeeds
     // without making the chat openable cannot bounce between here and openChat().
@@ -184,4 +234,7 @@ private:
 
     std::unique_ptr<ChatInfoFormatter> m_infoFormatter;
     std::unique_ptr<MessageModel> m_messageModel;
+
+    std::shared_ptr<Chat> m_profileChat;
+    std::unique_ptr<ChatInfoFormatter> m_profileInfo;
 };

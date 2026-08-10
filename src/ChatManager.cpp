@@ -458,6 +458,151 @@ QObject *ChatManager::messageModel() const noexcept
     return m_messageModel.get();
 }
 
+Chat *ChatManager::profileChat() const noexcept
+{
+    return m_profileChat.get();
+}
+
+QObject *ChatManager::profileInfoFormatter() const noexcept
+{
+    return m_profileInfo.get();
+}
+
+QString ChatManager::profileChatId() const noexcept
+{
+    return m_profileChat ? QString::number(m_profileChat->id()) : QString();
+}
+
+QString ChatManager::selectedChatId() const noexcept
+{
+    return m_selectedChat ? QString::number(m_selectedChat->id()) : QString();
+}
+
+void ChatManager::setProfileChat(std::shared_ptr<Chat> chat) noexcept
+{
+    m_profileChat = std::move(chat);
+
+    // Before the new one is built, and not by letting the assignment destroy it - same
+    // reason openChat() disposes of its formatter that way.
+    disposeLater(m_profileInfo);
+
+    m_profileInfo = std::make_unique<ChatInfoFormatter>(m_profileChat, m_locale, m_storage);
+
+    emit profileChanged();
+}
+
+void ChatManager::openProfile(const QString &target) noexcept
+{
+    // A mention carries either a user id, which is also the id of the private chat with
+    // them, or an @username that has to be resolved. toId gives 0 for the latter.
+    const auto chatId = toId(target);
+
+    if (chatId != 0)
+    {
+        if (auto chat = m_storage->chat(chatId))
+        {
+            setProfileChat(std::move(chat));
+            emit profileReady(true);
+            return;
+        }
+    }
+
+    // Not known here yet. searchPublicChat resolves a username; the id path is the same
+    // createPrivateChat / getChat split fetchChat makes, and for the same reason - a
+    // user you have never written to has no chat until one is created.
+    auto request = chatId == 0
+                       ? td::td_api::object_ptr<td::td_api::Function>(td::td_api::make_object<td::td_api::searchPublicChat>(
+                             QString(target).remove(QLatin1Char('@')).toStdString()))
+                       : chatId > 0 ? td::td_api::object_ptr<td::td_api::Function>(
+                                          td::td_api::make_object<td::td_api::createPrivateChat>(chatId, false))
+                                    : td::td_api::object_ptr<td::td_api::Function>(td::td_api::make_object<td::td_api::getChat>(chatId));
+
+    m_client->send(std::move(request), [this](auto &&response) {
+        qlonglong resolvedId = 0;
+
+        if (response->get_id() == td::td_api::chat::ID)
+        {
+            auto chat = td::td_api::move_object_as<td::td_api::chat>(response);
+
+            resolvedId = chat->id_;
+
+            // The reply is the chat, so hand it to everyone the same way fetchChat does -
+            // updateNewChat is what StorageManager learns a chat from, and TDLib sends it
+            // once per process however many times this client is restarted.
+            m_client->injectUpdate(td::td_api::make_object<td::td_api::updateNewChat>(std::move(chat)));
+        }
+        else if (response->get_id() == td::td_api::error::ID)
+        {
+            const auto *error = static_cast<const td::td_api::error *>(response.get());
+            qWarning() << "opening profile failed:" << error->code_ << QString::fromStdString(error->message_);
+        }
+
+        // Queued behind the injected update, which Qt delivers in the order posted, so
+        // StorageManager holds the chat by the time this runs.
+        QMetaObject::invokeMethod(this, "handleProfileFetched", Qt::QueuedConnection, Q_ARG(qlonglong, resolvedId),
+                                  Q_ARG(bool, resolvedId != 0));
+    });
+}
+
+void ChatManager::handleProfileFetched(qlonglong chatId, bool ok) noexcept
+{
+    auto chat = ok ? m_storage->chat(chatId) : nullptr;
+
+    if (chat)
+        setProfileChat(std::move(chat));
+
+    emit profileReady(chat != nullptr);
+}
+
+void ChatManager::searchMentions(const QString &query) noexcept
+{
+    const auto type = m_selectedChat ? m_selectedChat->type() : Chat::Type::None;
+
+    // Only a group has members worth suggesting. A private chat has exactly one other
+    // person and you are not going to mention them by name.
+    if (type != Chat::Type::BasicGroup && type != Chat::Type::Supergroup)
+    {
+        emit mentionsFound({});
+        return;
+    }
+
+    // Ten is about three screens of the panel this fills, and the query narrows fast.
+    // Null filter: every member, in the order the server ranks them.
+    m_client->send(td::td_api::make_object<td::td_api::searchChatMembers>(m_selectedChat->id(), query.toStdString(), 10, nullptr),
+                   [this](auto &&response) {
+                       // Straight to the main thread: turning member ids into usernames
+                       // reads StorageManager, which belongs to that thread alone.
+                       QMetaObject::invokeMethod(this, "handleChatMembers", Qt::QueuedConnection, Q_ARG(void *, response.release()));
+                   });
+}
+
+void ChatManager::handleChatMembers(void *responseObject) noexcept
+{
+    const td::td_api::object_ptr<td::td_api::Object> response(static_cast<td::td_api::Object *>(responseObject));
+
+    QStringList usernames;
+
+    if (response && response->get_id() == td::td_api::chatMembers::ID)
+    {
+        const auto *members = static_cast<const td::td_api::chatMembers *>(response.get());
+
+        for (const auto &member : members->members_)
+        {
+            if (!member->member_id_ || member->member_id_->get_id() != td::td_api::messageSenderUser::ID)
+                continue;
+
+            const auto userId = static_cast<const td::td_api::messageSenderUser *>(member->member_id_.get())->user_id_;
+
+            // Skipped rather than shown greyed out: a name that cannot be inserted as a
+            // working mention is worse than one that is simply not offered.
+            if (const auto user = m_storage->user(userId); user && !user->activeUsernames().isEmpty())
+                usernames.append(user->activeUsernames().first());
+        }
+    }
+
+    emit mentionsFound(usernames);
+}
+
 bool ChatManager::openChat(const QString &rawChatId) noexcept
 {
     const auto chatId = toId(rawChatId);

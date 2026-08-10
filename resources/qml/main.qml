@@ -115,6 +115,55 @@ PageStackWindow {
             else
                 showInfoBanner(qsTr("ErrorOccurred"))
         }
+
+        // A tapped mention, or the chat header's own profile button - both go through
+        // openProfile and land here once there is a profile to show.
+        onProfileReady: {
+            if (ok)
+                openProfilePage()
+            else
+                showInfoBanner(qsTr("NoResult"))
+        }
+    }
+
+    // A link tapped inside a message. Utils::formattedText turns each entity into an href
+    // with its own scheme, so this is where they are told apart. Anything not handled
+    // here goes to the browser, which is what a plain url has always done.
+    function openLink(link) {
+        // "mention:@name" carries the username; "mention_name:<user id>" is a mention of
+        // somebody without one, and a user id is also the id of the private chat with
+        // them. openProfile takes either.
+        if (link.indexOf("mention:") === 0) {
+            chatManager.openProfile(link.substring(8))
+            return
+        }
+
+        if (link.indexOf("mention_name:") === 0) {
+            chatManager.openProfile(link.substring(13))
+            return
+        }
+
+        // ponytail: hashtags, cashtags and bot commands have nowhere to go in this client
+        // yet. Swallowed rather than handed to the browser, which would open a search for
+        // the literal "hashtag:#foo".
+        if (link.indexOf("hashtag:") === 0 || link.indexOf("cashtag:") === 0 || link.indexOf("botCommand:") === 0)
+            return
+
+        Qt.openUrlExternally(link)
+    }
+
+    // Pushed from here rather than by whoever tapped the mention: the chat may have had
+    // to be fetched or created first, so only ChatManager knows when there is something
+    // to bind to.
+    function openProfilePage() {
+        var component = Qt.createComponent("ProfilePage.qml");
+
+        if (component.status !== Component.Ready) {
+            console.debug("Error loading component:", component.errorString());
+            return;
+        }
+
+        pageStack.push(component);
     }
 
     // Lives here rather than on ChatPage so the delegate can reach it by a unique name -

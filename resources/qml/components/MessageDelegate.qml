@@ -61,7 +61,7 @@ Item {
                 }
                 font.pixelSize: 23
                 horizontalAlignment: model.isOutgoing ? Text.AlignRight : Text.AlignLeft
-                onLinkActivated: Qt.openUrlExternally(link)
+                onLinkActivated: appWindow.openLink(link)
             }
         }
     }
@@ -155,7 +155,7 @@ Item {
                     wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                     font.pixelSize: 23
                     horizontalAlignment: model.isOutgoing ? Text.AlignRight : Text.AlignLeft
-                    onLinkActivated: Qt.openUrlExternally(link)
+                    onLinkActivated: appWindow.openLink(link)
                 }
             }
 
@@ -347,7 +347,7 @@ Item {
                     wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                     font.pixelSize: 23
                     horizontalAlignment: model.isOutgoing ? Text.AlignRight : Text.AlignLeft
-                    onLinkActivated: Qt.openUrlExternally(link)
+                    onLinkActivated: appWindow.openLink(link)
                 }
             }
 
@@ -631,7 +631,7 @@ Item {
                     wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                     font.pixelSize: 23
                     horizontalAlignment: model.isOutgoing ? Text.AlignRight : Text.AlignLeft
-                    onLinkActivated: Qt.openUrlExternally(link)
+                    onLinkActivated: appWindow.openLink(link)
                 }
             }
 
@@ -766,7 +766,7 @@ Item {
                     wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                     font.pixelSize: 23
                     horizontalAlignment: model.isOutgoing ? Text.AlignRight : Text.AlignLeft
-                    onLinkActivated: Qt.openUrlExternally(link)
+                    onLinkActivated: appWindow.openLink(link)
                 }
             }
         }
@@ -906,7 +906,7 @@ Item {
                     wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                     font.pixelSize: 23
                     horizontalAlignment: model.isOutgoing ? Text.AlignRight : Text.AlignLeft
-                    onLinkActivated: Qt.openUrlExternally(link)
+                    onLinkActivated: appWindow.openLink(link)
                 }
             }
         }

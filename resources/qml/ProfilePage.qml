@@ -1,18 +1,19 @@
 import QtQuick 1.1
 import com.nokia.meego 1.1
 
-// Who you are talking to, opened from the chat header. Bound to the current selection
-// the same way ChatPage is - it is pushed on top of that page and popped before another
-// chat can be opened, so there is no captured id to keep here.
+// Who you are talking to, opened from the chat header or from a mention tapped inside a
+// message. Bound to ChatManager's profile slot, which is set before this page is pushed.
 Page {
     id: root
 
-    property variant chat: chatManager.selectedChat
-    property variant chatInfo: chatManager.chatInfo
+    // The profile slot, not the selection: a mention opens somebody who is not the chat
+    // being viewed, and the page underneath stays on what it was showing.
+    property variant chat: chatManager.profileChat
+    property variant chatInfo: chatManager.profileInfo
 
     // The big photo is a separate file from the avatar the chat list uses, and nothing
     // has asked for it before this page.
-    property bool hasPhoto: chat.bigPhoto && chat.bigPhoto.isDownloadingCompleted
+    property bool hasPhoto: chat && chat.bigPhoto && chat.bigPhoto.isDownloadingCompleted
 
     orientationLock: PageOrientation.LockPortrait
 
@@ -162,7 +163,9 @@ Page {
                             textFormat: Text.RichText
                             font.pixelSize: 26
                             wrapMode: Text.WordWrap
-                            onLinkActivated: Qt.openUrlExternally(link)
+                            // A bio can carry mentions of its own, and they open the
+                            // same way they do inside a message.
+                            onLinkActivated: appWindow.openLink(link)
                         }
 
                         Label {
@@ -195,10 +198,19 @@ Page {
             platformIconId: "toolbar-back"
             onClicked: appWindow.pageStack.pop()
         }
+
+        // Opening the conversation with whoever this is. Hidden when it is the chat you
+        // came from, where it would only push the page underneath a second time - which
+        // is every profile reached from a chat header, and none reached from a mention.
+        ToolButton {
+            text: qsTr("SendMessage")
+            visible: chatManager.profileChatId !== "" && chatManager.profileChatId !== chatManager.selectedChatId
+            onClicked: appWindow.openChat(chatManager.profileChatId)
+        }
     }
 
     Component.onCompleted: {
-        if (chat.bigPhoto && chat.bigPhoto.canBeDownloaded && !chat.bigPhoto.isDownloadingActive && !chat.bigPhoto.isDownloadingCompleted)
+        if (chat && chat.bigPhoto && chat.bigPhoto.canBeDownloaded && !chat.bigPhoto.isDownloadingActive && !chat.bigPhoto.isDownloadingCompleted)
             appManager.downloadFile(chat.bigPhoto.id, 1, 0, 0, false);
 
         // The bio is the one thing here TDLib has to be asked for.
