@@ -1,3 +1,46 @@
+meegram (0.3.5) unstable; urgency=low
+
+  * Reactions. The pills sit inside the bubble, under the message: each one is the emoji,
+    how many people have used it, and whether one of them is you. Tapping a pill adds
+    your reaction or takes it back, holding a message offers a grid of twelve to pick one
+    that is not there yet, and All reactions lists who reacted and with what - a large
+    group only lets its admins ask that, and says so rather than showing an empty list.
+  * Names in a group are coloured, the same person keeping the same colour everywhere, and
+    whoever runs the group is marked beside their name: their own title if they have been
+    given one, owner or admin if they have not.
+  * A channel you only subscribe to no longer shows a composer. It used to offer a send
+    that Telegram then refused; now the whole row goes and the messages take the space
+    back. Channels carry an icon in the chat list so they can be told apart at a glance.
+  * Emoji in a chat title or in a sender's name are drawn as emoji instead of being left
+    as the raw characters, and a long name with one in it is now cut to fit its row -
+    marked-up text ignores the ordinary way of doing that, so it overran.
+  * A chat no longer opens showing its last message alone. Telegram answers the first
+    request for history out of whatever it is already holding, which can be a single
+    message, and that answer was taken at face value; too short an answer is now asked
+    again rather than believed.
+  * Mention autocomplete shows each person's name beside their username, and somebody with
+    no username at all can now be picked - their name goes into the message as ordinary
+    words, with the pointer alongside it that makes it a real mention. Two people with the
+    same name, or one mentioned twice, each get their own.
+  * The @ mark on a chat in the list is cleared once the message that put it there has
+    been read. It never cleared: reading a chat moves a single "read up to here" pointer,
+    which is not what clears a mention - the message carrying it has to be named - so the
+    mark stayed for good.
+  * Opening a profile from a group's member list, or a conversation from a profile, pushes
+    a new page instead of rewriting the page you were on and then pushing a copy of it.
+    Going back now returns to what you were looking at, and a conversation left open
+    behind a profile is still that conversation when you come back to it.
+  * Creating a group left you sitting on the chat list. The new group opens.
+  * The group members list shows a spinner while it is being fetched, rather than the
+    section appearing from nowhere once it lands.
+  * A contact's phone number can be tapped to call it, where the number is one you are
+    allowed to see.
+  * Save to gallery on a batch of photos, and the banner after a file is saved, showed
+    their own key names instead of any translation. Neither key existed in Telegram's
+    language pack; both were guesses.
+
+ -- Andrea Faggin <hellothere@andreafagg.in>  Tue, 11 Aug 2026 18:30:00 +0200
+
 meegram (0.3.4) unstable; urgency=low
 
   * Several photos at once. Tapping a thumbnail in the gallery now ticks it instead of
