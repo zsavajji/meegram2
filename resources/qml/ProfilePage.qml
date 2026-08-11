@@ -181,6 +181,130 @@ Page {
                     }
                 }
 
+                // Who is in the group, most recently seen first. One snapshot, taken on
+                // the way in: following the list live would mean a model and a
+                // subscription for something nobody watches change while it is open.
+                // Empty - and so hidden - in a private chat and in a channel.
+                Column {
+                    width: info.width
+                    spacing: 4
+                    visible: chatInfo.members.length > 0
+
+                    Rectangle {
+                        width: parent.width
+                        height: 1
+                        opacity: 0.5
+                        color: "#cccccc"
+                    }
+
+                    Item {
+                        width: parent.width
+                        height: 8
+                    }
+
+                    Label {
+                        text: qsTr("GroupMembers")
+                        color: "#505050"
+                        font.pixelSize: 20
+                        font.weight: Font.Light
+                    }
+
+                    Repeater {
+                        model: chatInfo.members
+
+                        Item {
+                            id: memberRow
+
+                            // Through a property first, the way the album cells take their
+                            // photo: a QObject read straight off an element of a variant
+                            // list is the conversion QML1 does not always make.
+                            property variant photo: modelData.photo
+
+                            width: info.width
+                            height: 76
+
+                            Image {
+                                id: memberPhoto
+
+                                anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                                width: 56
+                                height: 56
+
+                                // Same provider as the chat list, so it arrives cropped,
+                                // masked and cached at this size.
+                                sourceSize.width: width
+                                sourceSize.height: height
+                                asynchronous: true
+                                fillMode: Image.PreserveAspectCrop
+                                source: memberRow.photo && memberRow.photo.isDownloadingCompleted
+                                            ? "image://chatPhoto/" + memberRow.photo.localPath
+                                            : "image://theme/icon-l-content-avatar-placeholder"
+
+                                Component.onCompleted: {
+                                    var photo = memberRow.photo;
+
+                                    if (photo && photo.canBeDownloaded && !photo.isDownloadingActive && !photo.isDownloadingCompleted)
+                                        appManager.downloadFile(photo.id, 1, 0, 0, false);
+                                }
+                            }
+
+                            Column {
+                                anchors {
+                                    left: memberPhoto.right
+                                    leftMargin: 12
+                                    right: parent.right
+                                    verticalCenter: parent.verticalCenter
+                                }
+                                spacing: 2
+
+                                Item {
+                                    width: parent.width
+                                    height: memberName.height
+
+                                    Label {
+                                        id: memberName
+
+                                        anchors {
+                                            left: parent.left
+                                            right: memberTag.left
+                                            rightMargin: memberTag.visible ? 8 : 0
+                                        }
+                                        // elideEmoji, not replaceEmoji: emoji markup makes
+                                        // this rich text, and rich text ignores elide.
+                                        text: utils.elideEmoji(modelData.name, font, width)
+                                        font.pixelSize: 26
+                                    }
+
+                                    Label {
+                                        id: memberTag
+
+                                        anchors { right: parent.right; baseline: memberName.baseline }
+                                        text: modelData.tag
+                                        visible: text !== ""
+                                        color: "#505050"
+                                        font.pixelSize: 18
+                                        font.weight: Font.Light
+                                    }
+                                }
+
+                                Label {
+                                    width: parent.width
+                                    text: modelData.status
+                                    color: "#505050"
+                                    font.pixelSize: 20
+                                    font.weight: Font.Light
+                                    elide: Text.ElideRight
+                                }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: chatManager.openProfile(modelData.userId)
+                            }
+                        }
+                    }
+                }
+
                 Item {
                     width: parent.width
                     height: 16
@@ -215,5 +339,8 @@ Page {
 
         // The bio is the one thing here TDLib has to be asked for.
         chatInfo.loadProfile();
+        // And the members, for a group. Once per visit - the list is a snapshot, so
+        // coming back here is what refreshes it.
+        chatInfo.loadMembers();
     }
 }

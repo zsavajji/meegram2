@@ -126,6 +126,15 @@ public:
     // somebody long-pressed. The answer comes back on messageReactionsReceived.
     Q_INVOKABLE void getMessageReactions(const QString &messageId) noexcept;
 
+    // The person who sent a message, as a string for ChatManager::openProfile - a user id
+    // is also the id of the private chat with them. Empty when the sender is a chat
+    // rather than a person, which is what hides the menu entry and makes tapping the
+    // avatar on a channel-signed post do nothing.
+    //
+    // Not a role: it is read when something is tapped, and a role would be read for every
+    // row the list builds.
+    Q_INVOKABLE QString senderUserId(const QString &messageId) const noexcept;
+
     // mentionUserIds and mentionNames are newline-joined and paired by index: the people
     // picked from the composer's autocomplete who have no username, whose names went into
     // the text as ordinary words. Each one that is still present in the message goes out

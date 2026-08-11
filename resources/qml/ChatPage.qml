@@ -82,6 +82,11 @@ Page {
         property variant albumPhotos
         property int albumCount: 0
 
+        // Who sent it, for the profile entry. Resolved once here rather than in the
+        // entry itself, where the visibility test and the click would each ask again.
+        // Empty when a chat rather than a person sent it.
+        property string senderUserId: messageModel ? messageModel.senderUserId(messageId) : ""
+
         function open(id, sender, text, outgoing, file, name, photos) {
             messageId = id;
             menuTarget.sender = sender;
@@ -1105,6 +1110,14 @@ Page {
                 // yet; a reaction already there is toggled by tapping its pill.
                 text: qsTr("Reactions")
                 onClicked: reactionMenu.open()
+            }
+
+            MenuItem {
+                // Not on your own messages: your profile is a tap away under Settings,
+                // and the entry is there to look somebody else up.
+                text: qsTr("OpenProfile")
+                visible: !menuTarget.isOutgoing && menuTarget.senderUserId !== ""
+                onClicked: chatManager.openProfile(menuTarget.senderUserId)
             }
 
             MenuItem {

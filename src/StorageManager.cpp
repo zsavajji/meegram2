@@ -302,6 +302,20 @@ void StorageManager::handleResult(td::td_api::Object *object)
             }
             break;
         }
+        // The other half of the same value. TDLib sends updateChatUnreadMentionCount only
+        // for a message the client was never told about; once the message has been
+        // delivered as an update - which every message in an open chat has been - reading
+        // its mention arrives as this instead, carrying the same new count. Handling only
+        // the first one left the @ badge standing after the mention was read.
+        case td::td_api::updateMessageMentionRead::ID: {
+            auto update = static_cast<td::td_api::updateMessageMentionRead *>(object);
+            if (auto it = m_chats.find(update->chat_id_); it != m_chats.end())
+            {
+                it->second->setUnreadMentionCount(update->unread_mention_count_);
+                emit chatUpdated(update->chat_id_);
+            }
+            break;
+        }
         case td::td_api::updateChatIsMarkedAsUnread::ID: {
             auto update = static_cast<td::td_api::updateChatIsMarkedAsUnread *>(object);
             if (auto it = m_chats.find(update->chat_id_); it != m_chats.end())

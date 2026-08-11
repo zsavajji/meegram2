@@ -61,6 +61,13 @@ public:
     // Null when this message is not a reply.
     const ReplyInfo *replyTo() const noexcept;
 
+    // Whether this message is one of the chat's unread mentions. TDLib only clears a
+    // mention for the ids viewMessages is handed - the read pointer does nothing for it -
+    // so MessageModel has to know which of the loaded rows still carry one. Cleared as
+    // soon as the id goes out, so scrolling does not keep resending the same message.
+    bool containsUnreadMention() const noexcept;
+    void clearUnreadMention() noexcept;
+
     // The reactions on this message, or null when nobody has reacted. Handed out as the
     // td_api object rather than copied into a struct of its own: MessageModel is the only
     // reader and it walks this straight into a role, so a parallel type would be a second

@@ -121,6 +121,16 @@ const Message::ReplyInfo *Message::replyTo() const noexcept
     return m_replyTo.get();
 }
 
+bool Message::containsUnreadMention() const noexcept
+{
+    return m_message->contains_unread_mention_;
+}
+
+void Message::clearUnreadMention() noexcept
+{
+    m_message->contains_unread_mention_ = false;
+}
+
 qlonglong Message::id() const
 {
     return m_id;

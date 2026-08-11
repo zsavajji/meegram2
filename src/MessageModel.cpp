@@ -886,16 +886,40 @@ void MessageModel::viewMessagesUpTo(int index) noexcept
 
     const auto messageId = m_messages.at(index);
 
+    std::vector<std::int64_t> messageIds;
+
+    // Mentions are not covered by the read pointer: TDLib clears one only for the ids
+    // viewMessages is actually handed, so the @ badge on the chat list survived reading
+    // the chat forever. Every mention at or below the row on screen goes out by id.
+    // Gated on the chat still having one, so an ordinary scroll walks nothing.
+    if (m_chat->unreadMentionCount() > 0)
+    {
+        for (int i = 0; i <= index; ++i)
+        {
+            const auto it = m_messageMap.find(m_messages.at(i));
+            if (it != m_messageMap.end() && it->second->containsUnreadMention())
+            {
+                // Cleared here rather than on the update coming back, so the next scroll
+                // does not resend the same ids while that is in flight.
+                it->second->clearUnreadMention();
+                messageIds.push_back(m_messages.at(i));
+            }
+        }
+    }
+
     // Inbox read state is a single "last read" pointer, so reporting the newest
     // message on screen marks everything before it read as well. The comparison also
     // keeps this from re-sending on every scroll once the chat is fully read.
-    if (messageId <= m_chat->lastReadInboxMessageId())
+    if (messageId > m_chat->lastReadInboxMessageId())
+        messageIds.push_back(messageId);
+
+    if (messageIds.empty())
         return;
 
     auto request = td::td_api::make_object<td::td_api::viewMessages>();
 
     request->chat_id_ = m_chat->id();
-    request->message_ids_ = {messageId};
+    request->message_ids_ = std::move(messageIds);
     // Left null this meant "guess from the chat's open state", and the guess depends on
     // openChat having been processed before the view is reported. Saying it outright is
     // what makes the read reach other clients.
@@ -1054,6 +1078,15 @@ bool MessageModel::hasReactions(const QString &rawMessageId) const noexcept
     // on a message whose only ones this client drew nothing for.
     return std::ranges::any_of(reactions->reactions_,
                                [](const auto &reaction) { return !reactionEmoji(reaction->type_.get()).isEmpty(); });
+}
+
+QString MessageModel::senderUserId(const QString &rawMessageId) const noexcept
+{
+    const auto it = m_messageMap.find(toId(rawMessageId));
+    if (it == m_messageMap.end() || it->second->senderType() != Message::SenderType::User)
+        return {};
+
+    return QString::number(it->second->senderId());
 }
 
 void MessageModel::getMessageReactions(const QString &rawMessageId) noexcept

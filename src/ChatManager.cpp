@@ -15,6 +15,43 @@
 #include <algorithm>
 #include <ranges>
 
+namespace {
+
+// One page of members, which is the whole list for a basic group and the recent slice of
+// a supergroup. Enough to fill a profile page several times over on a 480px screen.
+constexpr int MaxMembers = 200;
+
+// What the member list is ordered by. Online sorts above every timestamp; the three
+// hidden statuses carry none of their own, so each takes the top of the window it stands
+// for - which is what puts somebody "seen recently" above somebody genuinely last seen a
+// month ago, and keeps the three of them in order among themselves.
+qint64 lastSeen(const std::shared_ptr<User> &user) noexcept
+{
+    constexpr qint64 Day = 24 * 60 * 60;
+
+    const auto now = static_cast<qint64>(QDateTime::currentDateTime().toTime_t());
+
+    switch (user->status())
+    {
+        case User::Status::Online:
+            return std::numeric_limits<qint64>::max();
+        case User::Status::Offline: {
+            const auto wasOnline = user->wasOnline();
+            return wasOnline.isNull() ? 0 : static_cast<qint64>(wasOnline.toTime_t());
+        }
+        case User::Status::Recently:
+            return now - Day;
+        case User::Status::LastWeek:
+            return now - 7 * Day;
+        case User::Status::LastMonth:
+            return now - 30 * Day;
+        default:
+            return 0;
+    }
+}
+
+}  // namespace
+
 ChatInfoFormatter::ChatInfoFormatter(std::shared_ptr<Chat> chat, std::shared_ptr<Locale> locale, std::shared_ptr<StorageManager> storage)
     : m_chat(std::move(chat))
     , m_locale(std::move(locale))
@@ -28,6 +65,12 @@ ChatInfoFormatter::ChatInfoFormatter(std::shared_ptr<Chat> chat, std::shared_ptr
 
     initializeMembers();
     updateStatus();
+}
+
+ChatInfoFormatter::~ChatInfoFormatter()
+{
+    // Tell any in-flight member-list callback not to touch this object.
+    m_alive->store(false);
 }
 
 void ChatInfoFormatter::handleChatAction(qlonglong chatId, qlonglong senderId, int actionType) noexcept
@@ -149,6 +192,11 @@ bool ChatInfoFormatter::canSendMessages() const noexcept
     return status == Supergroup::Status::Creator || status == Supergroup::Status::Administrator;
 }
 
+QVariantList ChatInfoFormatter::members() const noexcept
+{
+    return m_members;
+}
+
 void ChatInfoFormatter::loadProfile() noexcept
 {
     if (!m_user)
@@ -158,6 +206,136 @@ void ChatInfoFormatter::loadProfile() noexcept
     // callback on the TDLib worker thread holding a formatter that is destroyed the
     // moment another chat is opened.
     m_storageManager->loadUserFullInfo(m_user->id());
+}
+
+void ChatInfoFormatter::loadMembers() noexcept
+{
+    if (!m_chat)
+        return;
+
+    td::td_api::object_ptr<td::td_api::Function> request;
+
+    switch (m_chat->type())
+    {
+        case Chat::BasicGroup:
+            // A basic group carries its whole membership in its full info - there is no
+            // paged request for one, and there is no need: they cap at 200 people.
+            request = td::td_api::make_object<td::td_api::getBasicGroupFullInfo>(m_chat->typeId());
+            break;
+        case Chat::Supergroup:
+            // Recent, which is TDLib's "most recently active first" - the same order this
+            // list wants, though it is sorted here anyway because the basic-group answer
+            // arrives in no particular order.
+            //
+            // ponytail: the first page only. A supergroup runs to hundreds of thousands of
+            // members and this is a phone; the page shows who is around, not a directory.
+            // Feed the offset back in behind a "load more" if that ever bites.
+            request = td::td_api::make_object<td::td_api::getSupergroupMembers>(
+                m_chat->typeId(), td::td_api::make_object<td::td_api::supergroupMembersFilterRecent>(), 0, MaxMembers);
+            break;
+        default:
+            // A private chat has no members, and a channel only lets its admins ask.
+            return;
+    }
+
+    m_storageManager->client()->send(std::move(request), [this, alive = m_alive](auto &&response) {
+        // Worker thread, and this formatter may already be gone: opening another profile
+        // replaces it while the request is still out. Nothing else is touched here - the
+        // members are resolved through StorageManager on the other side of the hop.
+        if (!alive->load())
+            return;
+
+        QMetaObject::invokeMethod(this, "handleChatMembers", Qt::QueuedConnection, Q_ARG(void *, response.release()));
+    });
+}
+
+void ChatInfoFormatter::handleChatMembers(void *responseObject) noexcept
+{
+    td::td_api::object_ptr<td::td_api::Object> response(static_cast<td::td_api::Object *>(responseObject));
+
+    if (!response)
+        return;
+
+    // The two requests answer with different objects carrying the same array. Nothing
+    // else about them is used, so they are unwrapped to a pointer and share the rest.
+    const td::td_api::array<td::td_api::object_ptr<td::td_api::chatMember>> *members = nullptr;
+
+    switch (response->get_id())
+    {
+        case td::td_api::chatMembers::ID:
+            members = &static_cast<const td::td_api::chatMembers *>(response.get())->members_;
+            break;
+        case td::td_api::basicGroupFullInfo::ID:
+            members = &static_cast<const td::td_api::basicGroupFullInfo *>(response.get())->members_;
+            break;
+        default:
+            // An error, which is what a group you have just been removed from answers.
+            return;
+    }
+
+    // Sorted here rather than in QML: the key is a timestamp the row never shows - it
+    // shows the formatted string - so sorting over there would mean carrying both.
+    std::vector<std::pair<qint64, QVariantMap>> rows;
+    rows.reserve(members->size());
+
+    for (const auto &member : *members)
+    {
+        auto row = formatMember(*member);
+
+        if (!row.isEmpty())
+            rows.emplace_back(row.take(QLatin1String("lastSeen")).toLongLong(), std::move(row));
+    }
+
+    std::ranges::sort(rows, std::ranges::greater(), &std::pair<qint64, QVariantMap>::first);
+
+    m_members.clear();
+
+    for (auto &row : rows)
+        m_members.append(std::move(row.second));
+
+    emit membersChanged();
+}
+
+QVariantMap ChatInfoFormatter::formatMember(const td::td_api::chatMember &member) const noexcept
+{
+    // Anonymous admins post as the chat itself, and a channel can be a member of its own
+    // discussion group. Neither has a "last seen" to sort by, so neither is listed.
+    if (!member.member_id_ || member.member_id_->get_id() != td::td_api::messageSenderUser::ID)
+        return {};
+
+    const auto userId = static_cast<const td::td_api::messageSenderUser *>(member.member_id_.get())->user_id_;
+
+    const auto user = m_storageManager->user(userId);
+    if (!user)
+        return {};
+
+    // The title the group gave them, or the rank itself when they never set one - the
+    // same fallback the message bubbles make.
+    auto tag = QString::fromStdString(member.tag_);
+
+    if (tag.isEmpty() && member.status_)
+    {
+        if (member.status_->get_id() == td::td_api::chatMemberStatusCreator::ID)
+            tag = tr("ChannelCreator");
+        else if (member.status_->get_id() == td::td_api::chatMemberStatusAdministrator::ID)
+            tag = tr("ChannelAdmin");
+    }
+
+    QVariantMap row;
+
+    // A string, like every other id crossing into QML - and what openProfile takes when
+    // the row is tapped.
+    row.insert("userId", QString::number(userId));
+    row.insert("name", Utils::getUserShortName(user));
+    row.insert("tag", tag);
+    row.insert("status", formatUserStatus(user));
+    // The File itself, not a path: it is usually still to be downloaded, and the row
+    // binds to the object so the avatar appears when it lands. Outlives this list either
+    // way - StorageManager holds the canonical one for the whole session.
+    row.insert("photo", QVariant::fromValue(user->photo()));
+    row.insert("lastSeen", lastSeen(user));
+
+    return row;
 }
 
 void ChatInfoFormatter::handleBasicGroupUpdate(qlonglong groupId) noexcept
@@ -291,7 +469,7 @@ void ChatInfoFormatter::updateStatus() noexcept
         }
         else
         {
-            newStatus = formatUserStatus();
+            newStatus = formatUserStatus(m_user);
         }
     }
 
@@ -335,9 +513,12 @@ bool ChatInfoFormatter::isServiceNotification() const noexcept
     return std::ranges::contains(ServiceNotificationsUserIds, m_user->id());
 }
 
-QString ChatInfoFormatter::formatUserStatus() const noexcept
+QString ChatInfoFormatter::formatUserStatus(const std::shared_ptr<User> &user) const noexcept
 {
-    switch (m_user->status())
+    if (!user)
+        return {};
+
+    switch (user->status())
     {
         case User::Status::Empty:
             return tr("ALongTimeAgo");
@@ -346,7 +527,7 @@ QString ChatInfoFormatter::formatUserStatus() const noexcept
         case User::Status::LastWeek:
             return tr("WithinAWeek");
         case User::Status::Offline:
-            return formatOfflineStatus();
+            return formatOfflineStatus(user);
         case User::Status::Online:
             return tr("Online");
         case User::Status::Recently:
@@ -356,9 +537,9 @@ QString ChatInfoFormatter::formatUserStatus() const noexcept
     }
 }
 
-QString ChatInfoFormatter::formatOfflineStatus() const noexcept
+QString ChatInfoFormatter::formatOfflineStatus(const std::shared_ptr<User> &user) const noexcept
 {
-    const auto wasOnline = m_user->wasOnline();
+    const auto wasOnline = user->wasOnline();
     if (wasOnline.isNull())
         return tr("Invisible");
 

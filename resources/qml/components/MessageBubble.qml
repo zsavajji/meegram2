@@ -196,6 +196,23 @@ Item {
                         ? "image://chatPhoto/" + model.senderPhoto.localPath
                         : "image://theme/icon-l-content-avatar-placeholder"
 
+        // Straight to the sender's profile. Outside the balloon, so this takes no grab
+        // the bubble's own area wanted and needs none of the swipe handoff the pills and
+        // album cells make - nothing here covers anything.
+        MouseArea {
+            anchors.fill: parent
+
+            onClicked: {
+                // Empty when a chat rather than a person sent it - a channel signing its
+                // posts in the discussion group - and openProfile would take that empty
+                // string as a username to resolve.
+                var senderId = messageModel.senderUserId(root.messageId);
+
+                if (senderId !== "")
+                    chatManager.openProfile(senderId);
+            }
+        }
+
         // Same trade as the chat list: a delegate only exists for rows in view plus the
         // cache buffer, so this fetches the people you scrolled past, not the whole
         // membership. undefined on every message with no avatar, which the guard covers.

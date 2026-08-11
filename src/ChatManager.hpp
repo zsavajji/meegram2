@@ -7,7 +7,9 @@
 
 #include <QObject>
 #include <QTimer>
+#include <QVariant>
 
+#include <atomic>
 #include <memory>
 #include <vector>
 
@@ -37,8 +39,16 @@ class ChatInfoFormatter : public QObject
     // for every other chat type, including supergroups.
     Q_PROPERTY(bool canSendMessages READ canSendMessages NOTIFY canSendMessagesChanged)
 
+    // The group's members as { name, tag, status, photo }, most recently seen first.
+    // Empty until loadMembers is called and until its answer lands, and empty for good in
+    // anything that is not a group. A plain list rather than a model: the page asks once
+    // on the way in and never follows the members after that, so there is nothing for a
+    // QAbstractListModel's change signals to carry.
+    Q_PROPERTY(QVariantList members READ members NOTIFY membersChanged)
+
 public:
     explicit ChatInfoFormatter(std::shared_ptr<Chat> chat, std::shared_ptr<Locale> locale, std::shared_ptr<StorageManager> storage);
+    ~ChatInfoFormatter() override;
 
     QString title() const noexcept;
     QString status() const noexcept;
@@ -49,16 +59,29 @@ public:
 
     bool canSendMessages() const noexcept;
 
+    QVariantList members() const noexcept;
+
     // Asks TDLib for the bio, which arrives as an update rather than as an answer here.
     // Called by the profile page on the way in; everything else is already in store.
     Q_INVOKABLE void loadProfile() noexcept;
+
+    // The member list, one snapshot per visit to the profile page. Called from the same
+    // place as loadProfile and answered on membersChanged.
+    Q_INVOKABLE void loadMembers() noexcept;
 
 signals:
     void statusChanged();
     void profileChanged();
     void canSendMessagesChanged();
+    void membersChanged();
 
 private slots:
+    // The getSupergroupMembers / getBasicGroupFullInfo reply, handed over from the TDLib
+    // worker thread as a void* - the same handover MessageModel::handleHistoryResponse
+    // documents, and for the same reason: it resolves users through StorageManager, which
+    // belongs to the GUI thread.
+    void handleChatMembers(void *responseObject) noexcept;
+
     void handleBasicGroupUpdate(qlonglong groupId) noexcept;
     void handleSupergroupUpdate(qlonglong groupId) noexcept;
     void handleUserUpdate(qlonglong userId) noexcept;
@@ -75,8 +98,14 @@ private:
     QString formatStatus(int memberCount, const char *memberKey, const char *onlineKey) const noexcept;
     int getMemberCountWithFallback() const noexcept;
     bool isServiceNotification() const noexcept;
-    QString formatUserStatus() const noexcept;
-    QString formatOfflineStatus() const noexcept;
+    // Take the user rather than reading m_user, so the member list can format the same
+    // "last seen" string the header shows for whoever the chat is with.
+    QString formatUserStatus(const std::shared_ptr<User> &user) const noexcept;
+    QString formatOfflineStatus(const std::shared_ptr<User> &user) const noexcept;
+
+    // One member row, or an empty map when the member is a chat rather than a person or
+    // is not in store yet.
+    QVariantMap formatMember(const td::td_api::chatMember &member) const noexcept;
 
     int m_onlineMemberCount{};
 
@@ -96,6 +125,14 @@ private:
     std::shared_ptr<User> m_user;
     std::shared_ptr<BasicGroup> m_basicGroup;
     std::shared_ptr<Supergroup> m_supergroup;
+
+    QVariantList m_members;
+
+    // Cleared by the destructor so the member-list callback, which runs on the TDLib
+    // worker thread and captured a raw this, knows the formatter is gone - opening
+    // another profile destroys this one while the request is still out. Same guard and
+    // same reason as MessageModel's.
+    std::shared_ptr<std::atomic_bool> m_alive{std::make_shared<std::atomic_bool>(true)};
 };
 
 class ChatManager : public QObject
