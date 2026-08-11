@@ -42,6 +42,18 @@ public:
         // Separate from SenderRole because the plain one is carried into the reply
         // composer, where markup would show through.
         SenderHtmlRole,
+        // The sender's own avatar, or null. Only filled in where the bubble draws one -
+        // see SenderColorRole for what "where" means.
+        SenderPhotoRole,
+        // The colour Telegram gives this sender's name, picked from the sender id so the
+        // same person keeps the same one everywhere. Empty on every message that gets no
+        // avatar and no coloured name - which is what the bubble tests, so it does not
+        // have to know the chat type itself.
+        SenderColorRole,
+        // The sender's rank in this group, beside the name: their custom title, or
+        // "owner" / "admin" when they have none. Empty for an ordinary member - which is
+        // nearly everyone - and for every message SenderColorRole is empty on.
+        SenderTitleRole,
         ChatIdRole,
         IsOutgoingRole,
         DateRole,
@@ -103,6 +115,17 @@ public:
     // answers with updateMessageInteractionInfo and that is what repaints the row.
     Q_INVOKABLE void toggleReaction(const QString &messageId, const QString &emoji) noexcept;
 
+    // Whether the message carries any reaction this client can draw - what decides
+    // whether the menu offers to list them. Answered off the loaded message rather than
+    // passed down from the bubble, which would mean another argument on every one of the
+    // seven delegates that raise the menu.
+    Q_INVOKABLE bool hasReactions(const QString &messageId) const noexcept;
+
+    // Who reacted, and with what. A request rather than a role: the names are not on the
+    // message - it carries counts - and this is only ever wanted for the one message
+    // somebody long-pressed. The answer comes back on messageReactionsReceived.
+    Q_INVOKABLE void getMessageReactions(const QString &messageId) noexcept;
+
     // mentionUserIds and mentionNames are newline-joined and paired by index: the people
     // picked from the composer's autocomplete who have no username, whose names went into
     // the text as ordinary words. Each one that is still present in the message goes out
@@ -146,6 +169,11 @@ signals:
     // countChanged, which also fires when a page of history is prepended.
     void messageAppended();
 
+    // The answer to getMessageReactions: a list of { name, emoji, icon }, in the order
+    // TDLib gave them. Empty when the request failed - a big group only lets its admins
+    // ask - which is what the dialog turns into a banner.
+    void messageReactionsReceived(const QVariantList &senders);
+
 public slots:
     void refresh() noexcept;
 
@@ -156,6 +184,15 @@ private slots:
     // of the raw pointer; void* because a queued Q_ARG needs a registered metatype and
     // td_api::object_ptr is move-only, the same handover Client::disposeObject uses.
     void handleHistoryResponse(void *responseObject, bool fetchPrevious) noexcept;
+
+    // The getMessageAddedReactions reply, handed over from the TDLib worker thread on the
+    // same void* terms as handleHistoryResponse - it resolves names through StorageManager,
+    // which belongs to the GUI thread.
+    void handleAddedReactions(void *responseObject) noexcept;
+
+    // The getChatAdministrators reply, on the same terms - it fills m_admins and drops the
+    // formatting cache, both of which the GUI thread reads.
+    void handleChatAdministrators(void *responseObject) noexcept;
 
     // Runs linkContentFile over everything loaded, on the main thread. registerFile is
     // idempotent, so re-linking an already canonical file costs a hash lookup.
@@ -184,6 +221,11 @@ private:
     void handleDeleteMessages(qlonglong chatId, std::vector<int64_t> &&messageIds, bool isPermanent, bool fromCache) noexcept;
 
     void loadMessages() noexcept;
+
+    // One request per chat, not one per sender: getChatAdministrators answers with the
+    // whole list, which in any group a phone is reading is a handful of people. Skipped
+    // outside a group, where no bubble shows a rank anyway.
+    void requestAdministrators() noexcept;
 
     // Wraps any content in a sendMessage, so the reply plumbing lives in one place.
     void send(td::td_api::object_ptr<td::td_api::InputMessageContent> content, qlonglong replyToMessageId) noexcept;
@@ -236,6 +278,8 @@ private:
     {
         QString sender;
         QString senderHtml;
+        QString senderColor;
+        QString senderTitle;
         QString date;
         QString section;
         QString replyToSender;
@@ -278,4 +322,8 @@ private:
     std::unordered_map<qlonglong, std::unique_ptr<Message>> m_messageMap;
 
     mutable std::unordered_map<qlonglong, FormattedRow> m_formatted;
+
+    // Sender id to the rank shown beside their name. Only the people who have one are in
+    // here, so an ordinary member costs a failed lookup and nothing else.
+    std::unordered_map<qlonglong, QString> m_admins;
 };

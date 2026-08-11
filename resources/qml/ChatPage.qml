@@ -1108,6 +1108,15 @@ Page {
             }
 
             MenuItem {
+                // Who reacted, and with what. Asked of the model rather than passed in
+                // through menuTarget.open, which would mean another argument on all
+                // seven delegates that raise this menu.
+                text: qsTr("AllReactions")
+                visible: messageModel && messageModel.hasReactions(menuTarget.messageId)
+                onClicked: reactionsDialog.load(menuTarget.messageId)
+            }
+
+            MenuItem {
                 text: qsTr("Copy")
                 visible: menuTarget.text !== ""
                 onClicked: utils.copyToClipboard(menuTarget.text)
@@ -1256,6 +1265,107 @@ Page {
         rejectButtonText: qsTr("Cancel")
 
         onAccepted: messageModel.deleteMessage(menuTarget.messageId, revoke)
+    }
+
+    // Who reacted to one message, and with what. Filled by the model's answer rather
+    // than by a role: the names are not on the message, which only carries counts.
+    ListModel {
+        id: reactionsModel
+    }
+
+    // Opened by the answer, not by the tap - so it never flashes up empty with a spinner
+    // while the request is out, and a chat that refuses the question (a big group only
+    // lets its admins ask) says so in a banner instead of showing a blank list.
+    Connections {
+        target: messageModel
+
+        onMessageReactionsReceived: {
+            reactionsModel.clear();
+
+            for (var i = 0; i < senders.length; ++i)
+                reactionsModel.append(senders[i]);
+
+            if (reactionsModel.count > 0)
+                reactionsDialog.open();
+            else
+                appWindow.showInfoBanner(qsTr("NoReactions"));
+        }
+    }
+
+    // SelectionDialog rather than a Dialog of its own: it is the platform's titled,
+    // scrollable list, and nothing here needs buttons - a tap on a row just closes it.
+    SelectionDialog {
+        id: reactionsDialog
+
+        titleText: qsTr("Reactions")
+        model: reactionsModel
+
+        function load(messageId) {
+            messageModel.getMessageReactions(messageId);
+        }
+
+        delegate: Component {
+            Item {
+                property Style platformStyle: SelectionDialogStyle {}
+
+                height: platformStyle.itemHeight
+                anchors { left: parent.left; right: parent.right }
+
+                MouseArea {
+                    id: reactionRowArea
+
+                    anchors.fill: parent
+                    onClicked: reactionsDialog.accept()
+                }
+
+                BorderImage {
+                    anchors.fill: parent
+                    border { left: 22; top: 22; right: 22; bottom: 22 }
+                    source: reactionRowArea.pressed ? platformStyle.itemPressedBackground : platformStyle.itemBackground
+                }
+
+                Text {
+                    anchors {
+                        left: parent.left
+                        leftMargin: platformStyle.itemLeftMargin
+                        right: reactionIcon.left
+                        rightMargin: 12
+                        verticalCenter: parent.verticalCenter
+                    }
+                    font: platformStyle.itemFont
+                    color: platformStyle.itemTextColor
+                    elide: Text.ElideRight
+                    text: model.name
+                }
+
+                Image {
+                    id: reactionIcon
+
+                    anchors {
+                        right: parent.right
+                        rightMargin: platformStyle.itemRightMargin
+                        verticalCenter: parent.verticalCenter
+                    }
+                    // Native size, like the picker's cells - the assets are 32px and
+                    // drawing them larger would only upscale them.
+                    width: 32
+                    height: 32
+                    sourceSize.width: 32
+                    sourceSize.height: 32
+                    asynchronous: true
+                    source: model.icon !== "" ? "qrc:/emoji/" + model.icon : ""
+                }
+
+                Label {
+                    // The character itself for an emoji this build ships no asset for,
+                    // the same fallback the pills make.
+                    anchors.centerIn: reactionIcon
+                    visible: model.icon === ""
+                    text: model.emoji
+                    font.pixelSize: 24
+                }
+            }
+        }
     }
 
     // The @name currently being typed, without its @. Empty when the cursor is not in

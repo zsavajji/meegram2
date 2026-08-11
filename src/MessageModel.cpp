@@ -51,6 +51,9 @@ td::td_api::object_ptr<td::td_api::inputMessagePhoto> makeInputPhoto(const QStri
 // past it rather than trimming. The picker stops at the same number.
 constexpr int MaxAlbumSize = 10;
 
+// One page of "who reacted", which is as far as the dialog goes.
+constexpr int MaxAddedReactions = 50;
+
 // The emoji of one reaction, or an empty string for the kinds this client cannot draw.
 //
 // ponytail: emoji reactions only. A custom-emoji reaction is a sticker that has to be
@@ -58,12 +61,46 @@ constexpr int MaxAlbumSize = 10;
 // both are dropped rather than drawn as a blank pill with a number beside it. That does
 // mean a message reacted to only with those looks unreacted here. Resolve the sticker
 // through getCustomEmojiStickers if it bites.
-QString reactionEmoji(const td::td_api::messageReaction &reaction) noexcept
+QString reactionEmoji(const td::td_api::ReactionType *type) noexcept
 {
-    if (!reaction.type_ || reaction.type_->get_id() != td::td_api::reactionTypeEmoji::ID)
+    if (!type || type->get_id() != td::td_api::reactionTypeEmoji::ID)
         return {};
 
-    return QString::fromStdString(static_cast<const td::td_api::reactionTypeEmoji *>(reaction.type_.get())->emoji_);
+    return QString::fromStdString(static_cast<const td::td_api::reactionTypeEmoji *>(type)->emoji_);
+}
+
+// Whoever a reaction came from - a person, or a channel reacting as itself. The same
+// two cases Utils::getSenderName covers for a message, off a bare MessageSender rather
+// than off a Message.
+QString reactionSenderName(const td::td_api::MessageSender *sender, const std::shared_ptr<StorageManager> &storage) noexcept
+{
+    if (!sender)
+        return {};
+
+    if (sender->get_id() == td::td_api::messageSenderUser::ID)
+    {
+        const auto userId = static_cast<const td::td_api::messageSenderUser *>(sender)->user_id_;
+        return Utils::getUserShortName(storage->user(userId));
+    }
+
+    if (sender->get_id() == td::td_api::messageSenderChat::ID)
+    {
+        const auto chatId = static_cast<const td::td_api::messageSenderChat *>(sender)->chat_id_;
+        return Utils::getChatTitle(storage->chat(chatId), storage, false);
+    }
+
+    return {};
+}
+
+// Telegram's name palette, keyed by the sender id so one person keeps one colour across
+// chats and across restarts. These are the light-theme values: they have to read on the
+// near-white incoming bubble, which rules out the pastel set used for avatar initials.
+QString senderColor(qlonglong senderId) noexcept
+{
+    static const QString colors[] = {"#c03d33", "#4fad2d", "#d09306", "#168acd", "#8544d6", "#cd4073", "#2996ad", "#ce671b"};
+
+    // Bot and channel ids are negative, and % of a negative is negative in C++.
+    return colors[static_cast<quint64>(senderId < 0 ? -senderId : senderId) % 8];
 }
 
 }  // namespace
@@ -83,6 +120,7 @@ MessageModel::MessageModel(std::shared_ptr<Chat> chat, std::shared_ptr<Locale> l
 
     connect(&m_historyRetryTimer, SIGNAL(timeout()), SLOT(reloadHistory()));
 
+    requestAdministrators();
     loadMessages();
 }
 
@@ -151,6 +189,30 @@ QVariant MessageModel::data(const QModelIndex &index, int role) const
             return formattedRow(messageId, message.get()).sender;
         case SenderHtmlRole:
             return formattedRow(messageId, message.get()).senderHtml;
+        case SenderPhotoRole: {
+            // Same gate as the colour, so the avatar and the coloured name appear
+            // together and a private chat pays for neither.
+            if (formattedRow(messageId, message.get()).senderColor.isEmpty())
+                return QVariant();
+
+            switch (message->senderType())
+            {
+                case Message::SenderType::User: {
+                    const auto user = m_storage->user(message->senderId());
+                    return user ? QVariant::fromValue(user->photo()) : QVariant();
+                }
+                case Message::SenderType::Chat: {
+                    const auto chat = m_storage->chat(message->senderId());
+                    return chat ? QVariant::fromValue(chat->photo()) : QVariant();
+                }
+                default:
+                    return QVariant();
+            }
+        }
+        case SenderColorRole:
+            return formattedRow(messageId, message.get()).senderColor;
+        case SenderTitleRole:
+            return formattedRow(messageId, message.get()).senderTitle;
         case ChatIdRole:
             return message->chatId();
         case IsOutgoingRole:
@@ -403,7 +465,7 @@ QVariantList MessageModel::reactions(const Message *message) const noexcept
     // yours pulled forward - so the order they arrive in is the order the pills take.
     for (const auto &reaction : info->reactions_)
     {
-        const auto emoji = reactionEmoji(*reaction);
+        const auto emoji = reactionEmoji(reaction->type_.get());
         if (emoji.isEmpty())
             continue;
 
@@ -437,6 +499,20 @@ const MessageModel::FormattedRow &MessageModel::formattedRow(qlonglong messageId
         // so it re-ran on every rebind regardless of this cache (docs/profiling.md).
         // Here it runs once a row.
         entry.senderHtml = Utils::replaceEmoji(entry.sender);
+
+        // Avatar, coloured name and handle, all three at once: they only make sense
+        // where several people are talking, and only against someone else's message -
+        // your own bubble is on the other side and already yours. A channel is one
+        // voice, so it is left out with the private chats.
+        const auto chatType = m_chat->type();
+
+        if (!message->isOutgoing() && (chatType == Chat::BasicGroup || chatType == Chat::Supergroup))
+        {
+            entry.senderColor = senderColor(message->senderId());
+
+            if (const auto admin = m_admins.find(message->senderId()); admin != m_admins.end())
+                entry.senderTitle = admin->second;
+        }
 
         entry.date = message->date().toString(QObject::tr("formatterDay12H"));
         entry.section = sectionFor(message);
@@ -472,6 +548,9 @@ QHash<int, QByteArray> MessageModel::roleNames() const noexcept
     roles[IdStringRole] = "idString";
     roles[SenderRole] = "sender";
     roles[SenderHtmlRole] = "senderHtml";
+    roles[SenderPhotoRole] = "senderPhoto";
+    roles[SenderColorRole] = "senderColor";
+    roles[SenderTitleRole] = "senderTitle";
     roles[ChatIdRole] = "chatId";
     roles[IsOutgoingRole] = "isOutgoing";
     roles[DateRole] = "date";
@@ -871,7 +950,7 @@ void MessageModel::toggleReaction(const QString &rawMessageId, const QString &em
     if (const auto *reactions = it->second->reactions())
     {
         const auto &all = reactions->reactions_;
-        const auto found = std::ranges::find_if(all, [&emoji](const auto &reaction) { return reactionEmoji(*reaction) == emoji; });
+        const auto found = std::ranges::find_if(all, [&emoji](const auto &reaction) { return reactionEmoji(reaction->type_.get()) == emoji; });
 
         chosen = found != all.end() && (*found)->is_chosen_;
     }
@@ -901,6 +980,137 @@ void MessageModel::toggleReaction(const QString &rawMessageId, const QString &em
     request->update_recent_reactions_ = true;
 
     m_client->send(std::move(request));
+}
+
+void MessageModel::requestAdministrators() noexcept
+{
+    const auto chatType = m_chat->type();
+
+    // A channel has admins too, but its posts come from the channel itself, so there is
+    // no name for a rank to sit beside. Same set of chats formattedRow colours.
+    if (chatType != Chat::BasicGroup && chatType != Chat::Supergroup)
+        return;
+
+    auto request = td::td_api::make_object<td::td_api::getChatAdministrators>();
+
+    request->chat_id_ = m_chat->id();
+
+    m_client->send(std::move(request), [this, alive = m_alive](auto &&response) {
+        // Worker thread, and the model may already be gone - same guard and same handover
+        // as requestHistory, for the same reason.
+        if (!alive->load())
+            return;
+
+        QMetaObject::invokeMethod(this, "handleChatAdministrators", Qt::QueuedConnection, Q_ARG(void *, response.release()));
+    });
+}
+
+void MessageModel::handleChatAdministrators(void *responseObject) noexcept
+{
+    td::td_api::object_ptr<td::td_api::Object> response(static_cast<td::td_api::Object *>(responseObject));
+
+    // An error - a group you have just been removed from answers one - leaves every
+    // sender rankless, which is the same thing the list being empty means.
+    if (!response || response->get_id() != td::td_api::chatAdministrators::ID)
+        return;
+
+    const auto *administrators = static_cast<const td::td_api::chatAdministrators *>(response.get());
+
+    for (const auto &administrator : administrators->administrators_)
+    {
+        // The title the group gave them, or the rank itself when they never set one.
+        // Telegram shows exactly this, and it is why the string is resolved here rather
+        // than in the bubble: the empty case is not "no rank", it is "the default one".
+        auto title = QString::fromStdString(administrator->custom_title_);
+
+        if (title.isEmpty())
+            title = administrator->is_owner_ ? QObject::tr("ChannelCreator") : QObject::tr("ChannelAdmin");
+
+        m_admins.emplace(administrator->user_id_, title);
+    }
+
+    if (m_admins.empty() || m_messages.empty())
+        return;
+
+    // The rows already built were formatted against an empty map, so the ranks would
+    // otherwise only appear on messages that arrive from here on. One reformat per chat
+    // open, against a request that usually lands before the first screen is drawn.
+    m_formatted.clear();
+
+    emit dataChanged(createIndex(0, 0), createIndex(static_cast<int>(m_messages.size()) - 1, 0));
+}
+
+bool MessageModel::hasReactions(const QString &rawMessageId) const noexcept
+{
+    const auto it = m_messageMap.find(toId(rawMessageId));
+    if (it == m_messageMap.end())
+        return false;
+
+    const auto *reactions = it->second->reactions();
+    if (!reactions)
+        return false;
+
+    // The same emoji-only test the pills use, so the menu never offers to list reactions
+    // on a message whose only ones this client drew nothing for.
+    return std::ranges::any_of(reactions->reactions_,
+                               [](const auto &reaction) { return !reactionEmoji(reaction->type_.get()).isEmpty(); });
+}
+
+void MessageModel::getMessageReactions(const QString &rawMessageId) noexcept
+{
+    auto request = td::td_api::make_object<td::td_api::getMessageAddedReactions>();
+
+    request->chat_id_ = m_chat->id();
+    request->message_id_ = toId(rawMessageId);
+    // Null means every reaction rather than one emoji's, which is the whole list in one
+    // round trip - the dialog groups nothing, it just names who sent what.
+    request->reaction_type_ = nullptr;
+    request->offset_ = std::string();
+    // ponytail: the first page only. TDLib pages this from next_offset_, and a message
+    // with more than this many reactions is a channel post rather than anything a phone
+    // is going to scroll through. Feed next_offset_ back in if it bites.
+    request->limit_ = MaxAddedReactions;
+
+    m_client->send(std::move(request), [this, alive = m_alive](auto &&response) {
+        // Worker thread, and the model may already be gone - same guard and same handover
+        // as requestHistory, for the same reason.
+        if (!alive->load())
+            return;
+
+        QMetaObject::invokeMethod(this, "handleAddedReactions", Qt::QueuedConnection, Q_ARG(void *, response.release()));
+    });
+}
+
+void MessageModel::handleAddedReactions(void *responseObject) noexcept
+{
+    td::td_api::object_ptr<td::td_api::Object> response(static_cast<td::td_api::Object *>(responseObject));
+
+    QVariantList senders;
+
+    // An error - which is what a big group answers anyone who is not an admin - falls
+    // through with an empty list, and the dialog says so rather than opening blank.
+    if (response && response->get_id() == td::td_api::addedReactions::ID)
+    {
+        const auto *added = static_cast<const td::td_api::addedReactions *>(response.get());
+
+        for (const auto &reaction : added->reactions_)
+        {
+            const auto emoji = reactionEmoji(reaction->type_.get());
+            if (emoji.isEmpty())
+                continue;
+
+            QVariantMap entry;
+            entry.insert("name", reactionSenderName(reaction->sender_id_.get(), m_storage));
+            entry.insert("emoji", emoji);
+            // Resolved here for the same reason the pills are: the dialog would otherwise
+            // call into Utils once per row per rebind.
+            entry.insert("icon", Utils::emojiFilename(emoji));
+
+            senders.append(entry);
+        }
+    }
+
+    emit messageReactionsReceived(senders);
 }
 
 void MessageModel::linkLoadedContentFiles() noexcept

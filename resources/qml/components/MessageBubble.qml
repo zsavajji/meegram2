@@ -43,6 +43,19 @@ Item {
     // Where the sender label ends and everything below it begins.
     property int stackTop: senderLabel.text === "" ? 16 : 46
 
+    // An avatar in the left gutter, the way Telegram draws a group. The model decides
+    // which messages get one and says so by filling in senderColor, so the bubble needs
+    // to know nothing about the chat type - and a private chat, a channel and your own
+    // messages read the same empty string and keep the layout they had.
+    //
+    // ponytail: one per bubble, not one per run of messages from the same sender.
+    // Telegram hangs a single avatar off the last of a run, which needs the model to
+    // report where a run ends; this repeats it. Add the role if the repetition grates.
+    property bool showAvatar: model.senderColor !== ""
+    // Everything on the incoming side shifts by this, which is the whole cost of the
+    // gutter - the bubble, the labels and the content all measure from parent.left.
+    property int avatarSpace: showAvatar ? 52 : 0
+
     // Only set by a delegate whose text lives somewhere this cannot reach - an album's
     // caption is on another message of the batch. Everything else is read off the content
     // when a swipe actually commits, rather than for every bubble the list builds.
@@ -106,7 +119,9 @@ Item {
         width: Math.max(childrenWidth,
                         messageDate.paintedWidth + (sendStateIcon.visible ? sendStateIcon.paintedWidth + 6 : 0)
                             + (model.isOutgoing ? 0 : 28),
-                        senderLabel.paintedWidth,
+                        // The rank sits at the bubble's right edge, so it has to be part of
+                        // what decides that edge - name and rank both, plus a gap between.
+                        senderLabel.paintedWidth + (senderTitle.visible ? senderTitle.paintedWidth + 16 : 0),
                         replyBlock.visible ? replySender.paintedWidth + 11 : 0,
                         replyBlock.visible ? replyText.paintedWidth + 11 : 0,
                         // A row of pills widens the bubble the same way a quote does, so a
@@ -115,7 +130,7 @@ Item {
                         reactionsRow.width) + 26
         anchors {
             left: parent.left
-            leftMargin: model.isOutgoing ? parent.width - width - 10 : 10
+            leftMargin: model.isOutgoing ? parent.width - width - 10 : 10 + root.avatarSpace
             top: parent.top
             topMargin: model.isOutgoing ? 1 : 8
         }
@@ -150,15 +165,58 @@ Item {
         }
     }
 
+    // Bottom of the bubble rather than the top: a tall message keeps its avatar next to
+    // where the sender's last line is, which is how every Telegram client hangs it. Goes
+    // through the same provider as the chat list, so it arrives cropped, masked and
+    // cached - see ChatPhotoProvider.
+    Image {
+        id: avatarImage
+
+        width: 40
+        height: 40
+        visible: root.showAvatar
+        anchors {
+            left: parent.left
+            leftMargin: 6
+            bottom: bubble.bottom
+            bottomMargin: 2
+        }
+
+        sourceSize.width: width
+        sourceSize.height: height
+        asynchronous: true
+        fillMode: Image.PreserveAspectCrop
+        // The placeholder is the one thing here that is not already at 40x40.
+        smooth: true
+        // isDownloadingCompleted, not localPath: TDLib fills the path in when the
+        // download starts, so the path alone points the provider at a partial file.
+        source: !root.showAvatar
+                    ? ""
+                    : model.senderPhoto && model.senderPhoto.isDownloadingCompleted
+                        ? "image://chatPhoto/" + model.senderPhoto.localPath
+                        : "image://theme/icon-l-content-avatar-placeholder"
+
+        // Same trade as the chat list: a delegate only exists for rows in view plus the
+        // cache buffer, so this fetches the people you scrolled past, not the whole
+        // membership. undefined on every message with no avatar, which the guard covers.
+        Component.onCompleted: {
+            var photo = model.senderPhoto;
+
+            if (photo && photo.canBeDownloaded && !photo.isDownloadingActive && !photo.isDownloadingCompleted)
+                appManager.downloadFile(photo.id, 1, 0, 0, false);
+        }
+    }
+
     Label {
         id: senderLabel
         y: 18
         width: parent.width -100
         anchors {
             left: parent.left
-            leftMargin: isOutgoing ? 80 : 20
+            leftMargin: isOutgoing ? 80 : 20 + root.avatarSpace
         }
-        color: model.isOutgoing ? "white" : "black"
+        // Empty outside a group, so a private chat keeps the plain black name it had.
+        color: model.isOutgoing ? "white" : model.senderColor !== "" ? model.senderColor : "black"
         // Cached in the model, so the emoji substitution runs once a row.
         text: model.senderHtml
         font.pixelSize: 20
@@ -167,6 +225,29 @@ Item {
         maximumLineCount: 1
         horizontalAlignment: model.isOutgoing ? Text.AlignRight : Text.AlignLeft
         visible: text !== ""
+    }
+
+    // The sender's rank, on the far side of the name - "admin", "owner", or whatever
+    // title the group gave them. Hung off the balloon's own right edge, which is what
+    // puts it opposite the name however wide the message is.
+    //
+    // No width and no elide on purpose: the bubble below sizes itself from this label's
+    // paintedWidth, and a width bound to the bubble would close that into a loop. An
+    // intrinsic width is safe here because Telegram caps a custom title at 16 characters.
+    Label {
+        id: senderTitle
+
+        anchors {
+            right: bubble.right
+            rightMargin: 13
+            baseline: senderLabel.baseline
+        }
+        text: model.senderTitle
+        visible: text !== "" && senderLabel.text !== ""
+        color: senderLabel.color
+        opacity: 0.6
+        font.pixelSize: 18
+        font.weight: Font.Light
     }
 
     // Quote block for a reply. Plain text on purpose: the preview comes from
@@ -260,6 +341,11 @@ Item {
     Item {
         id: contentItem
 
+        // Zero-width and unanchored horizontally, so every delegate's content measures
+        // its own leftMargin from here. Shifting this is what moves all of them into the
+        // gutter at once - and it is zero on the outgoing side, where the content offset
+        // is computed from listView.width instead.
+        x: root.avatarSpace
         height: contentItem.children[0].height
         anchors {
             top: parent.top
@@ -282,7 +368,7 @@ Item {
             // Fixed-width content cannot lean on AlignRight the way the date does, so the
             // outgoing offset is computed - same as the photo delegate. 20 puts the right
             // edge exactly where the date's lands.
-            leftMargin: root.outgoing ? parent.width - width - 20 : 20
+            leftMargin: root.outgoing ? parent.width - width - 20 : 20 + root.avatarSpace
             top: contentItem.bottom
         }
 
@@ -390,7 +476,7 @@ Item {
         width: parent.width - 100 - (sendStateIcon.visible ? sendStateIcon.paintedWidth + 6 : 0)
         anchors {
             left: parent.left
-            leftMargin: isOutgoing ? 80 : 20
+            leftMargin: isOutgoing ? 80 : 20 + root.avatarSpace
             top: reactionsRow.bottom
             topMargin: 4
         }
