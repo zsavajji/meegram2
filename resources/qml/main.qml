@@ -230,9 +230,12 @@ PageStackWindow {
         // One banner per batch rather than one per photo: a dozen of them queue up and
         // sit on the screen long after the last save.
         if (albumIndex < 0)
-            // ponytail: SavedToDownloads is a real language-pack key but an unusual one,
-            // so it may fall back to showing its own name. Swap it if that turns up.
-            showInfoBanner(name !== "" ? qsTr("SavedToDownloads") : qsTr("PhotoSavedHint"));
+            // FileSavedHint, checked against the pack on the device: SavedToDownloads was
+            // not a key at all - only prefixed forms of it are - so this banner read
+            // "SavedToDownloads" whenever a named file was saved. The named branch is a
+            // document going to the downloads folder, which is exactly what this says;
+            // PhotoSavedHint on the other branch is a real key and was always right.
+            showInfoBanner(name !== "" ? qsTr("FileSavedHint") : qsTr("PhotoSavedHint"));
         else
             saveNextOfAlbum();
     }

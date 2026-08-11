@@ -1155,9 +1155,13 @@ Page {
                 // The whole batch, one photo at a time. A single photo of an album is
                 // saved by opening it and using the viewer's Save.
                 //
-                // ponytail: SaveAllPhotos is an unverified language-pack key, same caveat
-                // as SavedToDownloads - it shows its own name if the pack has no entry.
-                text: qsTr("SaveAllPhotos")
+                // SaveToGallery, checked against the pack on the device: SaveAllPhotos was
+                // guessed and the pack has no such key, so this menu entry read
+                // "SaveAllPhotos" in every language. Telegram has no "save all" string -
+                // this is the label the official clients put on the same action, and the
+                // entry only appears for an album, with the plain Save above it for one
+                // file.
+                text: qsTr("SaveToGallery")
                 visible: menuTarget.albumCount > 1
                 onClicked: appWindow.saveAlbum(menuTarget.albumPhotos)
             }

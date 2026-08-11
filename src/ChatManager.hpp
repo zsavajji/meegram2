@@ -46,6 +46,13 @@ class ChatInfoFormatter : public QObject
     // QAbstractListModel's change signals to carry.
     Q_PROPERTY(QVariantList members READ members NOTIFY membersChanged)
 
+    // True from loadMembers() until its answer lands. Only ever true where a request was
+    // actually sent - a private chat has no members and a channel only lets its admins
+    // ask, so neither can leave a spinner running with nothing on its way. Its own signal
+    // rather than membersChanged: the list has not changed when the request starts, and
+    // reusing that one would rebuild the rows for nothing.
+    Q_PROPERTY(bool membersLoading READ membersLoading NOTIFY membersLoadingChanged)
+
 public:
     explicit ChatInfoFormatter(std::shared_ptr<Chat> chat, std::shared_ptr<Locale> locale, std::shared_ptr<StorageManager> storage);
     ~ChatInfoFormatter() override;
@@ -60,6 +67,7 @@ public:
     bool canSendMessages() const noexcept;
 
     QVariantList members() const noexcept;
+    bool membersLoading() const noexcept;
 
     // Asks TDLib for the bio, which arrives as an update rather than as an answer here.
     // Called by the profile page on the way in; everything else is already in store.
@@ -74,6 +82,7 @@ signals:
     void profileChanged();
     void canSendMessagesChanged();
     void membersChanged();
+    void membersLoadingChanged();
 
 private slots:
     // The getSupergroupMembers / getBasicGroupFullInfo reply, handed over from the TDLib
@@ -127,6 +136,7 @@ private:
     std::shared_ptr<Supergroup> m_supergroup;
 
     QVariantList m_members;
+    bool m_membersLoading{false};
 
     // Cleared by the destructor so the member-list callback, which runs on the TDLib
     // worker thread and captured a raw this, knows the formatter is gone - opening
@@ -326,6 +336,12 @@ private slots:
     // reason: StorageManager must not be read from the TDLib worker thread.
     void handleProfileFetched(qlonglong chatId, const QString &reason) noexcept;
     void handleChatMembers(void *responseObject) noexcept;
+
+    // The created group is ready to open. Its own hop rather than handleChatFetched's,
+    // which is guarded by the fetch latch - and createGroup never sets that latch, having
+    // had no id to set it to. So every successful create was dropped on the floor by that
+    // guard and a group the user had just made never opened.
+    void handleChatCreated(qlonglong chatId, bool ok) noexcept;
 
 private:
     void updateFolderModels() noexcept;

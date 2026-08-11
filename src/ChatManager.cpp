@@ -197,6 +197,11 @@ QVariantList ChatInfoFormatter::members() const noexcept
     return m_members;
 }
 
+bool ChatInfoFormatter::membersLoading() const noexcept
+{
+    return m_membersLoading;
+}
+
 void ChatInfoFormatter::loadProfile() noexcept
 {
     if (!m_user)
@@ -238,6 +243,10 @@ void ChatInfoFormatter::loadMembers() noexcept
             return;
     }
 
+    // Past the switch, so only a chat that really is asking shows a spinner.
+    m_membersLoading = true;
+    emit membersLoadingChanged();
+
     m_storageManager->client()->send(std::move(request), [this, alive = m_alive](auto &&response) {
         // Worker thread, and this formatter may already be gone: opening another profile
         // replaces it while the request is still out. Nothing else is touched here - the
@@ -252,6 +261,15 @@ void ChatInfoFormatter::loadMembers() noexcept
 void ChatInfoFormatter::handleChatMembers(void *responseObject) noexcept
 {
     td::td_api::object_ptr<td::td_api::Object> response(static_cast<td::td_api::Object *>(responseObject));
+
+    // The answer is here, whatever it turned out to be. Cleared before the branches below
+    // rather than on the way out of each, so no early return - and two of them are error
+    // paths - can leave the spinner running for the life of the page.
+    if (m_membersLoading)
+    {
+        m_membersLoading = false;
+        emit membersLoadingChanged();
+    }
 
     if (!response)
         return;
@@ -1060,10 +1078,12 @@ void ChatManager::createGroup(const QString &title, const QStringList &userIds) 
                            qWarning() << "createNewBasicGroupChat failed:" << error->code_ << QString::fromStdString(error->message_);
                        }
 
-                       // Worker thread; hop before emitting. handleChatFetched is the same
-                       // "this chat is ready to open" report a fetch by id makes, so main.qml
-                       // needs nothing new to push the new group's page.
-                       QMetaObject::invokeMethod(this, "handleChatFetched", Qt::QueuedConnection, Q_ARG(qlonglong, chatId), Q_ARG(bool, chatId != 0));
+                       // Worker thread; hop before emitting. The report is the same
+                       // chatAvailable a fetch by id makes, so main.qml needs nothing new to
+                       // push the new group's page - but it does not go through
+                       // handleChatFetched, whose latch check silently swallowed every one
+                       // of these. See handleChatCreated.
+                       QMetaObject::invokeMethod(this, "handleChatCreated", Qt::QueuedConnection, Q_ARG(qlonglong, chatId), Q_ARG(bool, chatId != 0));
                    });
 }
 
@@ -1079,6 +1099,14 @@ void ChatManager::handleChatFetched(qlonglong chatId, bool ok) noexcept
     if (!ok)
         m_fetchingChatId = 0;  // a network failure should not block a later attempt
 
+    emit chatAvailable(QString::number(chatId), ok);
+}
+
+void ChatManager::handleChatCreated(qlonglong chatId, bool ok) noexcept
+{
+    // No latch check. createGroup asks for a chat that does not exist yet, so there is no
+    // id to have latched on the way out, and the request cannot be abandoned the way an
+    // open of an existing chat can - the user pressed create and the group now exists.
     emit chatAvailable(QString::number(chatId), ok);
 }
 
