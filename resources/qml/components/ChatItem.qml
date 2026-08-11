@@ -1,5 +1,6 @@
 import QtQuick 1.1
 import com.nokia.meego 1.1
+import MyComponent 1.0
 
 Item {
     id: root
@@ -58,9 +59,26 @@ Item {
         anchors.leftMargin: 16
         anchors.rightMargin: 16
 
+        // Channels are read-only for everybody but their admins, so they are worth
+        // telling apart at a glance. Fixed width rather than paintedWidth: the glyph is
+        // one character of the icon font and binding a Label's width to what it painted
+        // is how you get a loop.
+        Label {
+            id: typeIcon
+
+            anchors.verticalCenter: parent.verticalCenter
+            visible: model.type === Chat.Channel
+            width: visible ? 30 : 0
+            font.family: icons.fontFamily
+            font.pixelSize: 24
+            color: "#505050"
+            text: icons.channel
+        }
+
         Label {
             id: title
-            width: parent.width - date.width
+            anchors.left: typeIcon.right
+            width: parent.width - typeIcon.width - date.width
             anchors.verticalCenter: parent.verticalCenter
             font.bold: true
             font.pixelSize: 26

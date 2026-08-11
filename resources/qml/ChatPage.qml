@@ -17,6 +17,11 @@ Page {
     // and would do exactly that.
     property variant openedChatId: 0
 
+    // A channel you are only subscribed to takes no replies, so the composer goes
+    // entirely - Column skips invisible children, so hiding them collapses the holder
+    // and the message list takes the space back on its own.
+    property bool canSend: chatInfo ? chatInfo.canSendMessages : true
+
     // What the composer is currently doing: a plain send, a reply, or an edit.
     // Named distinctly rather than living on the page root, because MessageBubble
     // also uses id: root and would shadow it.
@@ -688,7 +693,7 @@ Page {
             Rectangle {
                 id: mentionPanel
 
-                visible: mentionModel.count > 0
+                visible: root.canSend && mentionModel.count > 0
                 width: parent.width
                 // Three rows at most: it sits over the conversation, and a longer list
                 // says less than typing one more letter does.
@@ -743,7 +748,7 @@ Page {
             Rectangle {
                 id: replyBanner
 
-                visible: composeState.replyId !== 0 || composeState.editId !== 0
+                visible: root.canSend && (composeState.replyId !== 0 || composeState.editId !== 0)
                 width: parent.width
                 height: visible ? 60 : 0
                 color: "white"
@@ -832,6 +837,7 @@ Page {
 
             TextArea {
                 id: textArea
+                visible: root.canSend
                 height: 64
                 width: parent.width
                 placeholderText: "Write your message here"
@@ -861,6 +867,7 @@ Page {
                     left: parent.left
                     right: parent.right
                 }
+                visible: root.canSend
                 height: 0
                 clip: true
                 color: "white"
@@ -1087,6 +1094,9 @@ Page {
         MenuLayout {
             MenuItem {
                 text: qsTr("Reply")
+                // Nothing to reply into when the composer is gone. Reactions stay:
+                // subscribers can react to a channel post even though they cannot post.
+                visible: root.canSend
                 onClicked: composeState.reply(menuTarget.messageId, menuTarget.sender, menuTarget.text)
             }
 
@@ -1108,7 +1118,7 @@ Page {
                 // ponytail: outgoing text only. Telegram also refuses edits past 48h
                 // and in channels without rights; TDLib rejects those and the error is
                 // swallowed. Gate properly via getMessageProperties if it bites.
-                visible: menuTarget.isOutgoing && menuTarget.text !== ""
+                visible: root.canSend && menuTarget.isOutgoing && menuTarget.text !== ""
                 onClicked: composeState.edit(menuTarget.messageId, menuTarget.text)
             }
 

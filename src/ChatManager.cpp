@@ -131,6 +131,24 @@ QString ChatInfoFormatter::phoneNumber() const noexcept
     return number.isEmpty() ? number : QLatin1Char('+') + number;
 }
 
+bool ChatInfoFormatter::canSendMessages() const noexcept
+{
+    if (!m_chat || m_chat->type() != Chat::Channel)
+        return true;
+
+    // Read-only until the supergroup lands, not the other way round: a composer that
+    // appears and then vanishes a moment later is worse than one that appears late.
+    if (!m_supergroup)
+        return false;
+
+    // ponytail: any admin counts. chatMemberStatusAdministrator carries a can_post_messages
+    // right that Supergroup collapses into this enum, so an admin restricted to editing
+    // others' posts still gets the composer - and TDLib refuses the send. Widen Supergroup
+    // to keep the rights if that turns up.
+    const auto status = m_supergroup->status();
+    return status == Supergroup::Status::Creator || status == Supergroup::Status::Administrator;
+}
+
 void ChatInfoFormatter::loadProfile() noexcept
 {
     if (!m_user)
@@ -163,6 +181,10 @@ void ChatInfoFormatter::handleSupergroupUpdate(qlonglong groupId) noexcept
     {
         m_supergroup = std::move(group);
         updateStatus();
+
+        // Unconditional: the status string is unchanged when only the member's own rights
+        // move, which is exactly the update the composer cares about.
+        emit canSendMessagesChanged();
     }
 }
 

@@ -32,6 +32,11 @@ class ChatInfoFormatter : public QObject
     Q_PROPERTY(QString bio READ bio NOTIFY profileChanged)
     Q_PROPERTY(QString phoneNumber READ phoneNumber NOTIFY profileChanged)
 
+    // False in a channel you are only subscribed to. Channels are broadcast-only, so the
+    // page hides its whole composer rather than offering a send TDLib will refuse. True
+    // for every other chat type, including supergroups.
+    Q_PROPERTY(bool canSendMessages READ canSendMessages NOTIFY canSendMessagesChanged)
+
 public:
     explicit ChatInfoFormatter(std::shared_ptr<Chat> chat, std::shared_ptr<Locale> locale, std::shared_ptr<StorageManager> storage);
 
@@ -42,6 +47,8 @@ public:
     QString bio() const noexcept;
     QString phoneNumber() const noexcept;
 
+    bool canSendMessages() const noexcept;
+
     // Asks TDLib for the bio, which arrives as an update rather than as an answer here.
     // Called by the profile page on the way in; everything else is already in store.
     Q_INVOKABLE void loadProfile() noexcept;
@@ -49,6 +56,7 @@ public:
 signals:
     void statusChanged();
     void profileChanged();
+    void canSendMessagesChanged();
 
 private slots:
     void handleBasicGroupUpdate(qlonglong groupId) noexcept;
