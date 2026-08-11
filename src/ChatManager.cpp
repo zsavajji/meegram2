@@ -558,12 +558,11 @@ QString ChatInfoFormatter::formatOfflineStatus(const std::shared_ptr<User> &user
 
 namespace {
 
-// Hands an owned QObject to the event loop instead of destroying it here. QML re-reads
-// messageModel and chatInfo only once selectedChatChanged has been delivered, and a
-// ChatPage being torn down keeps evaluating its bindings for a moment after closeChat -
-// so the previous objects have to outlive the call that replaces them. Destroying them
-// inline left the page's ListView holding a freed model. Same reason
-// updateFolderModels() releases its old models rather than deleting them.
+// Hands an owned QObject to the event loop instead of destroying it here. A page being
+// torn down keeps evaluating its bindings for a moment after it has been popped, so the
+// context it was bound to has to outlive the call that retires it. Destroying one inline
+// left the page's ListView holding a freed model. Same reason updateFolderModels()
+// releases its old models rather than deleting them.
 template <typename T>
 void disposeLater(std::unique_ptr<T> &owner) noexcept
 {
@@ -572,6 +571,46 @@ void disposeLater(std::unique_ptr<T> &owner) noexcept
 }
 
 }  // namespace
+
+ChatContext::ChatContext(int token, std::shared_ptr<Chat> chat, std::unique_ptr<ChatInfoFormatter> info,
+                         std::unique_ptr<MessageModel> messageModel, QObject *parent)
+    : QObject(parent)
+    , m_token(token)
+    , m_chat(std::move(chat))
+    , m_info(std::move(info))
+    , m_messageModel(std::move(messageModel))
+{
+}
+
+int ChatContext::token() const noexcept
+{
+    return m_token;
+}
+
+Chat *ChatContext::chat() const noexcept
+{
+    return m_chat.get();
+}
+
+QString ChatContext::chatId() const noexcept
+{
+    return m_chat ? QString::number(m_chat->id()) : QString();
+}
+
+QObject *ChatContext::info() const noexcept
+{
+    return m_info.get();
+}
+
+QObject *ChatContext::messageModel() const noexcept
+{
+    return m_messageModel.get();
+}
+
+bool ChatContext::isReading() const noexcept
+{
+    return m_messageModel != nullptr;
+}
 
 ChatManager::ChatManager(std::shared_ptr<StorageManager> storageManager, std::shared_ptr<Locale> locale)
     : m_client(storageManager->client())
@@ -592,7 +631,7 @@ ChatManager::ChatManager(std::shared_ptr<StorageManager> storageManager, std::sh
 
 bool ChatManager::eventFilter(QObject *object, QEvent *event) noexcept
 {
-    if (!m_selectedChat || (event->type() != QEvent::ApplicationActivate && event->type() != QEvent::ApplicationDeactivate))
+    if (m_openChatId == 0 || (event->type() != QEvent::ApplicationActivate && event->type() != QEvent::ApplicationDeactivate))
         return QObject::eventFilter(object, event);
 
     // Harmattan keeps a backgrounded app alive and its window "visible" - the task
@@ -602,14 +641,14 @@ bool ChatManager::eventFilter(QObject *object, QEvent *event) noexcept
     // same way. Neither is true of a chat sitting in the switcher, which is exactly when
     // a banner is wanted.
     //
-    // Only the TDLib side is reopened and reclosed. m_selectedChat, the models and the
-    // page stay as they are; the user has not left the chat, they have left the app.
-    const auto chatId = m_selectedChat->id();
-
+    // Only the TDLib side is reopened and reclosed. m_openChatId, the context stack and
+    // the pages stay as they are; the user has not left the chat, they have left the app -
+    // so this closes and reopens the same id rather than going through setOpenChat, which
+    // would have to be told to come back to a chat it thinks is already open.
     if (event->type() == QEvent::ApplicationActivate)
-        m_client->send(td::td_api::make_object<td::td_api::openChat>(chatId));
+        m_client->send(td::td_api::make_object<td::td_api::openChat>(m_openChatId));
     else
-        m_client->send(td::td_api::make_object<td::td_api::closeChat>(chatId));
+        m_client->send(td::td_api::make_object<td::td_api::closeChat>(m_openChatId));
 
     return QObject::eventFilter(object, event);
 }
@@ -646,52 +685,128 @@ QList<QObject *> ChatManager::folderModels() const noexcept
     return models;
 }
 
-Chat *ChatManager::selectedChat() const noexcept
+ChatContext *ChatManager::activeContext() const noexcept
 {
-    return m_selectedChat.get();
+    for (auto it = m_contextStack.rbegin(); it != m_contextStack.rend(); ++it)
+    {
+        if ((*it)->isReading())
+            return it->get();
+    }
+
+    return nullptr;
 }
 
-QObject *ChatManager::chatInfoFormatter() const noexcept
+QString ChatManager::activeChatId() const noexcept
 {
-    return m_infoFormatter.get();
+    // Off m_openChatId rather than off activeContext(), so this and the signal that
+    // notifies it always agree: setOpenChat emits from inside a push, before the new
+    // context has reached the stack, and a stack scan would answer with the one underneath
+    // and then never be asked again.
+    return m_openChatId != 0 ? QString::number(m_openChatId) : QString();
 }
 
-QObject *ChatManager::messageModel() const noexcept
+void ChatManager::setOpenChat(qlonglong chatId) noexcept
 {
-    return m_messageModel.get();
+    if (m_openChatId == chatId)
+        return;
+
+    // Closed before the next one opens, so TDLib's per-dialog open count never goes above
+    // one and meegramd's single open-chat id is never left naming a chat the user has
+    // moved off. Both used to be told only about opens, so stacking a chat over a chat
+    // left the first counted open for the rest of the session.
+    if (m_openChatId != 0)
+        m_client->send(td::td_api::make_object<td::td_api::closeChat>(m_openChatId));
+
+    m_openChatId = chatId;
+
+    if (m_openChatId != 0)
+        m_client->send(td::td_api::make_object<td::td_api::openChat>(m_openChatId));
+
+    emit activeChatChanged(m_openChatId);
 }
 
-Chat *ChatManager::profileChat() const noexcept
+QObject *ChatManager::pushChat(const QString &chatId) noexcept
 {
-    return m_profileChat.get();
+    return pushContext(chatId, true);
 }
 
-QObject *ChatManager::profileInfoFormatter() const noexcept
+QObject *ChatManager::pushProfile(const QString &chatId) noexcept
 {
-    return m_profileInfo.get();
+    return pushContext(chatId, false);
 }
 
-QString ChatManager::profileChatId() const noexcept
+ChatContext *ChatManager::pushContext(const QString &rawChatId, bool reading) noexcept
 {
-    return m_profileChat ? QString::number(m_profileChat->id()) : QString();
+    const auto chatId = toId(rawChatId);
+
+    auto chat = m_storage->chat(chatId);
+    if (!chat)
+    {
+        // Returning null rather than failing silently. main.qml pushed ChatPage
+        // regardless of the outcome, so a miss here left a page whose chat, chatInfo
+        // and messageModel were all undefined - every binding on it threw, no
+        // MessageModel existed to request history, and the result looked like "the chat
+        // never loads its messages" with nothing in the log to say why.
+        //
+        // StorageManager only ever learns a chat from updateNewChat, so anything opened
+        // by id that TDLib has not pushed yet lands here - Saved Messages, which opens
+        // myId() directly, and a notification tapped before the chat list has loaded.
+        // Fetch it instead of giving up; getChat makes TDLib push updateNewChat.
+        fetchChat(chatId);
+        return nullptr;
+    }
+
+    // A fetch for this chat, if there was one, is done with.
+    if (m_fetchingChatId == chatId)
+        m_fetchingChatId = 0;
+
+    // Before the model is built, so the chat is open by the time it asks for history:
+    // TDLib treats a request against a closed chat differently, and a view reported before
+    // the open has been processed does not reach the other clients. Only tell it at all
+    // once the context is going to be handed out - sent earlier, a push that could not
+    // happen left the server believing a chat was open that never was.
+    if (reading)
+        setOpenChat(chatId);
+
+    auto info = std::make_unique<ChatInfoFormatter>(chat, m_locale, m_storage);
+    auto messageModel = reading ? std::make_unique<MessageModel>(chat, m_locale, m_storage) : nullptr;
+
+    // Parented, so the context is never a candidate for QML's collector: an object QML
+    // owns goes away on the collector's schedule, and this codebase does not bet object
+    // lifetime on that. popContext() is what actually frees it, and the formatter and
+    // model go with it.
+    auto context = std::make_unique<ChatContext>(++m_nextToken, std::move(chat), std::move(info), std::move(messageModel), this);
+
+    auto *pushed = context.get();
+
+    m_contextStack.push_back(std::move(context));
+
+    return pushed;
 }
 
-QString ChatManager::selectedChatId() const noexcept
+void ChatManager::popContext(int token) noexcept
 {
-    return m_selectedChat ? QString::number(m_selectedChat->id()) : QString();
-}
+    const auto it = std::ranges::find_if(m_contextStack, [token](const auto &context) { return context->token() == token; });
 
-void ChatManager::setProfileChat(std::shared_ptr<Chat> chat) noexcept
-{
-    m_profileChat = std::move(chat);
+    // Not ours, or retired already. A page destroyed twice must not take the context a
+    // later page is using with it.
+    if (it == m_contextStack.end())
+        return;
 
-    // Before the new one is built, and not by letting the assignment destroy it - same
-    // reason openChat() disposes of its formatter that way.
-    disposeLater(m_profileInfo);
+    // Handed to the event loop rather than destroyed here: this runs from the page's own
+    // destruction and the page keeps evaluating its bindings for a moment afterwards.
+    // Destroying the model a ListView is still reading is what a segfault on leaving a
+    // chat looks like.
+    disposeLater(*it);
 
-    m_profileInfo = std::make_unique<ChatInfoFormatter>(m_profileChat, m_locale, m_storage);
+    m_contextStack.erase(it);
 
-    emit profileChanged();
+    // Whatever is left on screen is what is being read now. Popping the top of two stacked
+    // chat pages reopens the one underneath - which used to be left bound to a torn-down
+    // model with nothing open at all - and popping the last one closes the chat outright.
+    const auto *active = activeContext();
+
+    setOpenChat(active ? active->chat()->id() : 0);
 }
 
 void ChatManager::openProfile(const QString &target) noexcept
@@ -700,14 +815,12 @@ void ChatManager::openProfile(const QString &target) noexcept
     // them, or an @username that has to be resolved. toId gives 0 for the latter.
     const auto chatId = toId(target);
 
-    if (chatId != 0)
+    // Already known, so nothing to resolve - the page is pushed from the answer either
+    // way, and it is pushProfile() that takes the chat, not this.
+    if (chatId != 0 && m_storage->chat(chatId))
     {
-        if (auto chat = m_storage->chat(chatId))
-        {
-            setProfileChat(std::move(chat));
-            emit profileReady(true, QString());
-            return;
-        }
+        emit profileReady(true, QString::number(chatId), QString());
+        return;
     }
 
     // Not known here yet. searchPublicChat resolves a username; the id path is the same
@@ -759,26 +872,26 @@ void ChatManager::openProfile(const QString &target) noexcept
 
 void ChatManager::handleProfileFetched(qlonglong chatId, const QString &reason) noexcept
 {
-    if (chatId != 0)
+    if (chatId != 0 && m_storage->chat(chatId))
     {
-        if (auto chat = m_storage->chat(chatId))
-        {
-            setProfileChat(std::move(chat));
-            emit profileReady(true, QString());
-            return;
-        }
+        emit profileReady(true, QString::number(chatId), QString());
+        return;
     }
 
     // The two failures are worth telling apart: the request itself came back with
     // something, and separately StorageManager did or did not end up holding the chat it
     // was told about. The second one means the injected update was not taken, which is
     // the daemon-shaped bug fetchChat exists to work around.
-    emit profileReady(false, !reason.isEmpty() ? reason : QString::fromLatin1("chat %1 resolved but not in store").arg(chatId));
+    emit profileReady(false, QString(),
+                      !reason.isEmpty() ? reason : QString::fromLatin1("chat %1 resolved but not in store").arg(chatId));
 }
 
 void ChatManager::searchMentions(const QString &query) noexcept
 {
-    const auto type = m_selectedChat ? m_selectedChat->type() : Chat::Type::None;
+    // The chat being read, which is the one whose composer is being typed into. A profile
+    // pushed over it does not change that, and nothing else on the stack has a composer.
+    const auto *context = activeContext();
+    const auto type = context ? context->chat()->type() : Chat::Type::None;
 
     // Only a group has members worth suggesting. A private chat has exactly one other
     // person and you are not going to mention them by name.
@@ -790,7 +903,7 @@ void ChatManager::searchMentions(const QString &query) noexcept
 
     // Ten is about three screens of the panel this fills, and the query narrows fast.
     // Null filter: every member, in the order the server ranks them.
-    m_client->send(td::td_api::make_object<td::td_api::searchChatMembers>(m_selectedChat->id(), query.toStdString(), 10, nullptr),
+    m_client->send(td::td_api::make_object<td::td_api::searchChatMembers>(context->chat()->id(), query.toStdString(), 10, nullptr),
                    [this](auto &&response) {
                        // Straight to the main thread: turning member ids into usernames
                        // reads StorageManager, which belongs to that thread alone.
@@ -843,51 +956,6 @@ void ChatManager::handleChatMembers(void *responseObject) noexcept
     }
 
     emit mentionsFound(usernames, names, userIds);
-}
-
-bool ChatManager::openChat(const QString &rawChatId) noexcept
-{
-    const auto chatId = toId(rawChatId);
-
-    auto chat = m_storage->chat(chatId);
-    if (!chat)
-    {
-        // Returning false rather than failing silently. main.qml pushed ChatPage
-        // regardless of the outcome, so a miss here left a page whose chat, chatInfo
-        // and messageModel were all undefined - every binding on it threw, no
-        // MessageModel existed to request history, and the result looked like "the chat
-        // never loads its messages" with nothing in the log to say why.
-        //
-        // StorageManager only ever learns a chat from updateNewChat, so anything opened
-        // by id that TDLib has not pushed yet lands here - Saved Messages, which opens
-        // myId() directly, and a notification tapped before the chat list has loaded.
-        // Fetch it instead of giving up; getChat makes TDLib push updateNewChat.
-        fetchChat(chatId);
-        return false;
-    }
-
-    // A fetch for this chat, if there was one, is done with.
-    if (m_fetchingChatId == chatId)
-        m_fetchingChatId = 0;
-
-    // Only tell TDLib the chat is open once it is actually going to be shown. Sent
-    // first, a failed open left the server believing a chat was open that never was -
-    // which also suppresses its notifications.
-    m_client->send(td::td_api::make_object<td::td_api::openChat>(chatId));
-
-    m_selectedChat = std::move(chat);
-
-    // Before the new ones are built, and not by letting the assignment destroy them.
-    disposeLater(m_messageModel);
-    disposeLater(m_infoFormatter);
-
-    m_messageModel = std::make_unique<MessageModel>(m_selectedChat, m_locale, m_storage);
-    m_infoFormatter = std::make_unique<ChatInfoFormatter>(m_selectedChat, m_locale, m_storage);
-
-    emit selectedChatChanged();
-    emit activeChatChanged(chatId);
-
-    return true;
 }
 
 void ChatManager::fetchChat(qlonglong chatId) noexcept
@@ -1012,32 +1080,6 @@ void ChatManager::handleChatFetched(qlonglong chatId, bool ok) noexcept
         m_fetchingChatId = 0;  // a network failure should not block a later attempt
 
     emit chatAvailable(QString::number(chatId), ok);
-}
-
-void ChatManager::closeChat(const QString &rawChatId) noexcept
-{
-    const auto chatId = toId(rawChatId);
-
-    m_client->send(td::td_api::make_object<td::td_api::closeChat>(chatId));
-
-    // Only tear down the selection if this really is the chat that is selected. A page
-    // being destroyed can reach here after a *different* chat has been opened: tapping a
-    // notification pops the current ChatPage and opens the new chat in the same turn,
-    // and QML destroys the popped page afterwards. Without this, that destruction closed
-    // the chat that had just been opened, leaving the newly pushed page bound to a model
-    // already on its way out - and no selectedChatChanged to tell QML to re-read.
-    if (!m_selectedChat || m_selectedChat->id() != chatId)
-        return;
-
-    // This also runs while ChatPage is being popped, so its bindings can still fire
-    // against both of these. Destroying them here is what a segfault on leaving a chat
-    // looks like.
-    disposeLater(m_infoFormatter);
-    disposeLater(m_messageModel);
-
-    m_selectedChat = nullptr;
-
-    emit activeChatChanged(0);
 }
 
 void ChatManager::onChatFoldersUpdated() noexcept

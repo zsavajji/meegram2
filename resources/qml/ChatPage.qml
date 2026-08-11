@@ -6,16 +6,17 @@ import "components"
 Page {
     id: root
 
-    property variant chat: chatManager.selectedChat
-    property variant chatInfo: chatManager.chatInfo
-    property variant messageModel: chatManager.messageModel
+    // Handed to this page when it was pushed (main.qml, openChat), and its own for as long
+    // as the page lives. These three used to bind to ChatManager's one selection slot,
+    // which every ChatPage alive shared: opening a chat from a profile rebound the page
+    // underneath onto the new conversation, and `openedChatId` existed to stop that page
+    // closing the wrong chat on its way out. The context makes both impossible - there is
+    // no shared slot left to follow.
+    property variant chatContext
 
-    // The chat this page was opened for, captured once. `chat` above is a live binding
-    // to the current selection, so a page that has been popped but not yet destroyed
-    // follows it onto whatever was opened next - and then closes the wrong chat on the
-    // way out. Assigned imperatively because a declared initialiser would be a binding
-    // and would do exactly that.
-    property variant openedChatId: 0
+    property variant chat: chatContext.chat
+    property variant chatInfo: chatContext.info
+    property variant messageModel: chatContext.messageModel
 
     // A channel you are only subscribed to takes no replies, so the composer goes
     // entirely - Column skips invisible children, so hiding them collapses the holder
@@ -1466,12 +1467,12 @@ Page {
         }
     }
 
-    // Through ChatManager, which fills its profile slot and answers on profileReady -
-    // main.qml pushes the page from there. The same path a tapped mention takes, so the
-    // profile page has one thing to bind to however it was reached. openedChatId is the
-    // chat this page was opened for, not the live selection.
+    // Through ChatManager, which resolves the chat and answers on profileReady - main.qml
+    // pushes the page from there with a context of its own. The same path a tapped mention
+    // and a tapped group member take, so a profile is built the same way however it was
+    // reached.
     function openProfile() {
-        chatManager.openProfile(openedChatId);
+        chatManager.openProfile(chatContext.chatId);
     }
 
     // Built on demand: the page imports QtMobility.gallery, and if that module is
@@ -1611,19 +1612,20 @@ Page {
     }
 
     Component.onCompleted: {
-        openedChatId = chat ? chat.id : 0
-
         // The page exists and is bound; the delta from here to "messages-shown" is the
         // first getChatHistory round trip plus the list positioning itself.
         utils.mark("chatpage-completed")
     }
 
+    // Retires this page's context, which is what closes the chat and disposes of its
+    // message model. Whatever chat page is left underneath becomes the open one again.
+    //
     // Runs on app shutdown as well as on leaving the page, and by then appWindow's
     // properties can already be gone - chatManager reads back null and this threw.
     // Nothing needs closing at that point: the process is going away and TDLib drops an
     // open chat with the connection.
     Component.onDestruction: {
-        if (chatManager && openedChatId)
-            chatManager.closeChat(openedChatId)
+        if (chatManager && chatContext)
+            chatManager.popContext(chatContext.token)
     }
 }

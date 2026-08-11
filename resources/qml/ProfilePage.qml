@@ -1,15 +1,23 @@
 import QtQuick 1.1
 import com.nokia.meego 1.1
 
-// Who you are talking to, opened from the chat header or from a mention tapped inside a
-// message. Bound to ChatManager's profile slot, which is set before this page is pushed.
+// Who you are talking to, opened from the chat header, from a mention tapped inside a
+// message, or from a member of the group whose profile is already open.
+//
+// Handed its own context at push time (main.qml, openProfilePage) and reads no shared
+// state at all, which is what lets several of these stack. Binding to a single "current
+// profile" on ChatManager is what made tapping a member rewrite this page and then push a
+// second one showing the same person.
 Page {
     id: root
 
-    // The profile slot, not the selection: a mention opens somebody who is not the chat
-    // being viewed, and the page underneath stays on what it was showing.
-    property variant chat: chatManager.profileChat
-    property variant chatInfo: chatManager.profileInfo
+    // Set once, by whoever pushed this page. Not what is being read either: a mention
+    // opens somebody who is not the chat being viewed, and the page underneath - profile
+    // or chat - stays on what it was showing. A profile context carries no message model.
+    property variant chatContext
+
+    property variant chat: chatContext.chat
+    property variant chatInfo: chatContext.info
 
     // The big photo is a separate file from the avatar the chat list uses, and nothing
     // has asked for it before this page.
@@ -328,9 +336,19 @@ Page {
         // is every profile reached from a chat header, and none reached from a mention.
         ToolButton {
             text: qsTr("SendMessage")
-            visible: chatManager.profileChatId !== "" && chatManager.profileChatId !== chatManager.selectedChatId
-            onClicked: appWindow.openChat(chatManager.profileChatId)
+            visible: chatContext.chatId !== chatManager.activeChatId
+            onClicked: appWindow.openChat(chatContext.chatId)
         }
+    }
+
+    // Retires this page's context. It is owned by ChatManager, not here: QML1 gives a page
+    // no way to own a QObject, and leaving it to the collector is how object lifetime goes
+    // wrong in this codebase. Guarded because this also runs on app shutdown, by which
+    // time appWindow's properties can already be gone - the same reason ChatPage guards
+    // its own.
+    Component.onDestruction: {
+        if (chatManager && chatContext)
+            chatManager.popContext(chatContext.token)
     }
 
     Component.onCompleted: {

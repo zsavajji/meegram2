@@ -135,6 +135,70 @@ private:
     std::shared_ptr<std::atomic_bool> m_alive{std::make_shared<std::atomic_bool>(true)};
 };
 
+// Everything one pushed page binds to, owned for exactly as long as that page exists.
+//
+// Pages used to bind to ChatManager itself: one "selected chat" slot and one "current
+// profile" slot, both rewritten on every open. Every page alive shared them, so opening
+// anything from a page rewrote that page and then pushed the new one on top of it - a
+// profile turned into the member you tapped before being pushed again as a second copy,
+// and a chat opened from a profile rebound the ChatPage underneath to the new
+// conversation. One bug in two places, and this is the single fix for both: a page is
+// handed its own context at push time and reads no shared state at all.
+//
+// Everything a page needs is here rather than passed as three separate initial properties,
+// so there is no way to hand a page a chat and somebody else's formatter.
+class ChatContext : public QObject
+{
+    Q_OBJECT
+
+    Q_PROPERTY(Chat *chat READ chat CONSTANT)
+    // The same id as a string, for handing back to a manager call. See the note on ids in
+    // Chat.hpp for why it does not cross into QML1 as a number.
+    Q_PROPERTY(QString chatId READ chatId CONSTANT)
+    Q_PROPERTY(QObject *info READ info CONSTANT)
+
+    // Null on a context pushed for a profile page: it shows no messages, and building a
+    // model for it would start a history fetch nobody reads.
+    Q_PROPERTY(QObject *messageModel READ messageModel CONSTANT)
+
+    // Handed back to popContext() when the page is destroyed. An int rather than the
+    // context itself: the page holds it in a `property variant`, and a variant that has
+    // been round-tripped back into a C++ QObject* parameter is exactly the QML1
+    // conversion this codebase has been caught by before. A number crosses both ways with
+    // nothing to get wrong.
+    Q_PROPERTY(int token READ token CONSTANT)
+
+public:
+    ChatContext(int token, std::shared_ptr<Chat> chat, std::unique_ptr<ChatInfoFormatter> info,
+                std::unique_ptr<MessageModel> messageModel, QObject *parent = nullptr);
+
+    int token() const noexcept;
+    Chat *chat() const noexcept;
+    QString chatId() const noexcept;
+    QObject *info() const noexcept;
+    QObject *messageModel() const noexcept;
+
+    // True when this context is a chat being read rather than a profile being looked at -
+    // which is to say, when it has a message model. What decides whether it takes part in
+    // openChat/closeChat and in notification suppression, the two things that are about
+    // reading a chat rather than about showing one.
+    bool isReading() const noexcept;
+
+private:
+    int m_token{0};
+
+    // By shared_ptr and not by raw pointer or id: the object the page is bound to cannot
+    // go away underneath it while its page is alive, whatever StorageManager does with
+    // its own copy.
+    std::shared_ptr<Chat> m_chat;
+
+    // Owned outright, and one per context. Sharing a formatter is what let two profile
+    // pages fight over one member list, and sharing a model is what left a popped
+    // ChatPage's ListView reading the next chat's messages.
+    std::unique_ptr<ChatInfoFormatter> m_info;
+    std::unique_ptr<MessageModel> m_messageModel;
+};
+
 class ChatManager : public QObject
 {
     Q_OBJECT
@@ -145,26 +209,17 @@ class ChatManager : public QObject
     Q_PROPERTY(QObject *archivedModel READ archivedModel CONSTANT)
     Q_PROPERTY(QList<QObject *> folderModels READ folderModels NOTIFY folderModelsChanged)
 
-    Q_PROPERTY(Chat *selectedChat READ selectedChat NOTIFY selectedChatChanged)
-
     // Starting a conversation with somebody who is not in the chat list yet. One model for
     // the whole session rather than one per page: the page is pushed and popped, and its
     // results are worth nothing once it is gone.
     Q_PROPERTY(QObject *searchModel READ searchModel CONSTANT)
 
-    Q_PROPERTY(QObject *chatInfo READ chatInfoFormatter NOTIFY selectedChatChanged)
-    Q_PROPERTY(QObject *messageModel READ messageModel NOTIFY selectedChatChanged)
-
-    // Whose profile is being looked at, which is not always the chat being viewed: a
-    // mention is tapped from inside somebody else's conversation, and both ChatPage and
-    // the profile page bind to what is selected. Its own slot, so opening a profile
-    // leaves the page underneath showing what it was showing.
-    Q_PROPERTY(Chat *profileChat READ profileChat NOTIFY profileChanged)
-    Q_PROPERTY(QObject *profileInfo READ profileInfoFormatter NOTIFY profileChanged)
-
-    // Both as strings, to hand back to openChat(). See the note on ids in Chat.hpp.
-    Q_PROPERTY(QString profileChatId READ profileChatId NOTIFY profileChanged)
-    Q_PROPERTY(QString selectedChatId READ selectedChatId NOTIFY selectedChatChanged)
+    // The chat the user is reading - the topmost context that has a message model - as a
+    // string, or empty when none. See the note on ids in Chat.hpp. Not a handle to
+    // anything: a page binds to the context it was handed, and this exists for the one
+    // question a page legitimately asks about somebody else's, which is "am I about to
+    // push a duplicate of what is already underneath me".
+    Q_PROPERTY(QString activeChatId READ activeChatId NOTIFY activeChatChanged)
 
 public:
     explicit ChatManager(std::shared_ptr<StorageManager> storageManager, std::shared_ptr<Locale> locale);
@@ -175,58 +230,67 @@ public:
     QObject *archivedModel() const noexcept;
     QList<QObject *> folderModels() const noexcept;
 
-    Chat *selectedChat() const noexcept;
-
     QObject *searchModel() const noexcept;
 
-    QObject *chatInfoFormatter() const noexcept;
-    QObject *messageModel() const noexcept;
-
-    Chat *profileChat() const noexcept;
-    QObject *profileInfoFormatter() const noexcept;
-    QString profileChatId() const noexcept;
-    QString selectedChatId() const noexcept;
+    QString activeChatId() const noexcept;
 
     // Opens a profile for a chat id or an @username - a tapped mention carries one or the
-    // other - without touching the selection. Answers on profileReady: at once when the
-    // chat is already known, after a round trip when it has to be resolved or created.
+    // other - without touching what is being read. Answers on profileReady: at once when
+    // the chat is already known, after a round trip when it has to be resolved or created.
     Q_INVOKABLE void openProfile(const QString &target) noexcept;
 
-    // Mention autocomplete: members of the selected chat whose name or username matches
+    // A context for a page about to be pushed, or null when the chat is not in store - in
+    // which case nothing was pushed, a fetch was started for it, and the caller must not
+    // push a page that would bind to nothing. chatAvailable() follows either way.
+    //
+    // pushChat is for a ChatPage: it builds a message model and makes this the chat being
+    // read, which is what TDLib and meegramd are told and what suppresses its
+    // notifications. pushProfile is for a ProfilePage, which shows a chat without reading
+    // it and leaves whatever is being read alone.
+    //
+    // The caller owns the pairing: every context handed out here must come back through
+    // popContext() when its page is destroyed.
+    Q_INVOKABLE QObject *pushChat(const QString &chatId) noexcept;
+    Q_INVOKABLE QObject *pushProfile(const QString &chatId) noexcept;
+
+    // Retires the context a page was given, called from that page's destruction with the
+    // token it was handed. By token rather than by depth: PageStack is not the only thing
+    // that destroys pages - clear() takes the whole stack at once, and a pop is deferred to
+    // the end of the event loop - so retiring the top would take a context that is still on
+    // screen. An unknown token is ignored, which is what makes a page destroyed twice
+    // harmless.
+    //
+    // Whatever is left underneath becomes the chat being read again, so popping one of two
+    // stacked ChatPages reopens the one below rather than leaving nothing open.
+    Q_INVOKABLE void popContext(int token) noexcept;
+
+    // Mention autocomplete: members of the chat being read whose name or username matches
     // what is being typed. Answers on mentionsFound, with an empty list for anything that
     // is not a group - so the composer does not have to know what kind of chat it is in.
     Q_INVOKABLE void searchMentions(const QString &query) noexcept;
-
-    // False when the chat is not in StorageManager, in which case nothing was selected
-    // and the caller must not push a page that would bind to nothing. A fetch is started
-    // for it, so chatAvailable() follows either way.
-    Q_INVOKABLE bool openChat(const QString &chatId) noexcept;
-    Q_INVOKABLE void closeChat(const QString &chatId) noexcept;
 
     // Creates a group with the given members and reports it on chatAvailable, which is what
     // opens it - the same path a chat fetched by id takes. A basic group, as the official
     // clients make: Telegram upgrades it to a supergroup on its own when it outgrows one.
     Q_INVOKABLE void createGroup(const QString &title, const QStringList &userIds) noexcept;
 
-    // Installed on the application, to close and reopen the selected chat as the window
+    // Installed on the application, to close and reopen the chat being read as the window
     // loses and regains focus. Public because that is where QObject declares it.
     bool eventFilter(QObject *object, QEvent *event) noexcept override;
 
 signals:
-    void selectedChatChanged();
-
-    // The profile slot now holds somebody else.
-    void profileChanged();
-
     // openProfile() has finished, successfully or not. The page is pushed from here
     // rather than by the caller, which cannot know whether the chat had to be fetched.
+    //
+    // chatId is the resolved chat as a decimal string - a username had to be looked up to
+    // get it - and is what the caller feeds to pushProfile(). Empty on failure.
     //
     // reason is empty on success and says what went wrong otherwise - TDLib's own error,
     // or the lookup that followed it. It is shown in the banner because this device has
     // nowhere else to say it: qWarning goes to a stderr nothing collects, and the daemon
     // socket refuses any peer that is not the app itself, so a failure that is not
     // reported here cannot be investigated at all.
-    void profileReady(bool ok, const QString &reason);
+    void profileReady(bool ok, const QString &chatId, const QString &reason);
 
     // The answer to searchMentions(), oldest request wins nothing - a later reply simply
     // replaces the list. Lists paired by index rather than one of objects: QStringList is
@@ -238,15 +302,15 @@ signals:
     // the id, which is how the official clients mention somebody without a username.
     void mentionsFound(const QStringList &usernames, const QStringList &names, const QStringList &userIds);
 
-    // A chat that openChat() refused has finished being fetched. ok says whether it can
-    // be opened now; the caller retries openChat() or reports the failure.
-    // chatId is a decimal string: main.qml feeds it straight back into openChat(), and
-    // every Q_INVOKABLE on this class already takes ids that way. No C++ listener.
+    // A chat that pushChat() refused has finished being fetched. ok says whether it can
+    // be opened now; the caller retries the open or reports the failure.
+    // chatId is a decimal string: main.qml feeds it straight back into its own openChat(),
+    // and every Q_INVOKABLE on this class already takes ids that way. No C++ listener.
     void chatAvailable(const QString &chatId, bool ok);
 
-    // The chat the user is looking at, or 0 when none. Drives notification
-    // suppression; separate from selectedChatChanged because that one carries no id
-    // and does not fire on close.
+    // The chat being read, or 0 when none - the top of the context stack changing, whether
+    // by a push, a pop, or the last chat page going away. Drives notification suppression,
+    // and is the notify for activeChatId.
     void activeChatChanged(qlonglong chatId);
 
     void folderModelsChanged();
@@ -267,10 +331,44 @@ private:
     void updateFolderModels() noexcept;
     void fetchChat(qlonglong chatId) noexcept;
 
-    void setProfileChat(std::shared_ptr<Chat> chat) noexcept;
+    // The two pushes above, which differ only in whether the context reads its chat.
+    ChatContext *pushContext(const QString &rawChatId, bool reading) noexcept;
+
+    // The topmost context being read, or null when nothing on the stack is a ChatPage.
+    // Scanned from the top rather than tracked in a member: a profile pushed over a chat
+    // leaves the chat underneath still the one being read, and one rule - "the highest
+    // reading context wins" - answers that without a second thing to keep in step.
+    //
+    // Answers "which context", not "which chat" - activeChatId reads m_openChatId, which
+    // is the same answer from the one place that is always current. Callers here want the
+    // object: the chat to search members in, and the chat to reopen after a pop.
+    ChatContext *activeContext() const noexcept;
+
+    // Moves the single open chat, telling TDLib and - through the relayed request -
+    // meegramd. Exactly one at a time, which is what both of them assume: TDLib counts
+    // opens against closes per dialog, and the daemon keeps one open-chat id. So the
+    // previous one is closed before the new one opens, and pushing the same chat twice
+    // changes nothing rather than opening it twice.
+    void setOpenChat(qlonglong chatId) noexcept;
+
+    // Bottom to top, one per live page that was handed a context. Ordinarily one to three
+    // deep - a chat, a profile opened from it, a chat opened from that - so a vector
+    // scanned by token is the whole lookup. Contexts are retired by popContext(), and any
+    // left at shutdown are destroyed with this.
+    std::vector<std::unique_ptr<ChatContext>> m_contextStack;
+
+    // Handed out by pushContext() and never reused, so a token that outlives its context -
+    // a page destroyed twice, or one destroyed after the stack was cleared - matches
+    // nothing rather than matching whatever took its place.
+    int m_nextToken{0};
+
+    // What TDLib has been told is open, and the value the minimise/restore pair closes and
+    // reopens. Zero when nothing is. Kept rather than re-derived so a close is always sent
+    // for the id the matching open used, even if the stack changed underneath.
+    qlonglong m_openChatId{0};
 
     // The one chat currently being fetched by fetchChat(), so a fetch that succeeds
-    // without making the chat openable cannot bounce between here and openChat().
+    // without making the chat openable cannot bounce between here and pushChat().
     qlonglong m_fetchingChatId{0};
 
     std::shared_ptr<Client> m_client;
@@ -283,12 +381,4 @@ private:
 
     std::unique_ptr<ChatFolderModel> m_folderModel;
     std::unique_ptr<SearchModel> m_searchModel;
-
-    std::shared_ptr<Chat> m_selectedChat;
-
-    std::unique_ptr<ChatInfoFormatter> m_infoFormatter;
-    std::unique_ptr<MessageModel> m_messageModel;
-
-    std::shared_ptr<Chat> m_profileChat;
-    std::unique_ptr<ChatInfoFormatter> m_profileInfo;
 };

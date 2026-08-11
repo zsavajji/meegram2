@@ -120,7 +120,7 @@ PageStackWindow {
         // openProfile and land here once there is a profile to show.
         onProfileReady: {
             if (ok) {
-                openProfilePage()
+                openProfilePage(chatId)
                 return
             }
 
@@ -161,7 +161,13 @@ PageStackWindow {
     // Pushed from here rather than by whoever tapped the mention: the chat may have had
     // to be fetched or created first, so only ChatManager knows when there is something
     // to bind to.
-    function openProfilePage() {
+    //
+    // Each page gets its own context and binds only to what it was handed here. Nothing on
+    // the page reads a "current profile", which is what used to make tapping a member
+    // rewrite the page underneath and then push a copy of it - the two were the same
+    // object. A profile context carries no message model and does not change which chat is
+    // being read, so opening one over a conversation leaves that conversation open.
+    function openProfilePage(chatId) {
         var component = Qt.createComponent("ProfilePage.qml");
 
         if (component.status !== Component.Ready) {
@@ -169,7 +175,17 @@ PageStackWindow {
             return;
         }
 
-        pageStack.push(component);
+        // After the component is known to be good: a push that cannot happen must not
+        // leave a context behind for a page that was never created. Nothing to overlap
+        // here, unlike openChat above - a profile starts no history fetch.
+        var chatContext = chatManager.pushProfile(chatId);
+
+        if (!chatContext) {
+            showInfoBanner(qsTr("ErrorOccurred"));
+            return;
+        }
+
+        pageStack.push(component, { chatContext: chatContext });
     }
 
     // Lives here rather than on ChatPage so the delegate can reach it by a unique name -
@@ -331,17 +347,27 @@ PageStackWindow {
         // chat that could not be selected produced a page with chat, chatInfo and
         // messageModel all undefined - a spinner that never resolved. A refusal means a
         // fetch is under way; onChatAvailable comes back with the outcome.
-        if (!manager.openChat(chatId))
+        //
+        // The context is this page's own - its chat, its formatter, its message model -
+        // so a second ChatPage on the stack no longer rebinds the first one onto the new
+        // conversation. It is taken before the compile below so the first history request
+        // is already on the socket while ChatPage is being compiled.
+        var chatContext = manager.pushChat(chatId);
+
+        if (!chatContext)
             return;
 
-        // Separated so the compile below is attributable on its own: openChat() is the
-        // C++ side selecting the chat and kicking off the first history fetch.
+        // Separated so the compile below is attributable on its own: pushChat() is the
+        // C++ side opening the chat and kicking off the first history fetch.
         utils.mark("chat-selected")
 
         var component = Qt.createComponent("ChatPage.qml");
 
         if (component.status !== Component.Ready) {
             console.debug("Error loading component:", component.errorString());
+            // Give the context back rather than leaving one on the stack for a page that
+            // will never exist - it holds an open chat and a live message model.
+            manager.popContext(chatContext.token);
             return;
         }
 
@@ -350,7 +376,7 @@ PageStackWindow {
         // here rather than in setSource.
         utils.mark("chatpage-compiled")
 
-        pageStack.push(component);
+        pageStack.push(component, { chatContext: chatContext });
 
         utils.mark("chatpage-pushed")
     }
