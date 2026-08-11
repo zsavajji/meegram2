@@ -76,6 +76,9 @@ Page {
             bottom: parent.bottom
         }
         clip: true
+        // Same reasoning as ChatListView: these rows carry a decoded avatar each, and
+        // with the default buffer of 0 a flick back up re-decodes every one of them.
+        cacheBuffer: listView.height / 2
         model: root.model
 
         delegate: ListItem {
@@ -158,7 +161,7 @@ Page {
 
         MenuLayout {
             MenuItem {
-                text: "Find contacts on Telegram"
+                text: qsTr("ImportContacts")
                 onClicked: importDialog.open()
             }
         }
@@ -170,7 +173,7 @@ Page {
     QueryDialog {
         id: importDialog
 
-        titleText: "Find contacts on Telegram"
+        titleText: qsTr("ImportContacts")
         message: "Your phone's contact numbers will be sent to Telegram, and the ones with " +
                  "an account will be added to your Telegram contacts on all your devices."
         acceptButtonText: qsTr("OK")

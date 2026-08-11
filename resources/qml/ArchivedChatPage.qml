@@ -12,7 +12,7 @@ Page {
 
     TopBar {
         id: header
-        title: "ArchivedChats"
+        title: appWindow.tr("ArchivedChats")
         isArchived: true
     }
 

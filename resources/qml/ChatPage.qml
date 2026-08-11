@@ -846,7 +846,7 @@ Page {
                 visible: root.canSend
                 height: 64
                 width: parent.width
-                placeholderText: "Write your message here"
+                placeholderText: qsTr("TypeMessage")
                 platformStyle: TextAreaStyle {
                     background: "qrc:/images/messaging-textedit-background.png"
                     backgroundError: "qrc:/images/messaging-textedit-background.png"
@@ -1009,7 +1009,7 @@ Page {
                     height: 48
                     width: 120
                     platformStyle: ButtonStyle { inverted: true }
-                    text: composeState.editId !== 0 ? qsTr("Save") : "Send"
+                    text: composeState.editId !== 0 ? qsTr("Save") : qsTr("Send")
                     onClicked: {
                         // Whitespace-only counts as empty: TDLib rejects such a
                         // message, so there is nothing to gain by sending it.

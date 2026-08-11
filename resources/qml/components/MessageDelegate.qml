@@ -330,6 +330,20 @@ Item {
                                     onReleased: albumBubble.endSwipe(true)
                                     onCanceled: albumBubble.endSwipe(false)
                                 }
+
+                                // Downloads on sight, like every other bubble. Here rather
+                                // than in a loop over albumColumn.photos on the bubble: that
+                                // loop read photos[i].file straight off the model list, which
+                                // QML1 hands back as an unwrapped QVariant, so `file` was
+                                // undefined every time and no album photo was ever fetched -
+                                // only the ones TDLib already had on disk drew. The property
+                                // above is what converts the element, so read it from there.
+                                Component.onCompleted: {
+                                    var file = photo ? photo.file : null;
+
+                                    if (file && file.canBeDownloaded && !file.isDownloadingActive && !file.isDownloadingCompleted)
+                                        appManager.downloadFile(file.id, 1, 0, 0, false);
+                                }
                             }
                         }
                     }
@@ -348,17 +362,6 @@ Item {
                     font.pixelSize: 23
                     horizontalAlignment: model.isOutgoing ? Text.AlignRight : Text.AlignLeft
                     onLinkActivated: appWindow.openLink(link)
-                }
-            }
-
-            // Downloads on sight, once per photo of the batch. Same trade as the photo
-            // bubble's - see the note there.
-            Component.onCompleted: {
-                for (var i = 0; i < albumColumn.photos.length; ++i) {
-                    var file = albumColumn.photos[i].file;
-
-                    if (file && file.canBeDownloaded && !file.isDownloadingActive && !file.isDownloadingCompleted)
-                        appManager.downloadFile(file.id, 1, 0, 0, false);
                 }
             }
         }
@@ -936,7 +939,7 @@ Item {
                 horizontalAlignment: model.isOutgoing ? Text.AlignRight : Text.AlignLeft
                 wrapMode: Text.Wrap
                 color: model.isOutgoing ? "white" : "black"
-                text: "The message is not supported on MeeGram yet"
+                text: qsTr("UnsupportedAttachment")
             }
         }
     }

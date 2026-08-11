@@ -74,7 +74,7 @@ Item {
         }
 
         Button {
-            text: "Log in by QR Code"
+            text: qsTr("AuthAnotherClientScan")
             anchors.horizontalCenter: parent.horizontalCenter
             onClicked: authorization.state = "qr_code"
         }

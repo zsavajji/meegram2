@@ -10,7 +10,7 @@ Page {
 
     TopBar {
         id: header
-        title: "SETTINGS"
+        title: appWindow.tr("SETTINGS")
     }
 
     ListView {

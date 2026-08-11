@@ -69,6 +69,9 @@ Page {
             bottom: parent.bottom
         }
         clip: true
+        // Same reasoning as ChatListView: these rows carry a decoded avatar each, and
+        // with the default buffer of 0 a flick back up re-decodes every one of them.
+        cacheBuffer: listView.height / 2
         model: root.model
 
         delegate: ListItem {
