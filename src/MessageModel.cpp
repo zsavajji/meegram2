@@ -213,6 +213,8 @@ QVariant MessageModel::data(const QModelIndex &index, int role) const
             return formattedRow(messageId, message.get()).senderTitle;
         case ShowsSenderRole:
             return formattedRow(messageId, message.get()).showsSender;
+        case OpensRunRole:
+            return opensRun(index.row());
         case ChatIdRole:
             return message->chatId();
         case IsOutgoingRole:
@@ -372,6 +374,44 @@ void MessageModel::refreshAlbumAt(int row) noexcept
         ++last;
 
     emit dataChanged(createIndex(first, 0), createIndex(last, 0));
+}
+
+bool MessageModel::opensRun(int row) const noexcept
+{
+    if (row <= 0 || row >= static_cast<int>(m_messages.size()))
+        return true;
+
+    const auto previousId = m_messages[row - 1];
+    const auto currentId = m_messages[row];
+
+    const auto previous = m_messageMap.find(previousId);
+    const auto current = m_messageMap.find(currentId);
+
+    if (previous == m_messageMap.end() || current == m_messageMap.end() || !previous->second || !current->second)
+        return true;
+
+    // A service message - somebody joined, the title changed - ends whatever was above
+    // it, and so does a day header: both put something between the two messages.
+    if (previous->second->isService())
+        return true;
+
+    if (formattedRow(previousId, previous->second.get()).section != formattedRow(currentId, current->second.get()).section)
+        return true;
+
+    // Type as well as id: a channel signing its posts and a user can collide on the
+    // number alone.
+    return previous->second->senderType() != current->second->senderType() ||
+           previous->second->senderId() != current->second->senderId();
+}
+
+void MessageModel::refreshRunAt(int row) noexcept
+{
+    if (row <= 0 || row >= static_cast<int>(m_messages.size()))
+        return;
+
+    const auto modelIndex = createIndex(row, 0);
+
+    emit dataChanged(modelIndex, modelIndex);
 }
 
 QString MessageModel::replyToSender(const Message *message) const noexcept
@@ -558,6 +598,7 @@ QHash<int, QByteArray> MessageModel::roleNames() const noexcept
     roles[SenderPhotoRole] = "senderPhoto";
     roles[SenderColorRole] = "senderColor";
     roles[ShowsSenderRole] = "showsSender";
+    roles[OpensRunRole] = "opensRun";
     roles[SenderTitleRole] = "senderTitle";
     roles[ChatIdRole] = "chatId";
     roles[IsOutgoingRole] = "isOutgoing";
@@ -1346,6 +1387,7 @@ void MessageModel::handleNewMessage(td::td_api::object_ptr<td::td_api::message> 
     // An album arrives as one updateNewMessage per photo, so the row above may have just
     // become an album, or grown by one.
     refreshAlbumAt(pos);
+    refreshRunAt(pos);
 
     emit countChanged();
 
@@ -1425,6 +1467,7 @@ void MessageModel::handleMessageContent(qlonglong chatId, qlonglong messageId, t
         itemChanged(row);
         // An album member is drawn by the head row, not by its own.
         refreshAlbumAt(row);
+        refreshRunAt(row);
     }
 }
 
@@ -1531,6 +1574,7 @@ void MessageModel::handleDeleteMessages(qlonglong chatId, std::vector<int64_t> &
     // Deleting one photo of an album leaves the rest of the run to redraw - and if the
     // head went, the row that took its place is the new head.
     refreshAlbumAt(indicesToRemove.front());
+    refreshRunAt(indicesToRemove.front());
 }
 
 void MessageModel::reloadHistory() noexcept
@@ -1684,7 +1728,10 @@ void MessageModel::insertMessages(std::vector<qlonglong> &&newIds, bool prepend)
     // photos of a run whose tail was already loaded, or the reverse. The row where the block
     // meets what was already there is the one whose album changed shape. (The reset branch
     // above needs nothing - the view re-reads every row anyway.)
-    refreshAlbumAt(prepend ? static_cast<int>(newIds.size()) : static_cast<int>(m_messages.size() - newIds.size()));
+    const auto seam = prepend ? static_cast<int>(newIds.size()) : static_cast<int>(m_messages.size() - newIds.size());
+
+    refreshAlbumAt(seam);
+    refreshRunAt(seam);
 
     if (prepend)
     {

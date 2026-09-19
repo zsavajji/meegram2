@@ -23,8 +23,10 @@ Item {
     // height it had before replies existed. reactionsRow is already zero when the message
     // has none, so it needs no test of its own.
     height: contentItem.children[0].height
-          + messageDate.height
-          + (senderLabel.text !== "" ? senderLabel.height : 0)
+          // The flat layout spends no line on the date: it shares the top row, which
+          // hasTopRow has already paid for.
+          + (appWindow.showBubbles ? messageDate.height : 0)
+          + (root.hasTopRow ? senderLabel.height : 0)
           + (replyBlock.visible ? replyBlock.height + 6 : 0)
           + reactionsRow.height
           + (root.sided ? 30 : 28);
@@ -43,8 +45,13 @@ Item {
     // answers that case without building anything, so a screenful costs a null check each.
     property variant reactionList: model.reactions
 
-    // Where the sender label ends and everything below it begins.
-    property int stackTop: senderLabel.text === "" ? 16 : 46
+    // Whether anything occupies the row above the content. In bubble mode that is the
+    // sender name, when there is one. In the flat layout the timestamp lives there too,
+    // so the row is always there even on a continuation that shows no name.
+    property bool hasTopRow: appWindow.showBubbles ? senderLabel.visible : true
+
+    // Where that row ends and everything below it begins.
+    property int stackTop: root.hasTopRow ? 46 : 16
 
     // ...and where that stack starts horizontally. On the outgoing side the parts are
     // pushed right by a fixed inset; everywhere else they clear the avatar gutter.
@@ -56,13 +63,24 @@ Item {
     // none and keep the layout they had. With bubbles off every message gets one,
     // including your own: there is no side of the screen left to say who spoke.
     //
-    // ponytail: one per message, not one per run from the same sender. Telegram hangs a
-    // single avatar off the last of a run, which needs the model to report where a run
-    // ends; this repeats it. More visible in the flat layout than it ever was in bubbles.
-    property bool showAvatar: appWindow.showBubbles ? model.showsSender : true
+    // In the flat layout only the message that opens a run draws one, the way Telegram
+    // does it: five messages in a row from one person carry one avatar and one name
+    // between them, not five of each.
+    //
+    // Bubble mode still draws one per message. Telegram hangs a single avatar off the
+    // *last* of a run there, because that is where the balloon's tail points - the
+    // opposite end from the flat layout, and a different rule rather than the same one
+    // applied twice. Left as it was until bubble mode is worth revisiting.
+    property bool showAvatar: appWindow.showBubbles ? model.showsSender : model.opensRun
+
+    // Whether the gutter is reserved, which is not the same question: in the flat layout
+    // every message is indented past it, including the continuations that draw no avatar
+    // in it. Without that the second message of a run would slide left and the column
+    // would come apart.
+    property bool hasGutter: appWindow.showBubbles ? showAvatar : true
     // Everything on the incoming side shifts by this, which is the whole cost of the
     // gutter - the bubble, the labels and the content all measure from parent.left.
-    property int avatarSpace: showAvatar ? 52 : 0
+    property int avatarSpace: hasGutter ? 52 : 0
 
     // Only set by a delegate whose text lives somewhere this cannot reach - an album's
     // caption is on another message of the batch. Everything else is read off the content
@@ -262,7 +280,7 @@ Item {
         wrapMode: Text.WrapAnywhere
         maximumLineCount: 1
         horizontalAlignment: root.sided ? Text.AlignRight : Text.AlignLeft
-        visible: text !== ""
+        visible: text !== "" && (appWindow.showBubbles || model.opensRun)
     }
 
     // The sender's rank, on the far side of the name - "admin", "owner", or whatever
@@ -281,7 +299,7 @@ Item {
             baseline: senderLabel.baseline
         }
         text: model.senderTitle
-        visible: text !== "" && senderLabel.text !== ""
+        visible: text !== "" && senderLabel.visible
         color: senderLabel.color
         opacity: 0.6
         font.pixelSize: 18
@@ -312,6 +330,25 @@ Item {
             leftMargin: bubble.x + 10
             top: parent.top
             topMargin: root.stackTop
+        }
+
+        // The same wash the reaction pills carry, so a quote reads as a thing laid on the
+        // message rather than as two more lines of it. Sized from the labels' painted
+        // width rather than from the block, which is deliberately wider than its text -
+        // that extra width is the tap target, and a wash across all of it would look like
+        // a selection. No loop: the labels are capped by the block's own fixed width, so
+        // nothing here feeds back into what it measures.
+        Rectangle {
+            anchors {
+                left: parent.left
+                top: parent.top
+                topMargin: -3
+            }
+            width: Math.max(replySender.visible ? replySender.paintedWidth : 0,
+                            replyText.visible ? replyText.paintedWidth : 0) + 11 + 8
+            height: parent.height + 6
+            radius: 4
+            color: appWindow.tintOn(root.sided)
         }
 
         // Tapping the quote jumps to the message it points at. On the block rather than
@@ -434,7 +471,7 @@ Item {
                     // Yours is filled, everyone else's is a tint of the bubble it sits on.
                     color: modelData.chosen
                                ? (root.sided ? "white" : "#0077A8")
-                               : (root.sided ? "#40ffffff" : (theme.inverted ? "#20ffffff" : "#20000000"))
+                               : appWindow.tintOn(root.sided)
 
                     Row {
                         id: pill
@@ -514,15 +551,20 @@ Item {
         // cannot simply sit after the text - it has to come off the label's own right
         // edge, and that edge moves left to make room for it.
         //
-        // In the flat layout the label runs to the row's right edge instead, which puts
-        // every timestamp in one column down the side of the conversation.
+        // In the flat layout it moves to the **top** row instead, level with the sender
+        // name and hard against the row's right edge. With no balloon to close a message
+        // off, where one *starts* is the thing that needs marking, and a timestamp in the
+        // same column at the head of every message is what makes the conversation
+        // scannable. It costs no height: the row is there for the name already.
         width: (appWindow.showBubbles ? parent.width - 100 : parent.width - root.stackLeft - 16)
                - (sendStateIcon.visible ? sendStateIcon.paintedWidth + 6 : 0)
         anchors {
             left: parent.left
             leftMargin: root.stackLeft
-            top: reactionsRow.bottom
-            topMargin: 4
+            top: appWindow.showBubbles ? reactionsRow.bottom : parent.top
+            // 22 rather than the name's own 18: the date is the smaller font of the two,
+            // and this sits the two optically on one line.
+            topMargin: appWindow.showBubbles ? 4 : 22
         }
         text: model.date
         color: root.sided ? "white" : appWindow.bubbleTextColor

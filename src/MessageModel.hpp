@@ -61,6 +61,14 @@ public:
         // yours. With bubbles off the bubble ignores this and shows them on everything,
         // which is the only thing left that says who spoke.
         ShowsSenderRole,
+        // Whether this message starts a run - the message above it is from somebody else,
+        // or is a service message, or sits under a different day header, or there is no
+        // message above it. The flat layout hangs the avatar and the name off this, so a
+        // burst of five messages from one person carries one of each instead of five.
+        //
+        // A property of the row's *neighbour*, not of the row, so it is computed on read
+        // and the seam is refreshed on every structural change - see refreshRunAt.
+        OpensRunRole,
         ChatIdRole,
         IsOutgoingRole,
         DateRole,
@@ -268,6 +276,14 @@ private:
     // how many photos it holds, and neither is a value the row itself carries - so the
     // whole run has to be told to re-read. Called from every structural change.
     void refreshAlbumAt(int row) noexcept;
+
+    // OpensRunRole for one row, computed from the row above it.
+    bool opensRun(int row) const noexcept;
+
+    // An insert or a removal changes whether the row at the seam opens a run, and only
+    // that row. Appending never does - a message arriving at the end cannot change what
+    // is above it - which is why the busy path pays nothing for this.
+    void refreshRunAt(int row) noexcept;
 
     // Reply previews. Both return an empty string when the message is not a reply,
     // which is what the delegate tests to decide whether to show a quote block.

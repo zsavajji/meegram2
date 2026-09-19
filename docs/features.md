@@ -818,12 +818,35 @@ accent for read and the secondary grey for the rest, which is what Telegram's ow
 mode does.
 :::
 
-Two ceilings worth knowing, both marked in the source. The avatar is drawn **once per
-message, not once per run** from the same sender, which is more visible flat than it ever
-was in bubbles — Telegram hangs a single avatar off the last message of a run, which needs
-the model to report where a run ends. And **"Show bubbles" is the one untranslated string
-in the app**: Telegram's language pack has no key for it (it is not a setting Telegram
-has), and an absent key renders as the key itself.
+**Runs.** Five messages in a row from one person carry one avatar and one name between
+them, not five of each. `opensRun` is the model's answer to "is the message above this one
+from somebody else" — or a service message, or under a different day header, or absent.
+
+That flag is a property of a row's **neighbour**, which is what makes it interesting:
+
+- **Appending never invalidates anything.** A message arriving at the end cannot change
+  what is above it, so the busy path pays nothing. That is why the rule hangs the avatar
+  off the *first* message of a run rather than the last; the last-of-run rule Telegram uses
+  in bubbles would re-flag the previous row on every single arrival.
+- **A prepend or a removal invalidates exactly one row** — the one that now sits at the
+  seam — and `refreshRunAt` emits a `dataChanged` for it, at the same three call sites
+  where `refreshAlbumAt` already does the same thing for album grouping. Album membership
+  had this problem first and solved it the same way.
+
+The gutter is reserved for **every** flat-mode row, including the continuations that draw
+no avatar in it; otherwise the second message of a run slides left and the column comes
+apart.
+
+::: info Bubble mode still draws one avatar per message
+Telegram hangs a single avatar off the **last** message of a run there, because that is
+where the balloon's tail points — the opposite end from the flat layout, so it is a
+different rule rather than the same one applied twice, and it is the one that costs a
+re-flag per arrival. Unchanged until bubble mode is worth revisiting.
+:::
+
+**"Show bubbles" is the one untranslated string in the app**: Telegram's language pack has
+no key for it (it is not a setting Telegram has), and an absent key renders as the key
+itself.
 
 ### Theme glyphs need a second asset, not a colour
 

@@ -60,6 +60,13 @@ PageStackWindow {
         return outgoing && showBubbles;
     }
 
+    // A wash for something sitting *on* a message - a reaction pill, a reply quote.
+    // Lighter on the accent balloon, darker on everything else, and the other way round
+    // in the dark theme, where a black wash on a dark bubble is nothing at all.
+    function tintOn(sided) {
+        return sided ? "#40ffffff" : theme.inverted ? "#20ffffff" : "#20000000";
+    }
+
     // Theme glyphs are a different problem from the colours above, because they are
     // images and QML1 cannot tint one: there is no QtGraphicalEffects and no
     // ColorOverlay. Blanco draws them as near-black line art on transparent - #000000
