@@ -264,12 +264,14 @@ Page {
             delegate: MessageDelegate {}
             model: messageModel
 
-            // The bubble graphic is drawn taller than its delegate - MessageBubble
-            // gives the BorderImage an 8px top margin and +2 height on incoming
-            // messages - so the newest one sat hard against the composer and got
-            // clipped. A footer rather than anchors.bottomMargin: this only costs
-            // space at the end of the list, instead of a permanent band of page
-            // background between the list and the input bar.
+            // Breathing room under the newest message, which otherwise sits hard against
+            // the composer. This was load-bearing when the balloon was a nine-slice drawn
+            // taller than its own delegate and the last one came out clipped; the drawn
+            // shape stays inside its row, so what is left is the gap itself.
+            //
+            // A footer rather than anchors.bottomMargin: this only costs space at the end
+            // of the list, instead of a permanent band of page background between the
+            // list and the input bar.
             footer: Item {
                 width: listView.width
                 height: 15

@@ -2,16 +2,8 @@
     <qresource prefix="/">
         <file>images/avatar-image-mask.png</file>
         <file>images/help-icon.png</file>
-        <file>images/incoming-normal.png</file>
-        <file>images/incoming-normal-inverted.png</file>
-        <file>images/incoming-pressed.png</file>
-        <file>images/incoming-pressed-inverted.png</file>
         <file>images/messaging-textedit-background.png</file>
         <file>images/messaging-textedit-background-inverted.png</file>
         <file>images/notification.png</file>
-        <file>images/outgoing-normal.png</file>
-        <file>images/outgoing-normal-inverted.png</file>
-        <file>images/outgoing-pressed.png</file>
-        <file>images/outgoing-pressed-inverted.png</file>
     </qresource>
 </RCC>

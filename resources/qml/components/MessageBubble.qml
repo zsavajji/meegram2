@@ -12,10 +12,10 @@ Item {
     signal pressAndHold
 
     // Dips and comes back when the view jumps here, driven by the list's one shared
-    // animation. On the whole message, not on the bubble graphic below: the text, the
-    // sender and the content are siblings of that BorderImage rather than children of
-    // it, so dimming it faded the balloon behind the words and left the words alone -
-    // which on an incoming bubble is a near-white graphic on a near-white page.
+    // animation. On the whole message, not on the balloon below: the text, the sender and
+    // the content are siblings of that shape rather than children of it, so dimming it
+    // faded the balloon behind the words and left the words alone - which on an incoming
+    // one is a near-white shape on a near-white page.
     opacity: flashing ? listView.flashOpacity : 1.0
 
     // Vertical stack: sender, optional reply quote, content, reactions, date. Each term
@@ -80,9 +80,13 @@ Item {
     // from one person carry one avatar between them rather than five.
     //
     // Bubble mode still draws one per message. Telegram hangs a single avatar off the
-    // *last* of a run there, because that is where the balloon's tail points - the
-    // opposite end from the flat layout, and a different rule rather than the same one
-    // applied twice. Left as it was until bubble mode is worth revisiting.
+    // *last* of a run in bubbles, because that is where the balloon's tail points - the
+    // opposite end from the flat layout, and the one that costs a re-flag on every
+    // arrival rather than none.
+    //
+    // That reason left with the tail, now the balloon is a drawn shape: nothing points at
+    // the avatar any more, so this could take the flat layout's rule and cost nothing.
+    // Not done - it is a visible change to a layout this work was not asked to alter.
     property bool showAvatar: model.showsSender && (appWindow.showBubbles || model.opensRun)
 
     // Whether the gutter is reserved, which is not the same question: a continuation
@@ -114,8 +118,9 @@ Item {
     }
 
     function endSwipe(commit) {
-        // 56px is far enough to have been meant rather than a flick that wandered.
-        if (commit && root.x >= 56) {
+        // 56px is far enough to have been meant rather than a flick that wandered. The
+        // bubble travels left, so the distance is negative.
+        if (commit && root.x <= -56) {
             var content = model.content;
 
             // Each content type keeps its wording under a different name, and reading a
@@ -148,10 +153,20 @@ Item {
         easing.type: Easing.OutQuad
     }
 
-    BorderImage {
+    Rectangle {
         id: bubble
 
-        height: parent.height + (root.sided ? 0 : 2)
+        // The rectangle *is* the balloon. The nine-slice it replaced was a balloon with
+        // transparent margin around it - a tail's worth of empty pixels along the bottom
+        // of the incoming asset and the top of the outgoing one - and that margin was the
+        // gap between one message and the next. A solid shape fills it: incoming bubbles
+        // overlapped the row below by 2px and two outgoing ones met exactly.
+        //
+        // So the insets are explicit now, and the same on both sides, because a rectangle
+        // has no tail to leave room for. 11 and 13 put the painted edges where the
+        // asset's ink used to land, which keeps the 4px under the date line and the ~13px
+        // between messages that the old bubbles read with.
+        height: parent.height - 13
         // The quote block has to widen the bubble too, or a short message replying
         // to a long one would have its quote clipped. 11 = accent bar + its margin.
         width: Math.max(childrenWidth,
@@ -170,29 +185,42 @@ Item {
             left: parent.left
             leftMargin: root.sided ? parent.width - width - 10 : 10 + root.avatarSpace
             top: parent.top
-            topMargin: root.sided ? 1 : 8
+            topMargin: 11
         }
 
-        // No source at all in the flat layout - the item stays, because the quote block
-        // and the rank measure from its edges, but nothing is drawn or decoded for it.
-        source: appWindow.showBubbles ? internal.getBubbleImage() : ""
-
-        border { left: 22; right: 22; bottom: 22; top: 22; }
-
-        opacity: 1.0
+        // A drawn shape. The colours are the deleted assets' own, sampled from them
+        // before they went, so the palette is unchanged; what went with them is the tail.
+        //
+        // 13px is the radius the balloon assets were drawn with, measured off them
+        // before they were deleted: their corner curve reached the left edge 13 rows
+        // below the top one.
+        //
+        // smooth for antialiased corners. On Qt 4's software raster that is a real cost
+        // per paint where the nine-slice was a blit, and it is unmeasured: `frame` in a
+        // -DMEEGRAM_PROFILE=ON build against the same flick is what would settle it.
+        radius: 13
+        // Painted only in bubble mode, and **not** hidden in the other one: the MouseArea
+        // below is this message's whole input surface - tap, long-press for the action
+        // menu, swipe to reply - and an invisible item receives no events in QtQuick, so
+        // hiding this took all three with it. A transparent fill draws nothing and keeps
+        // them. The quote block and the rank measure from its edges either way.
+        color: appWindow.showBubbles ? internal.bubbleColor() : "transparent"
+        // The antialiased path is only worth asking for when there is a shape to draw.
+        smooth: appWindow.showBubbles
 
         MouseArea {
             id: mouseArea
             anchors.fill: parent
 
-            // Swipe right to reply, the way Telegram does. The whole bubble follows the
-            // finger: an axis-locked drag only takes the mouse grab once it has crossed
-            // the threshold sideways, so a vertical flick still reaches the list.
+            // Swipe left to reply: the whole bubble follows the finger. Telegram drags
+            // the other way, and this does not - a deliberate local choice. An axis-locked
+            // drag only takes the mouse grab once it has crossed the threshold sideways,
+            // so a vertical flick still reaches the list.
             drag {
                 target: root
                 axis: Drag.XAxis
-                minimumX: 0
-                maximumX: 90
+                minimumX: -90
+                maximumX: 0
             }
 
             onClicked: root.clicked()
@@ -219,10 +247,10 @@ Item {
             left: parent.left
             leftMargin: 6
             top: parent.top
-            // Bubble mode hangs the avatar off the balloon's bottom edge, beside the
-            // tail. Flat mode has no tail and the name is the first line, so it sits at
-            // the top instead. Expressed as an offset rather than by swapping which
-            // anchor is set, because clearing an anchor means assigning undefined to it.
+            // Bubble mode hangs the avatar off the balloon's bottom edge, where the tail
+            // used to be. The flat layout opens with the name, so it sits at the top
+            // there instead. Expressed as an offset rather than by swapping which anchor
+            // is set, because clearing an anchor means assigning undefined to it.
             topMargin: appWindow.showBubbles ? Math.max(0, bubble.y + bubble.height - height - 2) : 10
         }
 
@@ -389,8 +417,8 @@ Item {
             drag {
                 target: root
                 axis: Drag.XAxis
-                minimumX: 0
-                maximumX: 90
+                minimumX: -90
+                maximumX: 0
             }
 
             onClicked: listView.goToMessage(model.replyToMessageId)
@@ -555,8 +583,8 @@ Item {
                         drag {
                             target: root
                             axis: Drag.XAxis
-                            minimumX: 0
-                            maximumX: 90
+                            minimumX: -90
+                            maximumX: 0
                         }
 
                         onClicked: messageModel.toggleReaction(root.messageId, modelData.emoji)
@@ -636,18 +664,16 @@ Item {
     QtObject {
         id: internal
 
-        function getBubbleImage() {
-            var imageSrc = "qrc:/images/";
+        // The bubble's fill, in the four states the assets used to carry. Sampled from
+        // them: #f5f5f5 / #939393 light incoming, #0aa7cc / #06657b light outgoing, and
+        // the two dark pairs tools/make_inverted_assets.py derives.
+        function bubbleColor() {
+            if (root.sided)
+                return mouseArea.pressed ? (theme.inverted ? "#0e8aa8" : "#06657b")
+                                         : (theme.inverted ? "#0a6a82" : "#0aa7cc");
 
-            imageSrc += model.isOutgoing ? "outgoing" : "incoming"
-            imageSrc += mouseArea.pressed ? "-pressed" : "-normal"
-
-            // Same file recoloured, from tools/make_inverted_assets.py - the shape and
-            // the 22px nine-slice insets are the light asset's, byte for byte.
-            if (theme.inverted)
-                imageSrc += "-inverted";
-
-            return imageSrc + ".png";
+            return mouseArea.pressed ? (theme.inverted ? "#3d3d3d" : "#939393")
+                                     : (theme.inverted ? "#2b2b2b" : "#f5f5f5");
         }
     }
 }

@@ -1,3 +1,27 @@
+meegram (0.3.8) unstable; urgency=low
+
+  * A dark theme, and a switch for it in Settings. The phone's own styling does most of
+    the work; what had to be decided is the handful of colours the app paints itself -
+    the message balloons, the smaller text under a name, the lines between things. The
+    accent blue is darker here than in the light theme, because at full strength against
+    a black screen it glares.
+  * Several things that were invisible in the dark theme are not any more. The picture
+    that stands in for a missing photo, the arrows on the settings rows and the button
+    that clears a search box are all drawn in black by the phone's own icon set, which on
+    a black screen is nothing at all; each of them has a light version, and the app now
+    asks for that one. The message box was white with white text in it, and the buttons
+    beside it were dark grey on dark grey.
+  * A second switch, "Show bubbles". Turned off, messages have no balloon around them:
+    they sit on the page, still on the side they were on, with the time at the head of
+    each one rather than its foot and a line between one person's run of messages and the
+    next. A run carries one name and one picture between all of its messages instead of
+    one on each.
+  * The balloons are drawn rather than pasted from pictures. The same colours, slightly
+    cleaner edges, and eight image files out of the package.
+  * Swipe a message from right to left to reply to it. It used to be the other way round.
+
+ -- Andrea Faggin <hellothere@andreafagg.in>  Sat, 19 Sep 2026 14:10:00 +0200
+
 meegram (0.3.7) unstable; urgency=low
 
   * Fixes a device the app could never run on at all. The background process checks that

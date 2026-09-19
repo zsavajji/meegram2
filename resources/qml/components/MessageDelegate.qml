@@ -7,6 +7,32 @@ Item {
     height: loader.y + loader.height
     width: listView.width
 
+    // tentative: a hairline between one run of messages and the next, in the flat layout
+    // only - bubbles separate themselves. Drawn at the *top* of the message that opens a
+    // run rather than under the one that closes it, which is the same line in the same
+    // place and costs nothing: opensRun is already there, it depends on the row above, and
+    // a message arriving at the end therefore cannot change it. Asking "does this close a
+    // run" would mean re-reading the previous row on every single arrival.
+    //
+    // Two differences fall out of drawing it at the top, both of which read better: no
+    // dangling line under the newest message, and none above the oldest one loaded.
+    //
+    // Sits in the gap the delegates already leave between messages - no height of its own,
+    // so nothing here touches the scroll maths.
+    Rectangle {
+        anchors {
+            left: parent.left
+            right: parent.right
+            leftMargin: 16
+            rightMargin: 16
+            top: parent.top
+        }
+        height: 1
+        color: appWindow.separatorColor
+        opacity: 0.5
+        visible: !appWindow.showBubbles && !model.isService && index > 0 && model.opensRun
+    }
+
     Loader {
         id: loader
         width: listView.width
@@ -314,8 +340,8 @@ Item {
                                     drag {
                                         target: albumBubble
                                         axis: Drag.XAxis
-                                        minimumX: 0
-                                        maximumX: 90
+                                        minimumX: -90
+                                        maximumX: 0
                                     }
 
                                     onClicked: {

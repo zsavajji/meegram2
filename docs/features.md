@@ -762,19 +762,40 @@ on screen and the accent at full strength against black is most of the glare;
 `Qt.darker(theme.selectionColor, 1.6)` keeps it following whichever accent the device
 theme is set to.
 
-### The dark image assets are derived, not drawn
+### The balloons are drawn, not pasted
 
-The bubble nine-slices and the composer's field background are flat fills — the shape,
-the antialiasing and the nine-slice geometry all live in the alpha channel — so the dark
-variants are the light files with their RGB replaced:
+A message balloon is a `Rectangle` with `radius: 13` and a colour, where it used to be a
+nine-slice PNG per direction per state per theme — eight files, now deleted. The colours
+are the assets' own, sampled out of them before they went:
+
+| | normal | pressed |
+|---|---|---|
+| incoming, light | `#f5f5f5` | `#939393` |
+| outgoing, light | `#0aa7cc` | `#06657b` |
+| incoming, dark | `#2b2b2b` | `#3d3d3d` |
+| outgoing, dark | `#0a6a82` | `#0e8aa8` |
+
+13 is not a guess either: it is the radius those assets were drawn with, measured off the
+corner curve, which reached the left edge 13 rows below the top one.
+
+::: warning A drawn shape has no transparent margin, and the layout was living in one
+The balloon's geometry was `height: parent.height + 2` with `topMargin: 8` on the incoming
+side — a box **larger than its row**, because the asset's own bottom rows were empty
+except for the tail. Swapping in a solid shape filled that margin: incoming balloons
+overlapped the row below by 2px and two outgoing ones met exactly, with no gap at all.
+
+The insets are explicit now — `topMargin: 11`, `height: parent.height - 13`, the same on
+both sides since there is no tail to leave room for — and they put the painted edges where
+the asset's ink used to land. Anything else measured against the old bounding box would
+have the same problem.
+:::
+
+What is left of the derived assets is the composer's field background, still a flat fill
+with a hairline, still generated rather than hand-drawn:
 
 ```bash
 python3 tools/make_inverted_assets.py
 ```
-
-That keeps the 22px insets and the bubble tails byte-identical to the originals instead of
-hoping a second hand-drawn set lines up. `getBubbleImage()` appends `-inverted` the way
-platform theme graphics do; the colours are five constants at the top of the script.
 
 ::: info One platform default had to be overridden with them
 `TextAreaStyle.textColor` is a hardcoded `#191919` and never looks at `theme.inverted` —
@@ -815,7 +836,8 @@ now filled for everyone and a new `showsSender` role carries the old meaning:
 | | bubbles on | bubbles off |
 |---|---|---|
 | your own messages | right, on the accent balloon | right, on the page |
-| avatar + coloured name | `showsSender` — group, incoming, every message | `showsSender`, once per run |
+| coloured sender name | `showsSender` — group, incoming | **every** run opener, 1:1 and your own included |
+| avatar | `showsSender`, every message | `showsSender`, once per run |
 | timestamp | the bottom line, inside the balloon | the **top** row, level with the sender name |
 | delivery tick | washed-out white, green when read | secondary grey, accent when read |
 
@@ -842,9 +864,18 @@ accent for read and the secondary grey for the rest, which is what Telegram's ow
 mode does.
 :::
 
-**Runs.** Five messages in a row from one person carry one avatar and one name between
-them, not five of each. `opensRun` is the model's answer to "is the message above this one
-from somebody else" — or a service message, or under a different day header, or absent.
+**Runs.** Five messages in a row from one person carry one name and one avatar between
+them, not five of each — and the name is the looser of the two rules. The avatar answers
+"several people are talking", so a 1:1 chat gets none in either layout. The **name** is
+what separates one run from the next when there is no balloon doing it, so the flat layout
+puts one at the head of every run, in a 1:1 chat as much as in a group and on your own
+messages as much as anyone's. Without it the two sides run together into a wall.
+
+It stops short of the timestamp rather than running under it (`timeWidth`), which matters
+on your own messages: the name is right-aligned into the same corner the clock sits in.
+
+`opensRun` is the model's answer to "is the message above this one from somebody else" —
+or a service message, or under a different day header, or absent.
 
 That flag is a property of a row's **neighbour**, which is what makes it interesting:
 
@@ -862,10 +893,14 @@ message — a continuation draws no avatar and still has to clear the gutter, or
 message of a run slides left and the column comes apart.
 
 ::: info Bubble mode still draws one avatar per message
-Telegram hangs a single avatar off the **last** message of a run there, because that is
-where the balloon's tail points — the opposite end from the flat layout, so it is a
-different rule rather than the same one applied twice, and it is the one that costs a
-re-flag per arrival. Unchanged until bubble mode is worth revisiting.
+Telegram hangs a single avatar off the **last** message of a run in bubbles, because that
+is where the balloon's tail points — the opposite end from the flat layout, and the one
+that costs a re-flag on every arrival rather than none.
+
+**That reason left with the tail**, now the balloons are drawn shapes. Nothing points at
+the avatar any more, so the flat layout's rule — once per run, off the first message —
+would apply here too, and cost nothing. Not done; it is a visible change to a layout that
+was not what this work set out to alter.
 :::
 
 **"Show bubbles" is the one untranslated string in the app**: Telegram's language pack has
