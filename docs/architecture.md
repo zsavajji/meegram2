@@ -83,9 +83,10 @@ ChatManager
 ## Data flow: one incoming message
 
 1. TDLib worker thread receives `updateChatLastMessage`.
-2. `Client::initialize` emits `result(...)` — **queued**, so it lands on the main
-   thread. Four `handleResult` calls are posted; a fifth queued call disposes of the
-   update object after they drain (`src/Client.cpp`).
+2. The reader thread posts one queued `Client::dispatch` call carrying the object. On
+   the main thread `dispatch` emits `result(...)`, which runs the four `handleResult`
+   slots synchronously in connection order, and frees the object when the last one
+   returns (`src/Client.cpp`).
 3. `StorageManager::handleResult` mutates `m_chats[id]`, then emits `chatUpdated`
    **and** `chatPositionUpdated`.
 4. `ChatModel::handleChatItem` resolves the row via its `chatId → row` index, drops
@@ -345,7 +346,9 @@ started in `Client::initialize`, calling `receive(30.0)` in a loop.
 
 Two things follow, and both are easy to get wrong:
 
-- **`result()` is a queued signal.** Receivers run on the main thread. Safe.
+- **`result()` is emitted on the main thread**, from the `dispatch` call the reader
+  posts once per update. Receivers run synchronously inside it. Safe, and one event per
+  update rather than one per subscriber plus a disposal behind them.
 - **`Client::send` callbacks are *not*.** The completion lambda passed to `send()` is
   invoked directly on the worker thread. Anything touching Qt objects or model state
   from there must marshal back — `ChatModel::requestMoreChats` does this via a queued
@@ -375,11 +378,10 @@ entity wrappers — depends on `Client` only through those two members.
 The practical consequence is that TDLib can be relocated without touching its
 consumers: see `restructuring.md`.
 
-The lifetime detail that makes this work is `Client::disposeObject`. `result()` is
-emitted queued, so the update object must outlive every subscriber's slot; a fifth
-queued call frees it after the four `handleResult` calls drain. Any new subscriber
-inherits that ordering guarantee for free, and any code that stashes the raw
-`td_api::Object *` past its slot violates it.
+The lifetime detail that makes this work is `Client::dispatch`. It owns the update for
+the length of the emit and frees it when the last subscriber returns, so a slot may read
+the object freely and must never keep it. Any new subscriber inherits that guarantee for
+free, and any code that stashes the raw `td_api::Object *` past its slot violates it.
 
 ---
 

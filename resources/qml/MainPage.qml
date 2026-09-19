@@ -61,10 +61,27 @@ Page {
         // that was not the spinner, so an infoComponent swap - the flash fixed above - was
         // recorded as the chat list being up, and a startup figure taken from it could have
         // been either.
-        onLoaded: utils.mark(sourceComponent === busyComponent ? "busy-shown"
-                           : sourceComponent === infoComponent ? "info-shown"
-                           : sourceComponent === unreachableComponent ? "unreachable-shown"
-                                                                     : "chat-layout-loaded")
+        onLoaded: {
+            utils.mark(sourceComponent === busyComponent ? "busy-shown"
+                     : sourceComponent === infoComponent ? "info-shown"
+                     : sourceComponent === unreachableComponent ? "unreachable-shown"
+                                                                : "chat-layout-loaded")
+
+            if (sourceComponent === chatLayoutComponent || sourceComponent === chatTabsLayoutComponent)
+                chatPageWarmup.restart()
+        }
+    }
+
+    // Compiles ChatPage.qml while nothing else is happening. Preloading it *during* the
+    // TDLib wait was measured and reverted (docs/notification-startup.md): QML1 compiles
+    // on the GUI thread, and there it delayed the updates that drive app-initialized. By
+    // this point the chat list is up and the startup replay has mostly drained, so the
+    // ~1 s moves off the first tap and onto idle time. A tap that comes first compiles on
+    // demand, as it always did; a later firing finds the component already there.
+    Timer {
+        id: chatPageWarmup
+        interval: 3000
+        onTriggered: appWindow.ensureChatPageComponent()
     }
 
     Component {

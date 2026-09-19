@@ -30,9 +30,9 @@ QString formatSize(qint64 bytes) noexcept
 
 File::File(td::td_api::object_ptr<td::td_api::file> file, QObject *parent)
     : QObject(parent)
-    , m_file(std::move(file))
 {
-    updateFileProperties();
+    if (file)
+        updateFileProperties(*file);
 }
 
 int File::id() const
@@ -71,7 +71,8 @@ void File::setFile(td::td_api::object_ptr<td::td_api::file> file)
     // how many of them a delegate could see. Their ratio is what this guard bought.
     MEEGRAM_SCOPE("File::setFile");
 
-    m_file = std::move(file);
+    if (!file)
+        return;
 
     // TDLib sends an updateFile for every chunk that lands. Only five fields of it are
     // exposed here and an intermediate progress tick moves none of them - but
@@ -84,26 +85,23 @@ void File::setFile(td::td_api::object_ptr<td::td_api::file> file)
     // they produce is a state transition - starts, completes - so there are no
     // intermediate ticks to filter. Which means the chat list, the case this was
     // written for, is the one place the guard cannot help; the win is on media.
-    if (updateFileProperties())
+    if (updateFileProperties(*file))
     {
         MEEGRAM_SCOPE("File::fileChanged");
         emit fileChanged();
     }
 }
 
-bool File::updateFileProperties()
+bool File::updateFileProperties(const td::td_api::file &file)
 {
-    if (!m_file)
-        return false;
+    bool changed = m_id != file.id_;
 
-    bool changed = m_id != m_file->id_;
-
-    m_id = m_file->id_;
+    m_id = file.id_;
 
     // Total size, not downloaded size - it does not move as chunks land, so putting it
     // in the guard costs at most one extra notification (when an expected size is
     // replaced by the real one) rather than one per packet.
-    const auto size = formatSize(m_file->size_ > 0 ? m_file->size_ : m_file->expected_size_);
+    const auto size = formatSize(file.size_ > 0 ? file.size_ : file.expected_size_);
 
     changed = changed || m_size != size;
 
@@ -111,19 +109,19 @@ bool File::updateFileProperties()
 
     // Same guard as before: a file with no local part leaves the download state
     // standing rather than clearing it.
-    if (!m_file->local_)
+    if (!file.local_)
         return changed;
 
-    const auto localPath = QString::fromStdString(m_file->local_->path_);
+    const auto localPath = QString::fromStdString(file.local_->path_);
 
-    changed = changed || m_localPath != localPath || m_canBeDownloaded != m_file->local_->can_be_downloaded_ ||
-              m_isDownloadingActive != m_file->local_->is_downloading_active_ ||
-              m_isDownloadingCompleted != m_file->local_->is_downloading_completed_;
+    changed = changed || m_localPath != localPath || m_canBeDownloaded != file.local_->can_be_downloaded_ ||
+              m_isDownloadingActive != file.local_->is_downloading_active_ ||
+              m_isDownloadingCompleted != file.local_->is_downloading_completed_;
 
     m_localPath = localPath;
-    m_canBeDownloaded = m_file->local_->can_be_downloaded_;
-    m_isDownloadingActive = m_file->local_->is_downloading_active_;
-    m_isDownloadingCompleted = m_file->local_->is_downloading_completed_;
+    m_canBeDownloaded = file.local_->can_be_downloaded_;
+    m_isDownloadingActive = file.local_->is_downloading_active_;
+    m_isDownloadingCompleted = file.local_->is_downloading_completed_;
 
     return changed;
 }

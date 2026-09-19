@@ -4,36 +4,35 @@
 
 Chat::Chat(td::td_api::object_ptr<td::td_api::chat> chat, QObject *parent)
     : QObject(parent)
-    , m_chat(std::move(chat))
-    , m_id(m_chat->id_)
-    , m_title(QString::fromStdString(m_chat->title_))
-    , m_isMarkedAsUnread(m_chat->is_marked_as_unread_)
-    , m_unreadCount(m_chat->unread_count_)
-    , m_lastReadInboxMessageId(m_chat->last_read_inbox_message_id_)
-    , m_lastReadOutboxMessageId(m_chat->last_read_outbox_message_id_)
-    , m_unreadMentionCount(m_chat->unread_mention_count_)
-    , m_muteFor(m_chat->notification_settings_ ? m_chat->notification_settings_->mute_for_ : 0)
+    , m_id(chat->id_)
+    , m_title(QString::fromStdString(chat->title_))
+    , m_isMarkedAsUnread(chat->is_marked_as_unread_)
+    , m_unreadCount(chat->unread_count_)
+    , m_lastReadInboxMessageId(chat->last_read_inbox_message_id_)
+    , m_lastReadOutboxMessageId(chat->last_read_outbox_message_id_)
+    , m_unreadMentionCount(chat->unread_mention_count_)
+    , m_muteFor(chat->notification_settings_ ? chat->notification_settings_->mute_for_ : 0)
 {
-    if (auto &photo = m_chat->photo_; photo)
+    if (auto &photo = chat->photo_; photo)
     {
         setPhoto(std::move(photo));
     }
 
-    if (m_chat->last_message_)
+    if (chat->last_message_)
     {
-        setLastMessage(std::move(m_chat->last_message_));
+        setLastMessage(std::move(chat->last_message_));
     }
 
     // updateNewChat already carries the chat's positions. Without this the chat
     // starts with an empty position list, so every list model filters it out until
     // some later update happens to call setPositions - which is why only pinned
     // chats appeared.
-    if (!m_chat->positions_.empty())
+    if (!chat->positions_.empty())
     {
-        setPositions(std::move(m_chat->positions_));
+        setPositions(std::move(chat->positions_));
     }
 
-    setType(std::move(m_chat->type_));
+    setType(std::move(chat->type_));
 }
 
 qlonglong Chat::id() const noexcept

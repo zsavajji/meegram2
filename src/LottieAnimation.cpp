@@ -163,11 +163,8 @@ void LottieAnimation::stop()
 
 void LottieAnimation::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *)
 {
-    if (!m_cachedPixmap.isNull())
-    {
-        // If frame is cached, draw the cached pixmap
-        painter->drawPixmap(0, 0, m_cachedPixmap);
-    }
+    if (!m_frame.isNull())
+        painter->drawImage(0, 0, m_frame);
 }
 
 void LottieAnimation::componentComplete()
@@ -186,7 +183,6 @@ void LottieAnimation::updateFrame() noexcept
         {
             m_currentFrame = 0;
             ++m_loopIteration;
-            m_cachedPixmap = {};  // Clear cache for the next loop iteration
         }
         else
         {
@@ -199,12 +195,22 @@ void LottieAnimation::updateFrame() noexcept
     // Render the current frame and update cache
     if (m_currentFrame < m_frameCount)
     {
-        QImage image(QSize(width(), height()), QImage::Format_ARGB32_Premultiplied);
-        auto surface = rlottie::Surface(reinterpret_cast<uint32_t *>(image.bits()), image.width(), image.height(), image.bytesPerLine());
-        m_animation->renderSync(m_currentFrame, std::move(surface));
-        m_cachedPixmap = QPixmap::fromImage(std::move(image));
+        // Reused across frames: a 180px sticker is ~130 KB a frame, and allocating that
+        // and converting it to a QPixmap thirty times a second was most of what playing
+        // one cost. bits() bumps the image's cache key, so the paint engines' texture
+        // caches see a new frame rather than the last one.
+        const QSize size(width(), height());
 
-        update();  // Request a repaint
+        if (!size.isEmpty())
+        {
+            if (m_frame.size() != size)
+                m_frame = QImage(size, QImage::Format_ARGB32_Premultiplied);
+
+            auto surface = rlottie::Surface(reinterpret_cast<uint32_t *>(m_frame.bits()), m_frame.width(), m_frame.height(), m_frame.bytesPerLine());
+            m_animation->renderSync(m_currentFrame, std::move(surface));
+
+            update();
+        }
     }
 
     ++m_currentFrame;

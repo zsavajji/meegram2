@@ -88,28 +88,30 @@ void Client::initialize()
             }
             else
             {
-                // Ownership note: result() is emitted from this worker thread to
-                // receivers that all live on the main thread, so every connection is
-                // queued. Releasing the pointer here used to leak the update outright -
-                // no receiver can delete it, because the others still hold it.
-                //
-                // Qt appends queued invocations to the receiving thread's event queue in
-                // order, so a disposal posted after the emit is processed after all of
-                // result()'s slot invocations have run. The handlers move the fields they
-                // need out of the update and never retain the object itself, so freeing
-                // the shell at that point is safe.
-                auto *object = response.object.release();
-
-                emit result(object);
-
-                QMetaObject::invokeMethod(this, "disposeObject", Qt::QueuedConnection, Q_ARG(void *, object));
+                // Handed to the GUI thread whole. Emitting result() from here would cross
+                // the thread boundary once per subscriber - four posted invocations - and
+                // need a fifth queued call to free the object after they drained. One
+                // posted call does the emit over there and frees it on the way out; see
+                // dispatch().
+                QMetaObject::invokeMethod(this, "dispatch", Qt::QueuedConnection, Q_ARG(void *, response.object.release()));
             }
         }
     });
 }
 
-void Client::disposeObject(void *object)
+void Client::dispatch(void *pointer)
 {
-    // td::td_api::Object derives from td::TlObject, which has a virtual destructor.
-    delete static_cast<td::td_api::Object *>(object);
+    // Owned for the length of this call and no longer. Every receiver of result() lives on
+    // this thread, so the emit below runs them all synchronously and in connection order;
+    // when the last one returns, nothing may still be holding the object. Handlers move the
+    // fields they need out of the update and never keep the shell, which is what makes that
+    // true. td::td_api::Object derives from td::TlObject, which has a virtual destructor.
+    //
+    // One queued event per update rather than one per subscriber plus a disposal behind
+    // them: emitting across the thread boundary turned into four posted invocations and a
+    // fifth queued call to free the object after they drained. Five event-loop trips per
+    // update is what a 2000-update startup replay spent its GUI-thread time on.
+    const std::unique_ptr<td::td_api::Object> object(static_cast<td::td_api::Object *>(pointer));
+
+    emit result(object.get());
 }

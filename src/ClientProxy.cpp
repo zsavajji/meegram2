@@ -3,9 +3,11 @@
 // Same public surface as src/Client.cpp, and deliberately the same *semantics*, including
 // two that are load-bearing and undocumented at every call site:
 //
-//   - result() is emitted queued and the disposal is queued behind it. Four subscribers
-//     hold the raw pointer and none may delete it. The argument is spelled out in
-//     Client.cpp and is reproduced here because it survives the process split unchanged.
+//   - result() is emitted on the GUI thread from dispatch(), one posted call per update,
+//     and the object is freed when the last subscriber returns. Subscribers hold the raw
+//     pointer for the length of their slot and none may delete it. The argument is
+//     spelled out in Client.cpp and is reproduced here because it survives the process
+//     split unchanged.
 //
 //   - send() callbacks run on the reader thread, exactly as they do today
 //     (docs/architecture.md, "Threading"). Four call sites touch model state from there -
@@ -369,6 +371,12 @@ void Client::initialize()
         std::string buffered;
         char buffer[8192];
 
+        // How far into `buffered` the newline search has already been. A line that does
+        // not fit in one read - the language pack is 1.8 MB on one line - used to be
+        // searched from its first byte again on every 8 KB that arrived: a scan over the
+        // whole partial line per read, quadratic in the line's length.
+        size_t scanned = 0;
+
         while (!token.stop_requested())
         {
             const ssize_t n = ::read(m_socket, buffer, sizeof(buffer));
@@ -386,14 +394,27 @@ void Client::initialize()
 
             buffered.append(buffer, static_cast<size_t>(n));
 
-            for (size_t newline; (newline = buffered.find('\n')) != std::string::npos;)
-            {
-                std::string line = buffered.substr(0, newline);
-                buffered.erase(0, newline + 1);
+            // Consumed up to here. Lines are cut out in place and the buffer is trimmed
+            // once per read rather than once per line.
+            size_t consumed = 0;
 
-                if (!line.empty())
+            for (size_t newline; (newline = buffered.find('\n', scanned)) != std::string::npos;)
+            {
+                if (newline > consumed)
+                {
+                    std::string line = buffered.substr(consumed, newline - consumed);
                     handleLine(line);
+                }
+
+                consumed = newline + 1;
+                scanned = consumed;
             }
+
+            buffered.erase(0, consumed);
+
+            // Whatever is left has been searched and holds no newline, so the next read
+            // only has to look at what it appends.
+            scanned = buffered.size();
         }
 
         // A stop that was asked for is this process closing its own socket - the destructor
@@ -490,27 +511,16 @@ void Client::handleLine(std::string &line)
         return;
     }
 
-    // Ownership note, carried over from Client.cpp verbatim because the reasoning is
-    // unchanged: result() is emitted from this worker thread to receivers that all live
-    // on the main thread, so every connection is queued. Releasing the pointer here would
-    // leak the update outright - no receiver can delete it, because the others still hold
-    // it.
-    //
-    // Qt appends queued invocations to the receiving thread's event queue in order, so a
-    // disposal posted after the emit is processed after all of result()'s slot
-    // invocations have run. The handlers move the fields they need out of the update and
-    // never retain the object itself, so freeing the shell at that point is safe.
-    auto *raw = object.release();
-
-    emit result(raw);
-
-    QMetaObject::invokeMethod(this, "disposeObject", Qt::QueuedConnection, Q_ARG(void *, raw));
+    // Handed to the GUI thread whole, same as Client.cpp and for the same reason: one
+    // posted call per update, the emit and the free both over there. See dispatch().
+    QMetaObject::invokeMethod(this, "dispatch", Qt::QueuedConnection, Q_ARG(void *, object.release()));
 }
 
-void Client::disposeObject(void *object)
+void Client::dispatch(void *pointer)
 {
-    // td::td_api::Object derives from td::TlObject, which has a virtual destructor.
-    // Duplicated from Client.cpp: three lines, against a second translation unit and a
-    // shared header for the two implementations to agree on.
-    delete static_cast<td::td_api::Object *>(object);
+    // Duplicated from Client.cpp rather than shared: a few lines, against a third
+    // translation unit for the two implementations to agree on. The reasoning is there.
+    const std::unique_ptr<td::td_api::Object> object(static_cast<td::td_api::Object *>(pointer));
+
+    emit result(object.get());
 }

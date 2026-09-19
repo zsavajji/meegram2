@@ -81,8 +81,10 @@ signals:
 private:
     void setType(td::td_api::object_ptr<td::td_api::ChatType> type) noexcept;
 
-    td::td_api::object_ptr<td::td_api::chat> m_chat;
-
+    // No td_api::chat is kept. Everything this exposes is copied or moved out in the
+    // constructor, and the shell that used to stay behind - permissions, draft, video
+    // chat, background, a dozen strings - was a few hundred bytes per chat for nothing,
+    // across every chat TDLib has ever mentioned.
     qlonglong m_id;
     Type m_type;
     QString m_title;

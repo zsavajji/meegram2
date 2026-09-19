@@ -108,6 +108,24 @@ PageStackWindow {
     // openChat(); the flush is onChatManagerChanged below.
     property string pendingChatId: ""
 
+    // ChatPage.qml is the largest file in the scene and is not compiled until the first
+    // chat opens - about a second on device (docs/notification-startup.md), paid inside
+    // the tap. Compiled once and kept: the engine caches compiled types per URL, but
+    // holding the Component makes that a guarantee rather than a cache policy, and gives
+    // MainPage something to warm at idle once the chat list is up. A tap that lands
+    // before the warm-up compiles on demand, exactly as before.
+    //
+    // variant with a falsy test, not `=== null`: a variant initialised to null reads back
+    // as undefined (docs/troubleshooting.md).
+    property variant chatPageComponent: null
+
+    function ensureChatPageComponent() {
+        if (!chatPageComponent)
+            chatPageComponent = Qt.createComponent("ChatPage.qml");
+
+        return chatPageComponent;
+    }
+
     initialPage: Component { MainPage {} }
 
     onOrientationChangeFinished: showStatusBar = isPortrait
@@ -447,19 +465,23 @@ PageStackWindow {
         // C++ side opening the chat and kicking off the first history fetch.
         utils.mark("chat-selected")
 
-        var component = Qt.createComponent("ChatPage.qml");
+        var component = ensureChatPageComponent();
 
         if (component.status !== Component.Ready) {
             console.debug("Error loading component:", component.errorString());
             // Give the context back rather than leaving one on the stack for a page that
             // will never exist - it holds an open chat and a live message model.
             manager.popContext(chatContext.token);
+            // And forget the component, so the next open compiles afresh rather than
+            // handing back the same error for the life of the process.
+            chatPageComponent = null;
             return;
         }
 
         // Brackets the compile of ChatPage.qml, which is the largest file in the scene
-        // and is not compiled until the first chat is opened - so a cold start pays it
-        // here rather than in setSource.
+        // and is not compiled until the first chat is opened - unless MainPage's idle
+        // warm-up got there first, in which case this delta is the cache hit. A cold
+        // start with a tap pays it here rather than in setSource.
         utils.mark("chatpage-compiled")
 
         pageStack.push(component, { chatContext: chatContext });

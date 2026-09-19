@@ -29,7 +29,11 @@ Item {
 
         Rectangle {
             anchors.fill: parent
-            color: root.isSelected ? Settings.activeColor : UI.COLOR_INVERTED_SECONDARY_FOREGROUND
+            // "white" is what this has always painted: it named Settings.activeColor, which
+            // no Settings has, so QML1 warned once per highlighted row and left the
+            // Rectangle at its default - and every warning is a synchronous write to the
+            // log file. theme.selectionColor is the platform's pick if the look is revisited.
+            color: root.isSelected ? "white" : UI.COLOR_INVERTED_SECONDARY_FOREGROUND
             opacity: 0.5
         }
     }

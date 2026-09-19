@@ -3,6 +3,7 @@
 #include <rlottie.h>
 
 #include <QDeclarativeItem>
+#include <QImage>
 #include <QTimer>
 
 class LottieAnimation : public QDeclarativeItem
@@ -63,7 +64,9 @@ private:
 
     QUrl m_source;
     QTimer m_frameTimer;
-    QPixmap m_cachedPixmap;
+    // Rendered into in place, frame after frame: one buffer for the life of the item
+    // rather than a fresh QImage and a QPixmap conversion per frame at 30 fps.
+    QImage m_frame;
 
     std::unique_ptr<rlottie::Animation> m_animation;
 };

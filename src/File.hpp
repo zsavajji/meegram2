@@ -44,7 +44,7 @@ signals:
 private:
     // True when one of the exposed properties actually moved, which is what decides
     // whether fileChanged goes out.
-    bool updateFileProperties();
+    bool updateFileProperties(const td::td_api::file &file);
 
     // Initialised, because a file that arrives with no local part leaves these
     // untouched and setFile now reads them back to compare.
@@ -58,7 +58,9 @@ private:
     bool m_isDownloadingActive{};
     bool m_isDownloadingCompleted{};
 
-    td::td_api::object_ptr<td::td_api::file> m_file;
+    // No td_api::file is kept: the five fields above are copied out, and the shell - two
+    // remote id strings and the local path again - is freed with the update that carried
+    // it. A synced account holds a few thousand of these.
 };
 
 Q_DECLARE_METATYPE(File *);

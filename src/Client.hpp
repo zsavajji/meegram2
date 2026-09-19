@@ -60,18 +60,17 @@ public:
     // through here, so every subscriber handles it on its normal path.
     //
     // Defined here rather than twice: the body is identical for both transports, and it
-    // is the same ownership discipline a real update gets - queued emit, disposal queued
-    // behind it. See the argument in Client::initialize.
+    // is the same delivery a real update gets - one queued call to dispatch(), which emits
+    // on the GUI thread and frees the object after the last subscriber returns.
     void injectUpdate(td::td_api::object_ptr<td::td_api::Object> object)
     {
-        auto *raw = object.release();
-
-        emit result(raw);
-
-        QMetaObject::invokeMethod(this, "disposeObject", Qt::QueuedConnection, Q_ARG(void *, raw));
+        QMetaObject::invokeMethod(this, "dispatch", Qt::QueuedConnection, Q_ARG(void *, object.release()));
     }
 
 signals:
+    // One TDLib update. Emitted on the GUI thread from dispatch(), so every connection to
+    // it is direct: the receivers run synchronously, in connection order, and the object is
+    // freed when the last of them returns. Move what is needed out of it; never keep it.
     void result(td::td_api::Object *object);
 
     // meegramd went away under a running app: the reader lost the socket without this
@@ -89,9 +88,10 @@ signals:
     void disconnected();
 
 private slots:
-    // Frees an update after every queued result() slot invocation has run. See the
-    // ordering argument in Client::initialize().
-    void disposeObject(void *object);
+    // Delivers one update to every subscriber and frees it. Posted from the reader thread:
+    // one event per update, where a cross-thread emit cost one per subscriber plus a
+    // disposal queued behind them. Takes ownership of the raw td_api::Object.
+    void dispatch(void *object);
 
 private:
     void initialize();

@@ -98,7 +98,19 @@ struct Connection
     // sync produces exactly the burst. So writes here are non-blocking and the remainder
     // lands in this queue for the poll loop to finish on POLLOUT.
     std::string outgoing;
+
+    // How much of `outgoing` the socket has already taken. Advanced rather than erased on
+    // every write: erasing the front of a string moves everything behind it, and with a
+    // 5 MB replay draining in socket-buffer-sized pieces that was one memmove of the whole
+    // backlog per write. Reclaimed when the queue drains, or when the sent part is more
+    // than half of it.
+    size_t sent = 0;
 };
+
+size_t pendingBytes(const Connection &connection)
+{
+    return connection.outgoing.size() - connection.sent;
+}
 
 // Backpressure has to end somewhere: a client that never reads would otherwise grow this
 // queue until the daemon is OOM-killed, and on Harmattan that means the low-memory killer
@@ -221,15 +233,15 @@ std::vector<Connection>::iterator closeConnection(std::vector<Connection>::itera
 // the connection is dead and should be dropped. Callers must hold connectionsMutex.
 bool flushOutgoing(Connection &connection)
 {
-    while (!connection.outgoing.empty())
+    while (connection.sent < connection.outgoing.size())
     {
         // MSG_NOSIGNAL: a UI that exits between the poll and this write would otherwise
         // deliver SIGPIPE and kill the daemon - which is precisely the process that is
         // supposed to outlive it.
-        const ssize_t n = ::send(connection.fd, connection.outgoing.data(), connection.outgoing.size(), MSG_NOSIGNAL);
+        const ssize_t n = ::send(connection.fd, connection.outgoing.data() + connection.sent, pendingBytes(connection), MSG_NOSIGNAL);
         if (n > 0)
         {
-            connection.outgoing.erase(0, static_cast<size_t>(n));
+            connection.sent += static_cast<size_t>(n);
             continue;
         }
         if (n < 0 && errno == EINTR)
@@ -237,10 +249,24 @@ bool flushOutgoing(Connection &connection)
 
         // Socket full. The poll loop finishes this on POLLOUT; the connection is fine.
         if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+        {
+            // Reclaim the sent prefix once it dominates, so the queue stays compact without
+            // paying a memmove on every write.
+            if (connection.sent > connection.outgoing.size() / 2)
+            {
+                connection.outgoing.erase(0, connection.sent);
+                connection.sent = 0;
+            }
+
             return true;
+        }
 
         return false;
     }
+
+    // Drained. clear() keeps the capacity, so the next burst does not grow it back.
+    connection.outgoing.clear();
+    connection.sent = 0;
 
     return true;
 }
@@ -257,9 +283,9 @@ void broadcast(const char *line, size_t length)
             it->outgoing.append(line, length);
             it->outgoing.push_back('\n');
 
-            if (it->outgoing.size() > MaxOutgoingBytes)
+            if (pendingBytes(*it) > MaxOutgoingBytes)
             {
-                std::fprintf(stderr, "meegramd: dropping a client %zu bytes behind\n", it->outgoing.size());
+                std::fprintf(stderr, "meegramd: dropping a client %zu bytes behind\n", pendingBytes(*it));
                 it = closeConnection(it);
                 continue;
             }
@@ -270,7 +296,7 @@ void broadcast(const char *line, size_t length)
                 continue;
             }
 
-            queued = queued || !it->outgoing.empty();
+            queued = queued || pendingBytes(*it) != 0;
             ++it;
         }
     }
@@ -935,7 +961,7 @@ int main(int argc, char *argv[])
             {
                 // POLLOUT only while there is something queued: asking for it
                 // unconditionally would make poll() return immediately, every time.
-                const short events = static_cast<short>(POLLIN | (connection.outgoing.empty() ? 0 : POLLOUT));
+                const short events = static_cast<short>(POLLIN | (pendingBytes(connection) == 0 ? 0 : POLLOUT));
                 fds.push_back(pollfd{connection.fd, events, 0});
             }
         }

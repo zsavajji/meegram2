@@ -664,7 +664,7 @@ void MessageModel::requestHistory(qlonglong fromMessageId, int offset, int limit
         // this model's own containers.
         //
         // Same hop ChatModel::handleChatsLoaded makes, and the same void* handover
-        // Client::disposeObject uses: a queued Q_ARG needs a registered metatype, and
+        // Client::dispatch uses: a queued Q_ARG needs a registered metatype, and
         // td_api::object_ptr is move-only.
         //
         // ponytail: if the model dies between the check above and the queued call landing,

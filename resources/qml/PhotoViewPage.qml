@@ -99,7 +99,9 @@ Page {
                 // Interpolating while a flick is in flight costs frames the SGX530 does
                 // not have; the still image is what you actually look at.
                 smooth: !flick.moving
-                source: root.source
+                // Dropped once the real photo has decoded, not merely hidden: a hidden
+                // Image keeps its pixmap, and this one is a screen's worth of it.
+                source: fullImage.visible ? "" : root.source
                 // Nothing but the backdrop once the real photo has decoded. Two
                 // full-screen images drawn on top of each other is overdraw this GPU
                 // notices, and they cover exactly the same rectangle.
@@ -114,9 +116,13 @@ Page {
                 asynchronous: true
                 smooth: !flick.moving
 
-                // ponytail: decoded at its natural size, which is the point - but a 1280px
-                // photo is about 6MB as a pixmap and a 2560px one four times that. If a
-                // huge one ever kills the app, sourceSize.width is the clamp.
+                // Decoded no wider than the zoom can show. maxZoom is 4x over a screen the
+                // photo already covers, so past four times the short side of the screen
+                // there is no detail a pinch can reach - and a 2560px original decoded
+                // whole is ~26 MB of pixmap in a process that lives at ~80. Width alone:
+                // with both set, QML1 stretches to fit rather than keeping the aspect.
+                // sourceSize never upscales, so a smaller photo pays nothing.
+                sourceSize.width: Math.min(flick.width, flick.height) * pinchArea.maxZoom
                 source: root.fullSizeReady ? "file://" + root.original.localPath : ""
 
                 // Shown on decode, not on assignment: swapping the moment the file lands

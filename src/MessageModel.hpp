@@ -206,7 +206,7 @@ private slots:
 
     // The getChatHistory reply, handed over from the TDLib worker thread. Takes ownership
     // of the raw pointer; void* because a queued Q_ARG needs a registered metatype and
-    // td_api::object_ptr is move-only, the same handover Client::disposeObject uses.
+    // td_api::object_ptr is move-only, the same handover Client::dispatch uses.
     void handleHistoryResponse(void *responseObject, bool fetchPrevious) noexcept;
 
     // The getMessageAddedReactions reply, handed over from the TDLib worker thread on the

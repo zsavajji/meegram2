@@ -19,6 +19,5 @@ ListItem {
         elide: Text.ElideRight
         font.pixelSize: 26
         font.bold: true
-        text: display
     }
 }

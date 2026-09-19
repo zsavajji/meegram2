@@ -46,12 +46,11 @@ QString emojiTag(const QString &filename, int size) noexcept
 
 struct EmojiEntry
 {
-    // Formatted once at build time for the size nearly every call wants - titles,
-    // previews, message bodies. That prebuild is the whole point of this table.
-    QString tag;
-
-    // For the rare call that asks for another size. Points into Emoji::emojis(),
-    // a static array, so it stays valid for the life of the process.
+    // Points into Emoji::emojis(), a static array, so it stays valid for the life of the
+    // process. The <img> tag is built at the point of use: it used to be prebuilt here
+    // for the size nearly every call wants, which was 3773 QStrings of ~50 characters -
+    // about half a megabyte resident - for a table whose callers memoise per text
+    // anyway, so the format ran once per distinct string either way.
     const Emoji *emoji;
 };
 
@@ -69,8 +68,7 @@ struct EmojiTable
 };
 
 // Built on first use rather than during static initialisation. This is ~3773
-// QString allocations plus the img-tag formatting; it does not belong on the
-// path that runs before main().
+// QString allocations; it does not belong on the path that runs before main().
 const EmojiTable &emojiTable()
 {
     static const EmojiTable table = [] {
@@ -90,7 +88,7 @@ const EmojiTable &emojiTable()
             lengths.insert(unicode.size());
             t.canStart[unicode.at(0).unicode() >> 8] = true;
 
-            t.map.emplace(std::move(unicode), EmojiEntry{emojiTag(emoji.filename(), EmojiSize24), &emoji});
+            t.map.emplace(std::move(unicode), EmojiEntry{&emoji});
         }
 
         t.keyLengthsDesc.assign(lengths.rbegin(), lengths.rend());
@@ -380,7 +378,7 @@ QString Utils::replaceEmojiSized(const QString &text, int size) noexcept
         if (entry)
         {
             result.append(text.midRef(lastPos, i - lastPos));
-            result.append(size == EmojiSize24 ? entry->tag : emojiTag(entry->emoji->filename(), size));
+            result.append(emojiTag(entry->emoji->filename(), size));
 
             i += length;
             lastPos = i;
@@ -492,6 +490,15 @@ QVariantList Utils::emojiCategory(int category) noexcept
 {
     MEEGRAM_SCOPE("Utils::emojiCategory");
 
+    // Built once per category. Every tab switch in the picker asked for this again - a
+    // walk over all 3773 entries with a resource lookup per candidate - for a list that
+    // cannot change while the process runs. GUI thread only, like every Q_INVOKABLE
+    // here, so no lock.
+    static QHash<int, QVariantList> cache;
+
+    if (const auto it = cache.constFind(category); it != cache.constEnd())
+        return it.value();
+
     QVariantList result;
 
     for (const Emoji &emoji : Emoji::emojis())
@@ -518,6 +525,8 @@ QVariantList Utils::emojiCategory(int category) noexcept
 
         result.append(entry);
     }
+
+    cache.insert(category, result);
 
     return result;
 }
