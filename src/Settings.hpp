@@ -9,6 +9,7 @@ class Settings : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(bool invertedTheme READ invertedTheme WRITE setInvertedTheme NOTIFY invertedThemeChanged)
+    Q_PROPERTY(bool showBubbles READ showBubbles WRITE setShowBubbles NOTIFY showBubblesChanged)
 
     Q_PROPERTY(QString languagePackId READ languagePackId WRITE setLanguagePackId NOTIFY languagePackIdChanged)
     Q_PROPERTY(QString languagePluralId READ languagePluralId WRITE setLanguagePluralId NOTIFY languagePluralIdChanged)
@@ -18,6 +19,12 @@ public:
 
     bool invertedTheme() const;
     void setInvertedTheme(bool value);
+
+    // Whether messages are drawn in balloons, sided left and right. Off gives the flat
+    // layout: every message full width on the page, told apart by an avatar and a
+    // coloured name rather than by which side it is on.
+    bool showBubbles() const;
+    void setShowBubbles(bool value);
 
     QString languagePackId() const;
     void setLanguagePackId(const QString &value);
@@ -42,6 +49,7 @@ public:
 
 signals:
     void invertedThemeChanged();
+    void showBubblesChanged();
 
     void languagePackIdChanged();
     void languagePluralIdChanged();
@@ -50,6 +58,7 @@ private:
     QSettings *m_settings{};
 
     bool m_invertedTheme;
+    bool m_showBubbles;
     bool m_wasAuthorized;
 
     qint64 m_languagePackFetchedAt;

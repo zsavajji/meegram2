@@ -13,9 +13,10 @@ Page {
         title: appWindow.tr("SETTINGS")
     }
 
-    // Two rows, so no ListView and no ScrollDecorator: they cannot fill a portrait screen
-    // between them, and a model of heterogeneous rows needs a delegate that switches on
-    // the index - which is how this page grew a switch statement for one entry.
+    // Three rows, so no ListView and no ScrollDecorator: they cannot fill a portrait
+    // screen between them, and a model of heterogeneous rows needs a delegate that
+    // switches on the index - which is how this page grew a switch statement for one
+    // entry.
     Column {
         anchors {
             left: parent.left
@@ -58,6 +59,40 @@ Page {
                     verticalCenter: parent.verticalCenter
                 }
                 checked: settings.invertedTheme
+            }
+        }
+
+        // Bubbles, or the flat layout - see MessageBubble. Same shape as the row above:
+        // it writes the setting, and everything that draws a message binds to it.
+        ListItem {
+            onClicked: settings.showBubbles = !settings.showBubbles
+
+            Label {
+                anchors {
+                    left: parent.left
+                    leftMargin: 12
+                    right: bubblesSwitch.left
+                    rightMargin: 12
+                    verticalCenter: parent.verticalCenter
+                }
+                elide: Text.ElideRight
+                font.pixelSize: 26
+                font.bold: true
+                // Not qsTr: Telegram's language pack has no key for this - it is not a
+                // setting Telegram has - and an absent key renders as the key itself.
+                // English until there is somewhere to translate it.
+                text: "Show bubbles"
+            }
+
+            Switch {
+                id: bubblesSwitch
+
+                anchors {
+                    right: parent.right
+                    rightMargin: 16
+                    verticalCenter: parent.verticalCenter
+                }
+                checked: settings.showBubbles
             }
         }
     }

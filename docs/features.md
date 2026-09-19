@@ -17,7 +17,7 @@ Read this alongside [Architecture](/architecture) for how the pieces connect, an
 | Messages | text with entities, emoji picker, big emoji, replies, edit, copy, delete for me / for everyone, read receipts, delivery ticks, reactions | forward, pinned messages, custom-emoji and paid reactions |
 | Media | photo receive + send with pinch-zoom view and save, animated and static stickers, voice notes recorded and played in-app, documents sent and received, video and GIF bubbles that hand off to the platform player | inline video playback, location, contacts, polls |
 | Presence | typing indicators, online status, connection state | sending your own typing action |
-| System | notifications with avatar, tap-to-open, D-Bus activation, resident daemon | — |
+| System | notifications with avatar, tap-to-open, D-Bus activation, resident daemon, dark theme | — |
 
 ::: warning "Works" is not "plays"
 Video and GIF messages have a **bubble**, not a player — the still, a badge, and a
@@ -616,44 +616,57 @@ header could sit on a stale "Connecting" with nothing to indicate why.
 
 ## Notifications
 
-One notification per chat, updated in place as more messages arrive, withdrawn when you
-open the chat or read it elsewhere. That is what the platform's grouping expects, and
-what a phone wants over one banner per message.
+One banner per chat, updated in place as more messages arrive, withdrawn when you open
+the chat or read it elsewhere. That is what the platform's grouping expects, and what a
+phone wants over one banner per message.
 
-**Transport is D-Bus**, not libmeegotouch: QtDBus is already a dependency and
-`MNotification` is a thin wrapper over the same calls. Service
+**`meegramd` posts them**, not the app (`src/daemon/Notifier.cpp`). That is the whole
+point of the split: the daemon holds the Telegram connection, so a message raises a
+banner with no window open, and tapping it starts the app. The app builds
+`NotificationEndpoint` instead — one D-Bus method for opening a chat, and no notification
+state at all.
+
+::: info The in-process notifier still exists
+With `-DMEEGRAM_JSON_TRANSPORT=OFF` the app composes and posts its own through
+`NotificationManager`, which is what it always did and which only works for as long as
+the app is open. The two are alternatives, never both — they would race to post the same
+banner. Everything below describes the daemon, which is the device build.
+:::
+
+**TDLib decides what is worth showing.** The daemon drives off `updateNotificationGroup`
+and `updateNotification` rather than off chat updates, so the chat's notification
+settings and the scope defaults, ignoring outgoing and service messages, not renotifying
+a message already read on another device, and withdrawing when it is read anywhere are
+all TDLib's own. Nothing had ever switched that subsystem on — `notification_group_count_max`
+defaults to `0`, meaning "this client does not show notifications" — so the update stream
+it feeds on did not exist to be found until the daemon set the option.
+
+That is why this is thinner than the version it replaces rather than a port of it.
+Reimplementing those rules daemon-side would have meant a copy of `StorageManager` in a
+process that deliberately has no model.
+
+**What the daemon keeps of its own** is three maps, filled from updates it was relaying
+anyway: chat titles, user names, and chat photo paths. No requests to correlate, no
+responses to wait on. The one suppression it adds is the chat you are looking at: a UI
+relays `openChat` and `closeChat` through the same socket, and `ChatManager` reopens and
+recloses the chat around window activation, so "open" here means open *and* in front.
+
+**Transport is D-Bus through libdbus**, not QtDBus — QtCore in this process would cost
+more than the 24 MiB resident set that is the entire argument for it. Service
 `com.meego.core.MNotificationManager`, path `/notificationmanager`, event type
-`x-nokia.messaging.im`.
+`x-nokia.messaging.im`. Group id and count are both `0`: TDLib has already grouped by
+chat, so the platform's own grouping is not used.
 
-**Suppression** is a chain of one-liners: not outgoing, not a service message, not
-muted, not the chat on screen *and* in the foreground, not already read, and **not older
-than app start** — without that last one, launching after a busy night raises one banner
-per chat.
-
-"On screen" needs the foreground test because this client is left running so
-notifications keep arriving, which means a chat can be open for days while the app sits
-in the switcher. `isVisible()` is no use — Harmattan renders a live thumbnail of a
-minimised app, so it stays visible; `isActiveWindow()` is what tracks attention. A banner
-raised while minimised for the chat you have open is withdrawn by the "already read"
-branch as soon as you return and the messages are marked read.
-
-The **unusual** gates log why they stayed quiet — muted, older than app start, no
-notification user id — because "no banner" on its own carries no information and cost
-several builds of guessing. The steady-state ones are deliberately silent: `chatUpdated`
-fires for read state, positions, settings and mention counts, so most calls land on the
-dedupe or on "you are looking at this chat", and logging those buries everything else.
-
-Order matters in one place: the already-read check runs **before** the dedupe, or a
-message read elsewhere after a banner had already gone out would never have it taken down.
-
-`publish()` treats a returned notification id of `0` as a rejection as well as an outright
-D-Bus error, so a daemon that accepts the call and quietly declines to post it still
-triggers the retry-without-image.
+A banner already on screen for that chat is **updated**, not replaced. If the update is
+refused — you swiped it away, or the platform daemon restarted — it posts a new one
+rather than silently dropping the message. A returned notification id of `0` counts as a
+refusal as well as an outright D-Bus error, because "accepted, nothing appeared" is a real
+failure mode here.
 
 **The avatar** is a **plain absolute path**, not a `file://` URL — `MNotification::setImage()`
 takes "a path to an image file or an icon id", and a URL draws the broken-image red
-square. It is only handed over once `isDownloadingCompleted()`, because TDLib fills in the
-local path when a download *starts* and a half-written file draws the same square.
+square. The daemon only records a path once `is_downloading_completed` is set, because
+TDLib fills it in when a download *starts* and a half-written file draws the same square.
 
 ::: warning Two symptoms that overlapped
 This field was switched to `file://` once, on the reading that a bare path was refused and
@@ -662,25 +675,138 @@ took the whole banner with it. That was wrong. The missing banners were
 notification daemon was up, disabled notifications for the whole session no matter what
 this field contained. The image got the blame for a bug it had nothing to do with, and the
 red square went unfixed for three builds as a result.
+
+The daemon's `notificationUserId()` carries the rule that came out of it: latch on
+success only, and log the zero.
 :::
 
-When no avatar has been downloaded yet the notification asks for one, so the next one from
-that chat has it — and `publish()` retries without the image on any rejection, because
-decoration must never cost you the message.
+When no avatar has been downloaded yet the banner goes out without one and a
+`downloadFile` is sent, so the next message from that chat has it. A notification can
+arrive for a chat the list never scrolled to, which is how that case comes up at all. If
+the post is refused while carrying an image it is retried without it: decoration must
+never cost you the message.
 
-**Tapping** raises the app and opens that chat. The chat id travels in the **D-Bus
-object path** (`/chat/n1001234567890`) rather than as an argument, because the action
-string's argument encoding is undocumented while a path is a plain string either way.
-A `com.meegram.service` file under `/usr/share/dbus-1/services` lets D-Bus start the app
-if you had closed it.
+**Tapping** goes to the daemon, which then raises the app. The banner's action names
+`com.meegram.Daemon` at object path `/chat/n1001234567890`; the chat id travels in the
+**path** rather than as an argument, because the action string's argument encoding is
+undocumented while a path is a plain string either way. The daemon withdraws the banner
+and calls the UI's `com.meegram` `/notification` `openChat` with the id as a decimal
+string, leaving auto-start on — so with the app closed, dbus-daemon launches it from
+`com.meegram.service` and delivers the call once it owns the name.
 
-::: warning Only while the app is running
-Harmattan keeps backgrounded apps alive, so "minimised" is covered — "closed" is not.
-TDLib locks its database directory, so a separate always-on daemon cannot coexist with
-the app; it would mean proxying the whole update stream over IPC. Autostarting the app
-is the cheap answer. There is also no push channel for an N9: no Play Services, and
-Nokia's notification servers are long gone.
+That last part is the half of tap-to-open the in-process notifier could not have: it had
+to be running already to have posted the banner in the first place.
+
+::: info There is no push channel for an N9
+No Play Services, and Nokia's notification servers are long gone. Banners arrive because
+`meegramd` is resident and holding the connection, which is why it is D-Bus activated and
+why nothing stops it — surviving the UI is the point. See
+[Building](/building#the-daemon-transport).
 :::
+
+---
+
+## Appearance
+
+A **dark theme**, off by default, toggled from Settings and persisted
+(`Settings::invertedTheme`, a `QSettings` value like every other preference).
+
+The switch writes the setting and nothing else. `main.qml` applies it to
+`theme.inverted` — once in `Component.onCompleted` so a restart comes up in the theme you
+left it in, and again from a `Connections` on `invertedThemeChanged` so the toggle takes
+effect without one. Everything the platform draws itself follows that one boolean: page
+backgrounds, `Label`s with no colour of their own, toolbars, list highlights, and every
+`com.nokia.meego` component.
+
+What is left is the colours this app paints as literals. They are declared once on
+`appWindow` rather than repeated per page, and they split into two groups by **what is
+behind them**:
+
+| Property | Light | Dark | Painted on |
+|---|---|---|---|
+| `secondaryColor` | `#505050` | `#8c8c8c` | the page — subtitles, timestamps, status lines |
+| `separatorColor` | `#cccccc` | `#3c3c3c` | the page — hairlines between rows and panels |
+| `panelColor` | `white` | `#1e1e1e` | the page — the composer and the panels around it |
+| `iconColor` | `#505050` | `#c8c8c8` | a panel — the composer's glyphs, the picker's tabs |
+| `accentColor` | `#0077A8` | `#4FC3E8` | a page or a panel |
+| `bubbleTextColor` | `black` | `#ffffff` | an **incoming bubble** |
+| `bubbleSecondaryColor` | `#505050` | `#9a9a9a` | an **incoming bubble** |
+| `bubbleAccentColor` | `#0077A8` | `#4FC3E8` | an **incoming bubble** |
+
+::: warning The bubble is not the page
+A bubble brings its own background, so anything drawn on one follows the bubble asset and
+not the theme's surface. That is why the accent exists twice at the same values today:
+they are answers to two different questions and will diverge the moment either asset
+changes. Every call site spells the distinction out as `isOutgoing ? "white" : <a bubble
+colour>` — the outgoing bubble is the accent in both themes, so white always reads on it.
+
+`iconColor` is brighter than `secondaryColor` on purpose: a control rendered in caption
+grey reads as disabled.
+:::
+
+The page itself is left at the platform's `#000000`. Lifting it to a dark grey was tried
+and dropped — every other dark app on the device is black behind its content and lifts
+only its chrome, so a grey page reads as the odd one out. `PageStackWindowStyle` paints a
+flat `Rectangle` unless its `background` is set to an image, and the theme's own inverted
+background is a flat `#010101` tile, so there is no gradient to inherit; adding one means
+supplying the image and setting `backgroundFillMode: Image.Stretch`.
+
+**The header darkens rather than changing colour.** `TopBar` is the largest coloured area
+on screen and the accent at full strength against black is most of the glare;
+`Qt.darker(theme.selectionColor, 1.6)` keeps it following whichever accent the device
+theme is set to.
+
+### The dark image assets are derived, not drawn
+
+The bubble nine-slices and the composer's field background are flat fills — the shape,
+the antialiasing and the nine-slice geometry all live in the alpha channel — so the dark
+variants are the light files with their RGB replaced:
+
+```bash
+python3 tools/make_inverted_assets.py
+```
+
+That keeps the 22px insets and the bubble tails byte-identical to the originals instead of
+hoping a second hand-drawn set lines up. `getBubbleImage()` appends `-inverted` the way
+platform theme graphics do; the colours are five constants at the top of the script.
+
+::: info One platform default had to be overridden with them
+`TextAreaStyle.textColor` is a hardcoded `#191919` and never looks at `theme.inverted` —
+the platform's own textedit graphics are light in both themes, so it never had to. Ours is
+not, so the composer sets the text colour alongside the background. A dark field with the
+stock text colour is text you cannot see.
+:::
+
+### Theme glyphs need a second asset, not a colour
+
+QML1 cannot tint an image — no `QtGraphicalEffects`, no `ColorOverlay` — and blanco draws
+its glyphs as **exactly `#000000` line art on transparent**, so on a dark page they are
+present and invisible. The platform's answer is a parallel asset, and the suffix is
+`-inverse`, **not** the `-inverted` that the larger graphics use. `appWindow.themeIcon()`
+appends it; the two files hold the same glyph at the same pixel count, one black and one
+`#f1f1f2`.
+
+| Glyph | Where |
+|---|---|
+| `icon-m-common-drilldown-arrow` | every settings row, via `ListItem` |
+| `icon-m-input-clear` | the chat-list and new-chat search fields |
+
+::: warning The avatar placeholder is the exception
+`icon-l-content-avatar-placeholder` — the size this app uses — **has no inverse variant**.
+Only the `m` size does, so `appWindow.avatarPlaceholder` switches size and name together.
+That asset is also a filled grey disc rather than bare line art, which is what the
+platform's own dark screens show, so a placeholder gains a disc in dark and drops from
+80px to 64px anywhere the call site does not size it.
+:::
+
+`QrCodePage` reads `theme.inverted` directly rather than using any of the above, because a
+QR code has to invert with the surface it sits on to stay scannable.
+
+The switch's label is the language-pack key `SwitchThemeToNight`, so it arrives
+translated with the rest of the pack. A key the pack does not have renders as **the key
+itself**, on screen, with nothing in the log to say so — `Localization.cpp` reports it
+with `qDebug`, which a `Release` build compiles out. Reading the row on device is the
+check.
 
 ---
 
@@ -716,13 +842,18 @@ Honest list, so nobody goes looking:
 
 ## Performance work
 
-All of it is implemented, and as of 2026-07-31 **part of it is measured** — see
-[Profiling](/profiling). The short version: the C++ model layer costs 43.8 ms across a
-full-length chat-list flick, and avatar decoding in the same window costs **7.6 seconds**.
-The caching work below is confirmed to be as close to free as the instrument can measure
-(5.9 µs per read, at its ~5 µs noise floor), and equally confirmed to be ~1% of what
-scrolling actually costs. The message-list half is still unmeasured: it is blocked on a
-history-paging failure and a segfault.
+All of it is implemented and **measured** — see [Profiling](/profiling). The short
+version: the C++ model layer costs 43.8 ms across a full-length chat-list flick, and
+avatar decoding in the same window cost **7.6 seconds**. The caching work below is as
+close to free as the instrument can measure (5.9 µs per read, at its ~5 µs noise floor),
+and equally confirmed to be ~1% of what scrolling actually costs.
+
+The two costs that did matter were found by those counters and neither was on the list
+below: the avatar cache held 64 entries against a far longer chat list (**17.1 s → 39 ms**
+on a warm re-scroll, for one constant), and `replaceEmoji` ran per delegate rebind from
+inside a QML binding (**182.2 ms → 3.0 ms** on the message list, with a memo). Both are
+fixed. The message-list session also had to fix a `getChatHistory` data race and the
+paging handshake that fix broke; both are in the tree.
 
 What is in:
 

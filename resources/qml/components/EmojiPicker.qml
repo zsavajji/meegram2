@@ -72,7 +72,7 @@ Rectangle {
                     text: modelData.icon
                     font.family: icons.fontFamily
                     font.pixelSize: 32
-                    color: root.currentTab === index ? "#0077A8" : "#505050"
+                    color: root.currentTab === index ? appWindow.accentColor : appWindow.iconColor
                 }
 
                 MouseArea {

@@ -100,7 +100,7 @@ Page {
                 Image {
                     anchors.centerIn: parent
                     visible: !root.hasPhoto
-                    source: "image://theme/icon-l-content-avatar-placeholder"
+                    source: appWindow.avatarPlaceholder
                 }
 
                 BusyIndicator {
@@ -270,7 +270,7 @@ Page {
                                 fillMode: Image.PreserveAspectCrop
                                 source: memberRow.photo && memberRow.photo.isDownloadingCompleted
                                             ? "image://chatPhoto/" + memberRow.photo.localPath
-                                            : "image://theme/icon-l-content-avatar-placeholder"
+                                            : appWindow.avatarPlaceholder
 
                                 Component.onCompleted: {
                                     var photo = memberRow.photo;

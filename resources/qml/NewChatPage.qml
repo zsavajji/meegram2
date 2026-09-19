@@ -46,7 +46,7 @@ Page {
             id: clearIcon
 
             anchors { right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
-            source: "image://theme/icon-m-input-clear"
+            source: appWindow.themeIcon("icon-m-input-clear")
             visible: searchField.text.length > 0
 
             MouseArea {
@@ -100,7 +100,7 @@ Page {
                 // TDLib fills the path in as soon as the download starts.
                 source: model.photo && model.photo.isDownloadingCompleted ?
                             "image://chatPhoto/" + model.photo.localPath :
-                            "image://theme/icon-l-content-avatar-placeholder"
+                            appWindow.avatarPlaceholder
             }
 
             Column {

@@ -8,7 +8,13 @@ Item {
     property string title
     property bool isArchived: false
 
-    property color color: isArchived ? "#424345" :  theme.selectionColor
+    // The accent at full strength is a band of saturated blue against a near-black page,
+    // which is the single biggest source of glare in the dark theme - it is the largest
+    // coloured area on screen. Darkened rather than replaced, so it still follows
+    // whichever accent the device theme is set to.
+    property color color: isArchived ? "#424345"
+                                     : theme.inverted ? Qt.darker(theme.selectionColor, 1.6)
+                                                      : theme.selectionColor
 
     signal clicked
 

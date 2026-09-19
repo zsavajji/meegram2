@@ -42,18 +42,25 @@ public:
         // Separate from SenderRole because the plain one is carried into the reply
         // composer, where markup would show through.
         SenderHtmlRole,
-        // The sender's own avatar, or null. Only filled in where the bubble draws one -
-        // see SenderColorRole for what "where" means.
+        // The sender's own avatar, or null. Filled in for every message, including your
+        // own: with bubbles off there is no side of the screen to say who spoke, so every
+        // row carries one. Whether it is drawn is ShowsSenderRole's question, and the
+        // bubble's binding short-circuits before reading this when the answer is no.
         SenderPhotoRole,
         // The colour Telegram gives this sender's name, picked from the sender id so the
-        // same person keeps the same one everywhere. Empty on every message that gets no
-        // avatar and no coloured name - which is what the bubble tests, so it does not
-        // have to know the chat type itself.
+        // same person keeps the same one everywhere. Filled in for every message, for the
+        // same reason as the photo above.
         SenderColorRole,
         // The sender's rank in this group, beside the name: their custom title, or
         // "owner" / "admin" when they have none. Empty for an ordinary member - which is
-        // nearly everyone - and for every message SenderColorRole is empty on.
+        // nearly everyone - and for every message ShowsSenderRole is false on.
         SenderTitleRole,
+        // Whether the avatar and the coloured name belong on this message *when it is
+        // drawn as a bubble*: only where several people are talking, and only against
+        // someone else's message - your own balloon is on the other side and already
+        // yours. With bubbles off the bubble ignores this and shows them on everything,
+        // which is the only thing left that says who spoke.
+        ShowsSenderRole,
         ChatIdRole,
         IsOutgoingRole,
         DateRole,
@@ -289,6 +296,7 @@ private:
         QString senderHtml;
         QString senderColor;
         QString senderTitle;
+        bool showsSender{false};
         QString date;
         QString section;
         QString replyToSender;

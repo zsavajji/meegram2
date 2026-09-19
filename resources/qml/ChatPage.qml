@@ -181,7 +181,7 @@ Page {
                         fillMode: Image.PreserveAspectCrop
                         source: chat.photo && chat.photo.isDownloadingCompleted ?
                                     "image://chatPhoto/" + chat.photo.localPath :
-                                    "image://theme/icon-l-content-avatar-placeholder"
+                                    appWindow.avatarPlaceholder
 
                         // The chat list delegate normally starts this, but a chat
                         // opened from a notification was never scrolled past.
@@ -768,7 +768,7 @@ Page {
                     }
                     width: 3
                     height: 40
-                    color: "#0077A8"
+                    color: appWindow.accentColor
                 }
 
                 Label {
@@ -782,7 +782,7 @@ Page {
                         top: replyBannerBar.top
                     }
                     text: composeState.senderName
-                    color: "#0077A8"
+                    color: appWindow.accentColor
                     font.pixelSize: 18
                     font.bold: true
                     elide: Text.ElideRight
@@ -847,11 +847,26 @@ Page {
                 width: parent.width
                 placeholderText: qsTr("TypeMessage")
                 platformStyle: TextAreaStyle {
-                    background: "qrc:/images/messaging-textedit-background.png"
-                    backgroundError: "qrc:/images/messaging-textedit-background.png"
-                    backgroundDisabled: "qrc:/images/messaging-textedit-background.png"
-                    backgroundSelected: "qrc:/images/messaging-textedit-background.png"
+                    // One image for all four states: this field has no error or disabled
+                    // state worth drawing differently, and the stock textedit background
+                    // is a rounded box with margins that does not belong under a chat.
+                    //
+                    // The dark variant is the same file recoloured, from
+                    // tools/make_inverted_assets.py.
+                    property url field: theme.inverted ? "qrc:/images/messaging-textedit-background-inverted.png"
+                                                       : "qrc:/images/messaging-textedit-background.png"
+
+                    background: field
+                    backgroundError: field
+                    backgroundDisabled: field
+                    backgroundSelected: field
                     backgroundCornerMargin: 1
+
+                    // TextFieldStyle hardcodes #191919 and does not look at
+                    // theme.inverted - the platform's own background graphics are light
+                    // in both themes, so it never had to. Ours is not, and #191919 on
+                    // #1e1e1e is text you cannot see.
+                    textColor: theme.inverted ? "#ffffff" : "#191919"
                 }
 
                 // Tapping in to type raises the keyboard, which would come up over the
@@ -901,7 +916,7 @@ Page {
                     text: voice.recording ? icons.close : icons.attach
                     font.family: icons.fontFamily
                     font.pixelSize: 36
-                    color: attachArea.pressed ? "#0077A8" : "#505050"
+                    color: attachArea.pressed ? appWindow.accentColor : appWindow.iconColor
 
                     MouseArea {
                         id: attachArea
@@ -932,7 +947,7 @@ Page {
                     text: voice.recording ? icons.stop : icons.microphone
                     font.family: icons.fontFamily
                     font.pixelSize: 36
-                    color: voice.recording ? "#d14836" : (recordArea.pressed ? "#0077A8" : "#505050")
+                    color: voice.recording ? "#d14836" : (recordArea.pressed ? appWindow.accentColor : appWindow.iconColor)
 
                     MouseArea {
                         id: recordArea
@@ -976,7 +991,7 @@ Page {
                     text: emojiPanel.open ? icons.close : icons.smile
                     font.family: icons.fontFamily
                     font.pixelSize: 36
-                    color: emojiPanel.open || emojiArea.pressed ? "#0077A8" : "#505050"
+                    color: emojiPanel.open || emojiArea.pressed ? appWindow.accentColor : appWindow.iconColor
 
                     MouseArea {
                         id: emojiArea

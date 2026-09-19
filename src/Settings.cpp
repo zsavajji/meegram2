@@ -11,6 +11,10 @@ Settings::Settings(QObject *parent)
 {
     m_invertedTheme = m_settings->value("invertedTheme", false).toBool();
 
+    // Defaults true: balloons are what this app has always drawn, and what Telegram draws
+    // everywhere else.
+    m_showBubbles = m_settings->value("showBubbles", true).toBool();
+
     m_languagePackId = m_settings->value("languagePackId", DefaultLanguageCode).toString();
     m_languagePluralId = m_settings->value("languagePluralId", DefaultLanguageCode).toString();
 
@@ -21,6 +25,21 @@ Settings::Settings(QObject *parent)
     // Defaults 0, which reads as "never", so an install that predates this setting refreshes
     // once and then settles into the interval.
     m_languagePackFetchedAt = m_settings->value("languagePackFetchedAt", 0).toLongLong();
+}
+
+bool Settings::showBubbles() const
+{
+    return m_showBubbles;
+}
+
+void Settings::setShowBubbles(bool value)
+{
+    if (m_showBubbles != value)
+    {
+        m_showBubbles = value;
+        m_settings->setValue("showBubbles", m_showBubbles);
+        emit showBubblesChanged();
+    }
 }
 
 bool Settings::invertedTheme() const

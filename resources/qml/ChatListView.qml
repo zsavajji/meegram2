@@ -72,7 +72,7 @@ Item {
                 id: clearIcon
 
                 anchors { right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
-                source: "image://theme/icon-m-input-clear"
+                source: appWindow.themeIcon("icon-m-input-clear")
                 visible: searchField.text.length > 0
 
                 MouseArea {

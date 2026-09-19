@@ -48,7 +48,7 @@ Item {
         // provider at a half written file.
         source: model.photo && model.photo.isDownloadingCompleted ?
                     "image://chatPhoto/" + model.photo.localPath :
-                    "image://theme/icon-l-content-avatar-placeholder"
+                    appWindow.avatarPlaceholder
     }
 
     Item {

@@ -52,15 +52,15 @@ Item {
                 // before the string lands and the text is laid out once, not twice.
                 textFormat: /[<&\n\r\t]|\s\s/.test(html) ? Text.RichText : Text.PlainText
                 text: html
-                color: model.isOutgoing ? "white" : "black"
+                color: appWindow.isSided(model.isOutgoing) ? "white" : appWindow.bubbleTextColor
                 width: isPortrait ? 380 : 754
                 wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                 anchors {
                     left: parent.left
-                    leftMargin: model.isOutgoing ? 80 : 20
+                    leftMargin: appWindow.isSided(model.isOutgoing) ? 80 : 20
                 }
                 font.pixelSize: 23
-                horizontalAlignment: model.isOutgoing ? Text.AlignRight : Text.AlignLeft
+                horizontalAlignment: appWindow.isSided(model.isOutgoing) ? Text.AlignRight : Text.AlignLeft
                 onLinkActivated: appWindow.openLink(link)
             }
         }
@@ -103,7 +103,7 @@ Item {
                     // An image is only as wide as itself, so its offset has to be
                     // computed or it sits on the left while the bubble sits on the right.
                     // 20 puts the right edge exactly where the text delegate's lands.
-                    leftMargin: model.isOutgoing ? listView.width - width - 20 : 20
+                    leftMargin: appWindow.isSided(model.isOutgoing) ? listView.width - width - 20 : 20
                 }
 
                 Item {
@@ -151,10 +151,10 @@ Item {
                     visible: text !== ""
                     textFormat: /[<&\n\r\t]|\s\s/.test(html) ? Text.RichText : Text.PlainText
                     text: html
-                    color: model.isOutgoing ? "white" : "black"
+                    color: appWindow.isSided(model.isOutgoing) ? "white" : appWindow.bubbleTextColor
                     wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                     font.pixelSize: 23
-                    horizontalAlignment: model.isOutgoing ? Text.AlignRight : Text.AlignLeft
+                    horizontalAlignment: appWindow.isSided(model.isOutgoing) ? Text.AlignRight : Text.AlignLeft
                     onLinkActivated: appWindow.openLink(link)
                 }
             }
@@ -254,7 +254,7 @@ Item {
                     left: parent.left
                     // Fixed-width content, so the outgoing offset is computed rather than
                     // left to alignment - same as the photo bubble above.
-                    leftMargin: model.isOutgoing ? listView.width - width - 20 : 20
+                    leftMargin: appWindow.isSided(model.isOutgoing) ? listView.width - width - 20 : 20
                 }
 
                 Repeater {
@@ -357,10 +357,10 @@ Item {
                     visible: text !== ""
                     textFormat: /[<&\n\r\t]|\s\s/.test(html) ? Text.RichText : Text.PlainText
                     text: html
-                    color: model.isOutgoing ? "white" : "black"
+                    color: appWindow.isSided(model.isOutgoing) ? "white" : appWindow.bubbleTextColor
                     wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                     font.pixelSize: 23
-                    horizontalAlignment: model.isOutgoing ? Text.AlignRight : Text.AlignLeft
+                    horizontalAlignment: appWindow.isSided(model.isOutgoing) ? Text.AlignRight : Text.AlignLeft
                     onLinkActivated: appWindow.openLink(link)
                 }
             }
@@ -412,7 +412,7 @@ Item {
                     // Same as the photo delegate: fixed-width content cannot lean on
                     // AlignRight, so the outgoing offset is computed. A 180px sticker at
                     // leftMargin 80 is what put it under the incoming bubbles.
-                    leftMargin: model.isOutgoing ? listView.width - width - 20 : 20
+                    leftMargin: appWindow.isSided(model.isOutgoing) ? listView.width - width - 20 : 20
                 }
 
                 width: Math.min(model.content.width > 0 ? model.content.width : maxSize, maxSize)
@@ -444,7 +444,7 @@ Item {
                     width: parent.width
                     text: utils.replaceEmoji(model.content.emoji) + " " + qsTr("AttachSticker")
                     textFormat: Text.RichText
-                    color: model.isOutgoing ? "white" : "black"
+                    color: appWindow.isSided(model.isOutgoing) ? "white" : appWindow.bubbleTextColor
                     font.pixelSize: 23
                     wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                     horizontalAlignment: Text.AlignHCenter
@@ -511,7 +511,7 @@ Item {
                     left: parent.left
                     // Computed offset, same as the photo delegate: fixed-width content
                     // cannot lean on AlignRight to sit on the outgoing side.
-                    leftMargin: model.isOutgoing ? listView.width - width - 20 : 20
+                    leftMargin: appWindow.isSided(model.isOutgoing) ? listView.width - width - 20 : 20
                 }
 
                 Item {
@@ -630,10 +630,10 @@ Item {
                     visible: text !== ""
                     textFormat: /[<&\n\r\t]|\s\s/.test(html) ? Text.RichText : Text.PlainText
                     text: html
-                    color: model.isOutgoing ? "white" : "black"
+                    color: appWindow.isSided(model.isOutgoing) ? "white" : appWindow.bubbleTextColor
                     wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                     font.pixelSize: 23
-                    horizontalAlignment: model.isOutgoing ? Text.AlignRight : Text.AlignLeft
+                    horizontalAlignment: appWindow.isSided(model.isOutgoing) ? Text.AlignRight : Text.AlignLeft
                     onLinkActivated: appWindow.openLink(link)
                 }
             }
@@ -691,7 +691,7 @@ Item {
                     left: parent.left
                     // Same computed offset as the photo delegate: fixed-width content
                     // cannot lean on AlignRight to sit on the outgoing side.
-                    leftMargin: model.isOutgoing ? listView.width - width - 20 : 20
+                    leftMargin: appWindow.isSided(model.isOutgoing) ? listView.width - width - 20 : 20
                 }
 
                 Row {
@@ -706,7 +706,7 @@ Item {
                         width: 60
                         height: 60
                         radius: 30
-                        color: model.isOutgoing ? "#40ffffff" : "#0077A8"
+                        color: appWindow.isSided(model.isOutgoing) ? "#40ffffff" : appWindow.bubbleAccentColor
 
                         Label {
                             anchors.centerIn: parent
@@ -739,7 +739,7 @@ Item {
                             elide: Text.ElideMiddle
                             maximumLineCount: 1
                             text: model.content.fileName !== "" ? model.content.fileName : qsTr("AttachDocument")
-                            color: model.isOutgoing ? "white" : "black"
+                            color: appWindow.isSided(model.isOutgoing) ? "white" : appWindow.bubbleTextColor
                             font.pixelSize: 23
                         }
 
@@ -749,8 +749,8 @@ Item {
                             // Already formatted by File::size - td_api sizes are int53
                             // and must not cross into QML1 as numbers.
                             text: model.content.file ? model.content.file.size : ""
-                            color: model.isOutgoing ? "white" : "#505050"
-                            opacity: model.isOutgoing ? 0.75 : 1.0
+                            color: appWindow.isSided(model.isOutgoing) ? "white" : appWindow.bubbleSecondaryColor
+                            opacity: appWindow.isSided(model.isOutgoing) ? 0.75 : 1.0
                             font.pixelSize: 18
                             font.weight: Font.Light
                         }
@@ -765,10 +765,10 @@ Item {
                     visible: text !== ""
                     textFormat: /[<&\n\r\t]|\s\s/.test(html) ? Text.RichText : Text.PlainText
                     text: html
-                    color: model.isOutgoing ? "white" : "black"
+                    color: appWindow.isSided(model.isOutgoing) ? "white" : appWindow.bubbleTextColor
                     wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                     font.pixelSize: 23
-                    horizontalAlignment: model.isOutgoing ? Text.AlignRight : Text.AlignLeft
+                    horizontalAlignment: appWindow.isSided(model.isOutgoing) ? Text.AlignRight : Text.AlignLeft
                     onLinkActivated: appWindow.openLink(link)
                 }
             }
@@ -823,7 +823,7 @@ Item {
 
                 anchors {
                     left: parent.left
-                    leftMargin: model.isOutgoing ? listView.width - width - 20 : 20
+                    leftMargin: appWindow.isSided(model.isOutgoing) ? listView.width - width - 20 : 20
                 }
 
                 Row {
@@ -836,7 +836,7 @@ Item {
                         width: 60
                         height: 60
                         radius: 30
-                        color: model.isOutgoing ? "#40ffffff" : "#0077A8"
+                        color: appWindow.isSided(model.isOutgoing) ? "#40ffffff" : appWindow.bubbleAccentColor
 
                         Label {
                             anchors.centerIn: parent
@@ -866,7 +866,7 @@ Item {
                         Label {
                             width: parent.width
                             text: qsTr("AttachAudio")
-                            color: model.isOutgoing ? "white" : "black"
+                            color: appWindow.isSided(model.isOutgoing) ? "white" : appWindow.bubbleTextColor
                             font.pixelSize: 23
                         }
 
@@ -878,8 +878,8 @@ Item {
                                 // Duration comes off the message, not the file, so it reads
                                 // right before the note has finished downloading.
                                 text: utils.formatTime(model.content.duration)
-                                color: model.isOutgoing ? "white" : "#505050"
-                                opacity: model.isOutgoing ? 0.75 : 1.0
+                                color: appWindow.isSided(model.isOutgoing) ? "white" : appWindow.bubbleSecondaryColor
+                                opacity: appWindow.isSided(model.isOutgoing) ? 0.75 : 1.0
                                 font.pixelSize: 18
                                 font.weight: Font.Light
                             }
@@ -891,7 +891,7 @@ Item {
                                 height: 12
                                 radius: 6
                                 anchors.verticalCenter: parent.verticalCenter
-                                color: "#0077A8"
+                                color: appWindow.bubbleAccentColor
                                 visible: !model.isOutgoing && !model.content.isListened
                             }
                         }
@@ -905,10 +905,10 @@ Item {
                     visible: text !== ""
                     textFormat: /[<&\n\r\t]|\s\s/.test(html) ? Text.RichText : Text.PlainText
                     text: html
-                    color: model.isOutgoing ? "white" : "black"
+                    color: appWindow.isSided(model.isOutgoing) ? "white" : appWindow.bubbleTextColor
                     wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                     font.pixelSize: 23
-                    horizontalAlignment: model.isOutgoing ? Text.AlignRight : Text.AlignLeft
+                    horizontalAlignment: appWindow.isSided(model.isOutgoing) ? Text.AlignRight : Text.AlignLeft
                     onLinkActivated: appWindow.openLink(link)
                 }
             }
@@ -929,16 +929,16 @@ Item {
                 id: notSupportedMessage
                 anchors {
                     left: parent.left
-                    leftMargin: model.isOutgoing ? 80 : 20
+                    leftMargin: appWindow.isSided(model.isOutgoing) ? 80 : 20
                 }
                 width: isPortrait ? 380 : 754
                 font {
                     bold: true
                     pixelSize: 23
                 }
-                horizontalAlignment: model.isOutgoing ? Text.AlignRight : Text.AlignLeft
+                horizontalAlignment: appWindow.isSided(model.isOutgoing) ? Text.AlignRight : Text.AlignLeft
                 wrapMode: Text.Wrap
-                color: model.isOutgoing ? "white" : "black"
+                color: appWindow.isSided(model.isOutgoing) ? "white" : appWindow.bubbleTextColor
                 text: qsTr("UnsupportedAttachment")
             }
         }

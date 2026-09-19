@@ -18,12 +18,78 @@ PageStackWindow {
 
     // Dark theme. The platform inverts everything it draws itself off theme.inverted -
     // page background, Labels with no colour of their own, toolbars, list highlights - so
-    // the only colours left to decide are the literals this app paints. These three are
-    // the ones it repeats; anything drawn on a bubble, a count bubble or the picker
-    // headers already carries its own background and is right in both themes.
+    // what is left to decide is the literals this app paints itself.
+    //
+    // Three surfaces, darkest at the back: the page behind everything (the platform's,
+    // see below), the panels that sit on it, and the hairlines between them.
     property color secondaryColor: theme.inverted ? "#8c8c8c" : "#505050"
     property color separatorColor: theme.inverted ? "#3c3c3c" : "#cccccc"
     property color panelColor: theme.inverted ? "#1e1e1e" : "white"
+
+    // The accent, for anything painted on a page or a panel. #0077A8 was picked against
+    // white and is too dark to read on one of those surfaces, so the dark theme lightens
+    // it rather than keeping one value for both.
+    property color accentColor: theme.inverted ? "#4FC3E8" : "#0077A8"
+
+    // And the accent for anything painted on a *bubble*, which is a different question:
+    // the bubble brings its own background, so these follow the bubble asset and not the
+    // page. Only the incoming side needs them - the outgoing bubble is the accent colour
+    // in both themes and white reads on it either way, which is why every call site
+    // spells it `isOutgoing ? "white" : <one of these>`.
+    property color bubbleTextColor: theme.inverted ? "#ffffff" : "black"
+    property color bubbleSecondaryColor: theme.inverted ? "#9a9a9a" : "#505050"
+    property color bubbleAccentColor: theme.inverted ? "#4FC3E8" : "#0077A8"
+
+    // Interactive glyphs - the composer's attach, record and emoji buttons, the emoji
+    // picker's tabs. Brighter than secondaryColor because they are controls rather than
+    // captions: #505050 on a dark panel is a button that reads as disabled.
+    property color iconColor: theme.inverted ? "#c8c8c8" : "#505050"
+
+    // Bubbles on, or the flat layout. Off means no balloons: every message runs full
+    // width on the page and is told apart by an avatar and a coloured name rather than by
+    // which side of the screen it sits on.
+    property bool showBubbles: settings.showBubbles
+
+    // Whether a message is *drawn* as an outgoing one - sided right, on the accent
+    // balloon, with white text on it. Nearly every `model.isOutgoing ?` in a delegate is
+    // asking this rather than asking who sent it, and with bubbles off the answer is
+    // always no: what is left is the incoming layout, which is already a full-width row
+    // on the page. The ones that genuinely ask who sent it - the action menu, the
+    // unplayed-note dot - keep reading model.isOutgoing directly.
+    function isSided(outgoing) {
+        return outgoing && showBubbles;
+    }
+
+    // Theme glyphs are a different problem from the colours above, because they are
+    // images and QML1 cannot tint one: there is no QtGraphicalEffects and no
+    // ColorOverlay. Blanco draws them as near-black line art on transparent - #000000
+    // exactly - so on a dark page they are there and invisible.
+    //
+    // The platform's answer is a second asset, and the suffix is `-inverse`, not the
+    // `-inverted` the larger graphics use. Verified on device: the two files hold the
+    // same glyph at the same pixel count, one black and one #f1f1f2.
+    function themeIcon(name) {
+        return "image://theme/" + name + (theme.inverted ? "-inverse" : "");
+    }
+
+    // The avatar placeholder cannot go through themeIcon: the `l` size this app uses has
+    // no inverse variant at all, so the dark theme takes the `m` one, which does. That
+    // asset is also a filled disc rather than bare line art, which is what the platform's
+    // own dark screens show - so a placeholder gains a disc in dark, and drops from 80px
+    // to 64px anywhere the call site does not size it.
+    property url avatarPlaceholder: theme.inverted ? "image://theme/icon-m-content-avatar-placeholder-inverse"
+                                                   : "image://theme/icon-l-content-avatar-placeholder"
+
+    // The page behind everything is left at the platform's own inverted default, which
+    // is #000000 - a flat Rectangle, since PageStackWindowStyle only reaches for the
+    // theme's background image when `background` is set, and that image is a flat
+    // #010101 tile anyway. Lifting the page to a dark grey was tried and dropped: every
+    // other dark app on the device is black behind its content and lifts only its
+    // chrome, so a grey page reads as the odd one out. The glare it was meant to fix
+    // belongs to the accent, which is where it is fixed - see TopBar.
+    //
+    // If a gradient is ever wanted, it is `background` set to an image plus
+    // `backgroundFillMode: Image.Stretch`; the platform ships no gradient for this.
 
     // Latched from appManager's one-shot appInitialized. It lives here rather than on a
     // page because appWindow is created once and never destroyed - a page that misses the

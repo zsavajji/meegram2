@@ -190,11 +190,9 @@ QVariant MessageModel::data(const QModelIndex &index, int role) const
         case SenderHtmlRole:
             return formattedRow(messageId, message.get()).senderHtml;
         case SenderPhotoRole: {
-            // Same gate as the colour, so the avatar and the coloured name appear
-            // together and a private chat pays for neither.
-            if (formattedRow(messageId, message.get()).senderColor.isEmpty())
-                return QVariant();
-
+            // Ungated: the flat layout draws an avatar on every message, including in a
+            // private chat. The storage lookup below is only paid when something actually
+            // reads this role, and the bubble does not read it when it draws no avatar.
             switch (message->senderType())
             {
                 case Message::SenderType::User: {
@@ -213,6 +211,8 @@ QVariant MessageModel::data(const QModelIndex &index, int role) const
             return formattedRow(messageId, message.get()).senderColor;
         case SenderTitleRole:
             return formattedRow(messageId, message.get()).senderTitle;
+        case ShowsSenderRole:
+            return formattedRow(messageId, message.get()).showsSender;
         case ChatIdRole:
             return message->chatId();
         case IsOutgoingRole:
@@ -500,15 +500,22 @@ const MessageModel::FormattedRow &MessageModel::formattedRow(qlonglong messageId
         // Here it runs once a row.
         entry.senderHtml = Utils::replaceEmoji(entry.sender);
 
-        // Avatar, coloured name and handle, all three at once: they only make sense
-        // where several people are talking, and only against someone else's message -
-        // your own bubble is on the other side and already yours. A channel is one
-        // voice, so it is left out with the private chats.
+        // The colour is a pure function of the sender id, and the flat layout needs one
+        // for every message including your own - with no balloon and no side of the
+        // screen, the name is what says who spoke. Cheap enough to always fill: no
+        // storage lookup, just the palette.
+        entry.senderColor = senderColor(message->senderId());
+
+        // Whether a *bubble* shows the avatar, the coloured name and the rank. All three
+        // at once: they only make sense where several people are talking, and only
+        // against someone else's message - your own balloon is on the other side and
+        // already yours. A channel is one voice, so it is left out with the private
+        // chats.
         const auto chatType = m_chat->type();
 
         if (!message->isOutgoing() && (chatType == Chat::BasicGroup || chatType == Chat::Supergroup))
         {
-            entry.senderColor = senderColor(message->senderId());
+            entry.showsSender = true;
 
             if (const auto admin = m_admins.find(message->senderId()); admin != m_admins.end())
                 entry.senderTitle = admin->second;
@@ -550,6 +557,7 @@ QHash<int, QByteArray> MessageModel::roleNames() const noexcept
     roles[SenderHtmlRole] = "senderHtml";
     roles[SenderPhotoRole] = "senderPhoto";
     roles[SenderColorRole] = "senderColor";
+    roles[ShowsSenderRole] = "showsSender";
     roles[SenderTitleRole] = "senderTitle";
     roles[ChatIdRole] = "chatId";
     roles[IsOutgoingRole] = "isOutgoing";

@@ -47,7 +47,7 @@ Item {
         id: indicator
 
         Image {
-            source: "image://theme/icon-m-common-drilldown-arrow"
+            source: appWindow.themeIcon("icon-m-common-drilldown-arrow")
         }
     }
 

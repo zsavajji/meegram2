@@ -27,14 +27,17 @@ Item {
           + (senderLabel.text !== "" ? senderLabel.height : 0)
           + (replyBlock.visible ? replyBlock.height + 6 : 0)
           + reactionsRow.height
-          + (model.isOutgoing ? 30 : 28);
+          + (root.sided ? 30 : 28);
     width: parent.width
 
     // Both read once here because the pills below live inside a Repeater, where `model`
     // is the Repeater's own and the row's roles are out of reach - the same shadowing the
     // album delegate documents. The id goes as a string rather than through the number
     // role, which is the trip Common.hpp does not trust.
-    property bool outgoing: model.isOutgoing
+    // Drawn as an outgoing message: sided right, on the accent balloon, white text. Not
+    // "who sent it" - with bubbles off nothing is sided and every row is laid out the way
+    // an incoming one always was. See appWindow.isSided.
+    property bool sided: appWindow.isSided(model.isOutgoing)
     property string messageId: model.idString
     // Empty for the messages nobody reacted to, which is nearly all of them - the model
     // answers that case without building anything, so a screenful costs a null check each.
@@ -43,15 +46,20 @@ Item {
     // Where the sender label ends and everything below it begins.
     property int stackTop: senderLabel.text === "" ? 16 : 46
 
-    // An avatar in the left gutter, the way Telegram draws a group. The model decides
-    // which messages get one and says so by filling in senderColor, so the bubble needs
-    // to know nothing about the chat type - and a private chat, a channel and your own
-    // messages read the same empty string and keep the layout they had.
+    // ...and where that stack starts horizontally. On the outgoing side the parts are
+    // pushed right by a fixed inset; everywhere else they clear the avatar gutter.
+    property int stackLeft: root.sided ? 80 : 20 + root.avatarSpace
+
+    // An avatar in the left gutter, the way Telegram draws a group. In bubble mode the
+    // model decides which messages get one (showsSender), so the bubble needs to know
+    // nothing about the chat type - a private chat, a channel and your own messages get
+    // none and keep the layout they had. With bubbles off every message gets one,
+    // including your own: there is no side of the screen left to say who spoke.
     //
-    // ponytail: one per bubble, not one per run of messages from the same sender.
-    // Telegram hangs a single avatar off the last of a run, which needs the model to
-    // report where a run ends; this repeats it. Add the role if the repetition grates.
-    property bool showAvatar: model.senderColor !== ""
+    // ponytail: one per message, not one per run from the same sender. Telegram hangs a
+    // single avatar off the last of a run, which needs the model to report where a run
+    // ends; this repeats it. More visible in the flat layout than it ever was in bubbles.
+    property bool showAvatar: appWindow.showBubbles ? model.showsSender : true
     // Everything on the incoming side shifts by this, which is the whole cost of the
     // gutter - the bubble, the labels and the content all measure from parent.left.
     property int avatarSpace: showAvatar ? 52 : 0
@@ -113,12 +121,12 @@ Item {
     BorderImage {
         id: bubble
 
-        height: parent.height + (isOutgoing ? 0 : 2)
+        height: parent.height + (root.sided ? 0 : 2)
         // The quote block has to widen the bubble too, or a short message replying
         // to a long one would have its quote clipped. 11 = accent bar + its margin.
         width: Math.max(childrenWidth,
                         messageDate.paintedWidth + (sendStateIcon.visible ? sendStateIcon.paintedWidth + 6 : 0)
-                            + (model.isOutgoing ? 0 : 28),
+                            + (root.sided ? 0 : 28),
                         // The rank sits at the bubble's right edge, so it has to be part of
                         // what decides that edge - name and rank both, plus a gap between.
                         senderLabel.paintedWidth + (senderTitle.visible ? senderTitle.paintedWidth + 16 : 0),
@@ -130,12 +138,14 @@ Item {
                         reactionsRow.width) + 26
         anchors {
             left: parent.left
-            leftMargin: model.isOutgoing ? parent.width - width - 10 : 10 + root.avatarSpace
+            leftMargin: root.sided ? parent.width - width - 10 : 10 + root.avatarSpace
             top: parent.top
-            topMargin: model.isOutgoing ? 1 : 8
+            topMargin: root.sided ? 1 : 8
         }
 
-        source: internal.getBubbleImage();
+        // No source at all in the flat layout - the item stays, because the quote block
+        // and the rank measure from its edges, but nothing is drawn or decoded for it.
+        source: appWindow.showBubbles ? internal.getBubbleImage() : ""
 
         border { left: 22; right: 22; bottom: 22; top: 22; }
 
@@ -178,8 +188,12 @@ Item {
         anchors {
             left: parent.left
             leftMargin: 6
-            bottom: bubble.bottom
-            bottomMargin: 2
+            top: parent.top
+            // Bubble mode hangs the avatar off the balloon's bottom edge, beside the
+            // tail. Flat mode has no tail and the name is the first line, so it sits at
+            // the top instead. Expressed as an offset rather than by swapping which
+            // anchor is set, because clearing an anchor means assigning undefined to it.
+            topMargin: appWindow.showBubbles ? Math.max(0, bubble.y + bubble.height - height - 2) : 10
         }
 
         sourceSize.width: width
@@ -194,7 +208,7 @@ Item {
                     ? ""
                     : model.senderPhoto && model.senderPhoto.isDownloadingCompleted
                         ? "image://chatPhoto/" + model.senderPhoto.localPath
-                        : "image://theme/icon-l-content-avatar-placeholder"
+                        : appWindow.avatarPlaceholder
 
         // Straight to the sender's profile. Outside the balloon, so this takes no grab
         // the bubble's own area wanted and needs none of the swipe handoff the pills and
@@ -217,6 +231,11 @@ Item {
         // cache buffer, so this fetches the people you scrolled past, not the whole
         // membership. undefined on every message with no avatar, which the guard covers.
         Component.onCompleted: {
+            // The role is ungated now, so asking for it in a chat that draws no avatars
+            // would resolve a user and start a download for a picture nothing shows.
+            if (!root.showAvatar)
+                return;
+
             var photo = model.senderPhoto;
 
             if (photo && photo.canBeDownloaded && !photo.isDownloadingActive && !photo.isDownloadingCompleted)
@@ -230,17 +249,19 @@ Item {
         width: parent.width -100
         anchors {
             left: parent.left
-            leftMargin: isOutgoing ? 80 : 20 + root.avatarSpace
+            leftMargin: root.stackLeft
         }
-        // Empty outside a group, so a private chat keeps the plain black name it had.
-        color: model.isOutgoing ? "white" : model.senderColor !== "" ? model.senderColor : "black"
+        // Coloured only where the avatar is: a name Telegram has picked a colour for is
+        // one of several people talking. Everywhere else it falls back to the bubble's
+        // own text colour.
+        color: root.sided ? "white" : root.showAvatar ? model.senderColor : appWindow.bubbleTextColor
         // Cached in the model, so the emoji substitution runs once a row.
         text: model.senderHtml
         font.pixelSize: 20
         font.bold: true
         wrapMode: Text.WrapAnywhere
         maximumLineCount: 1
-        horizontalAlignment: model.isOutgoing ? Text.AlignRight : Text.AlignLeft
+        horizontalAlignment: root.sided ? Text.AlignRight : Text.AlignLeft
         visible: text !== ""
     }
 
@@ -321,8 +342,8 @@ Item {
 
             width: 3
             height: parent.height
-            color: model.isOutgoing ? "white" : "#0077A8"
-            opacity: model.isOutgoing ? 0.6 : 1.0
+            color: root.sided ? "white" : appWindow.bubbleAccentColor
+            opacity: root.sided ? 0.6 : 1.0
         }
 
         Label {
@@ -332,7 +353,7 @@ Item {
             anchors { left: replyBar.right; leftMargin: 8; right: parent.right }
             text: model.replyToSender
             visible: text !== ""
-            color: model.isOutgoing ? "white" : "#0077A8"
+            color: root.sided ? "white" : appWindow.bubbleAccentColor
             font.pixelSize: 18
             font.bold: true
             elide: Text.ElideRight
@@ -346,8 +367,8 @@ Item {
             anchors { left: replyBar.right; leftMargin: 8; right: parent.right }
             text: model.replyToText
             visible: text !== ""
-            color: model.isOutgoing ? "white" : "#505050"
-            opacity: model.isOutgoing ? 0.75 : 1.0
+            color: root.sided ? "white" : appWindow.bubbleSecondaryColor
+            opacity: root.sided ? 0.75 : 1.0
             font.pixelSize: 18
             font.weight: Font.Light
             elide: Text.ElideRight
@@ -385,7 +406,7 @@ Item {
             // Fixed-width content cannot lean on AlignRight the way the date does, so the
             // outgoing offset is computed - same as the photo delegate. 20 puts the right
             // edge exactly where the date's lands.
-            leftMargin: root.outgoing ? parent.width - width - 20 : 20 + root.avatarSpace
+            leftMargin: root.sided ? parent.width - width - 20 : 20 + root.avatarSpace
             top: contentItem.bottom
         }
 
@@ -412,8 +433,8 @@ Item {
                     radius: 12
                     // Yours is filled, everyone else's is a tint of the bubble it sits on.
                     color: modelData.chosen
-                               ? (root.outgoing ? "white" : "#0077A8")
-                               : (root.outgoing ? "#40ffffff" : "#20000000")
+                               ? (root.sided ? "white" : "#0077A8")
+                               : (root.sided ? "#40ffffff" : (theme.inverted ? "#20ffffff" : "#20000000"))
 
                     Row {
                         id: pill
@@ -446,7 +467,9 @@ Item {
                             visible: modelData.icon === ""
                             text: modelData.emoji
                             font.pixelSize: 16
-                            color: modelData.chosen && !root.outgoing ? "white" : "black"
+                            color: modelData.chosen && !root.sided ? "white"
+                                 : root.sided ? "black"
+                                 : appWindow.bubbleTextColor
                         }
 
                         Label {
@@ -456,8 +479,8 @@ Item {
                             // line under it are the one band of small text on a bubble.
                             font.pixelSize: 16
                             color: modelData.chosen
-                                       ? (root.outgoing ? "#0077A8" : "white")
-                                       : (root.outgoing ? "white" : "black")
+                                       ? (root.sided ? "#0077A8" : "white")
+                                       : (root.sided ? "white" : appWindow.bubbleTextColor)
                         }
                     }
 
@@ -490,18 +513,24 @@ Item {
         // The date is right-aligned inside a label that spans the bubble, so the tick
         // cannot simply sit after the text - it has to come off the label's own right
         // edge, and that edge moves left to make room for it.
-        width: parent.width - 100 - (sendStateIcon.visible ? sendStateIcon.paintedWidth + 6 : 0)
+        //
+        // In the flat layout the label runs to the row's right edge instead, which puts
+        // every timestamp in one column down the side of the conversation.
+        width: (appWindow.showBubbles ? parent.width - 100 : parent.width - root.stackLeft - 16)
+               - (sendStateIcon.visible ? sendStateIcon.paintedWidth + 6 : 0)
         anchors {
             left: parent.left
-            leftMargin: isOutgoing ? 80 : 20 + root.avatarSpace
+            leftMargin: root.stackLeft
             top: reactionsRow.bottom
             topMargin: 4
         }
         text: model.date
-        color: model.isOutgoing ? "white" : "black"
+        color: root.sided ? "white" : appWindow.bubbleTextColor
         font.pixelSize: 16
         font.weight: Font.Light
-        horizontalAlignment: model.isOutgoing ? Text.AlignRight : Text.AlignLeft
+        // Right in the flat layout too: nothing is sided there, but a timestamp column
+        // only reads as one if it lines up.
+        horizontalAlignment: root.sided || !appWindow.showBubbles ? Text.AlignRight : Text.AlignLeft
     }
 
     // Delivery state, outgoing messages only: a clock while it is still on its way, a
@@ -522,10 +551,14 @@ Item {
               : icons.check1
         font.family: icons.fontFamily
         font.pixelSize: 16
-        // The bubble behind this is #15A8CA, so the sent tick takes the same washed-out
-        // white the date does and read is the one state that gets a colour of its own.
-        color: model.sendState === "read" ? "#7BE87B" : "white"
-        opacity: model.sendState === "read" ? 1.0 : 0.75
+        // On a balloon the sent tick takes the same washed-out white the date does, and
+        // read is the one state with a colour of its own. On the page neither reads -
+        // white vanishes on a light theme and the green is weak on both - so the flat
+        // layout uses the accent for read and the secondary grey for the rest, which is
+        // what Telegram's own flat mode does.
+        color: appWindow.showBubbles ? (model.sendState === "read" ? "#7BE87B" : "white")
+                                     : (model.sendState === "read" ? appWindow.accentColor : appWindow.bubbleSecondaryColor)
+        opacity: model.sendState === "read" || !appWindow.showBubbles ? 1.0 : 0.75
     }
 
     QtObject {
@@ -536,6 +569,11 @@ Item {
 
             imageSrc += model.isOutgoing ? "outgoing" : "incoming"
             imageSrc += mouseArea.pressed ? "-pressed" : "-normal"
+
+            // Same file recoloured, from tools/make_inverted_assets.py - the shape and
+            // the 22px nine-slice insets are the light asset's, byte for byte.
+            if (theme.inverted)
+                imageSrc += "-inverted";
 
             return imageSrc + ".png";
         }
