@@ -17,7 +17,7 @@ Read this alongside [Architecture](/architecture) for how the pieces connect, an
 | Messages | text with entities, emoji picker, big emoji, replies, edit, copy, delete for me / for everyone, read receipts, delivery ticks, reactions | forward, pinned messages, custom-emoji and paid reactions |
 | Media | photo receive + send with pinch-zoom view and save, animated and static stickers, voice notes recorded and played in-app, documents sent and received, video and GIF bubbles that hand off to the platform player | inline video playback, location, contacts, polls |
 | Presence | typing indicators, online status, connection state | sending your own typing action |
-| System | notifications with avatar, tap-to-open, D-Bus activation, resident daemon, dark theme | — |
+| System | notifications with avatar, tap-to-open, D-Bus activation, resident daemon, dark theme, flat (bubble-less) layout | — |
 
 ::: warning "Works" is not "plays"
 Video and GIF messages have a **bubble**, not a player — the still, a badge, and a
@@ -776,6 +776,54 @@ the platform's own textedit graphics are light in both themes, so it never had t
 not, so the composer sets the text colour alongside the background. A dark field with the
 stock text colour is text you cannot see.
 :::
+
+### The flat layout
+
+**Show bubbles**, on by default, is the second switch in Settings. Off drops the balloons:
+every message runs full width on the page, and who sent it is carried by an avatar and a
+coloured name instead of by which side of the screen it is on.
+
+The whole mode rests on one observation — **the flat layout is the incoming layout,
+applied to everything**. meegram's incoming message was already a full-width row with an
+avatar gutter, a coloured sender name and left-aligned content, so the mode is not a
+second set of delegates; it is the same ones with the sided branch turned off:
+
+```qml
+function isSided(outgoing) { return outgoing && showBubbles; }
+```
+
+Nearly every `model.isOutgoing ? … : …` in a delegate was asking *"is this drawn as an
+outgoing message"* — right-aligned, on the accent balloon, white text — not *"who sent
+it"*. Those 31 ternaries now ask `appWindow.isSided(model.isOutgoing)`. The nine that
+genuinely ask who sent it — the action menu's target, the unplayed-voice-note dot — still
+read `model.isOutgoing` directly, and that split is the whole review surface of the
+change.
+
+What it needed from the model: the avatar and the coloured name used to be gated on
+`senderColor` being non-empty, which was only true for **someone else's message in a
+group**. Flat mode needs them on every message including your own, so `senderColor` is
+now filled for everyone and a new `showsSender` role carries the old meaning:
+
+| | bubbles on | bubbles off |
+|---|---|---|
+| avatar + coloured name | `model.showsSender` — group, incoming only | every message |
+| content, date, sender name | sided right when outgoing | always left |
+| timestamp | inside the balloon | a column down the right edge |
+| delivery tick | washed-out white, green when read | secondary grey, accent when read |
+
+::: info The tick changes colour because the surface does
+On a balloon the tick sits on `#0a6a82` and white reads. On the page it does not — white
+vanishes in the light theme and the green is weak in both — so the flat layout uses the
+accent for read and the secondary grey for the rest, which is what Telegram's own flat
+mode does.
+:::
+
+Two ceilings worth knowing, both marked in the source. The avatar is drawn **once per
+message, not once per run** from the same sender, which is more visible flat than it ever
+was in bubbles — Telegram hangs a single avatar off the last message of a run, which needs
+the model to report where a run ends. And **"Show bubbles" is the one untranslated string
+in the app**: Telegram's language pack has no key for it (it is not a setting Telegram
+has), and an absent key renders as the key itself.
 
 ### Theme glyphs need a second asset, not a colour
 
