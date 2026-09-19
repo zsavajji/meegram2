@@ -50,13 +50,14 @@ PageStackWindow {
     // which side of the screen it sits on.
     property bool showBubbles: settings.showBubbles
 
-    // Whether a message is *drawn* as an outgoing one - sided right, on the accent
-    // balloon, with white text on it. Nearly every `model.isOutgoing ?` in a delegate is
-    // asking this rather than asking who sent it, and with bubbles off the answer is
-    // always no: what is left is the incoming layout, which is already a full-width row
-    // on the page. The ones that genuinely ask who sent it - the action menu, the
-    // unplayed-note dot - keep reading model.isOutgoing directly.
-    function isSided(outgoing) {
+    // Whether a message is painted *on the accent balloon*, which is the only thing the
+    // colour of its contents depends on: white reads on that balloon and on nothing else,
+    // so with bubbles off every one of those whites has to become a page colour.
+    //
+    // Not the same question as which side the message sits on - your own messages are
+    // sided right in both layouts; the flat one drops the balloon, not the sides. Layout
+    // reads model.isOutgoing directly, colour asks this.
+    function isOnBubble(outgoing) {
         return outgoing && showBubbles;
     }
 

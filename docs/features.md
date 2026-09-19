@@ -123,6 +123,12 @@ preview. `Message::ReplyInfo` is plain data rather than a `QObject`, because the
 QML needs require a `StorageManager` and a `Locale` to produce, so `MessageModel`
 formats them into roles.
 
+The block carries the same wash the reaction pills do (`appWindow.tintOn`), so it reads as
+something laid on the message rather than as two more lines of it. That wash is sized from
+the labels' **painted width**, not from the block: the block is deliberately wider than its
+text, because the extra width is the tap target that jumps to the replied-to message, and a
+wash across all of it would look like a selection.
+
 `messageReplyToMessage` only carries `origin` **and `content`** when the replied-to
 message came from another chat. For an ordinary same-chat reply both are null, which is
 why the quote block used to show a sender and no text at all. Both `replyToSender` and
@@ -780,24 +786,26 @@ stock text colour is text you cannot see.
 ### The flat layout
 
 **Show bubbles**, on by default, is the second switch in Settings. Off drops the balloons:
-every message runs full width on the page, and who sent it is carried by an avatar and a
-coloured name instead of by which side of the screen it is on.
+messages sit on the page itself, still sided the way they were, with the timestamp moved
+up to the head of each one.
 
-The whole mode rests on one observation — **the flat layout is the incoming layout,
-applied to everything**. meegram's incoming message was already a full-width row with an
-avatar gutter, a coloured sender name and left-aligned content, so the mode is not a
-second set of delegates; it is the same ones with the sided branch turned off:
+**The flat layout drops the balloon, not the sides.** Your own messages stay right and
+the other side stays left, exactly where bubble mode puts them — what goes is the balloon
+behind them.
 
-```qml
-function isSided(outgoing) { return outgoing && showBubbles; }
-```
+That is why `model.isOutgoing ? … : …` turned out to be **two questions wearing one
+condition**, and separating them is most of the change:
 
-Nearly every `model.isOutgoing ? … : …` in a delegate was asking *"is this drawn as an
-outgoing message"* — right-aligned, on the accent balloon, white text — not *"who sent
-it"*. Those 31 ternaries now ask `appWindow.isSided(model.isOutgoing)`. The nine that
-genuinely ask who sent it — the action menu's target, the unplayed-voice-note dot — still
-read `model.isOutgoing` directly, and that split is the whole review surface of the
-change.
+| the question | reads | decides |
+|---|---|---|
+| which side is this on | `model.isOutgoing` | margins and alignment — the same in both layouts |
+| is this painted on the accent balloon | `appWindow.isOnBubble(…)` | every colour, because `"white"` reads on that balloon and on nothing else |
+
+15 of the delegate's ternaries were the first and 16 were the second, and they had been
+indistinguishable for as long as the balloon and the side always arrived together. Nine
+more ask neither — the action menu's target, the unplayed-voice-note dot — and still read
+`model.isOutgoing` directly. Putting one of those three groups in the wrong bucket is what
+a review of this should look for.
 
 What it needed from the model: the avatar and the coloured name used to be gated on
 `senderColor` being non-empty, which was only true for **someone else's message in a
@@ -806,10 +814,26 @@ now filled for everyone and a new `showsSender` role carries the old meaning:
 
 | | bubbles on | bubbles off |
 |---|---|---|
-| avatar + coloured name | `model.showsSender` — group, incoming only | every message |
-| content, date, sender name | sided right when outgoing | always left |
-| timestamp | inside the balloon | a column down the right edge |
+| your own messages | right, on the accent balloon | right, on the page |
+| avatar + coloured name | `showsSender` — group, incoming, every message | `showsSender`, once per run |
+| timestamp | the bottom line, inside the balloon | the **top** row, level with the sender name |
 | delivery tick | washed-out white, green when read | secondary grey, accent when read |
+
+The tick sits **before** the time in both — "done, at 13:06" rather than "13:06, done",
+which is the order Telegram writes it in. It hangs off the right edge of a right-aligned
+label that spans far more than its text, so it measures back by `paintedWidth`; the label
+no longer subtracts the icon from its own width, which it had to while the icon sat
+outside its right edge.
+
+**The timestamp moves to the top row and costs no height.** With no balloon to close a
+message off, where one *starts* is the thing that needs marking — so the time sits level
+with the sender name, hard against the row's right edge, and every message in the
+conversation opens with one in the same column. The row was already there for the name, so
+the line the date used to occupy at the bottom is given back: a message with a sender name
+is now one line shorter than it was in bubbles.
+
+A continuation — second message of a run, no name — keeps that row for the timestamp
+alone, which is what `hasTopRow` is for.
 
 ::: info The tick changes colour because the surface does
 On a balloon the tick sits on `#0a6a82` and white reads. On the page it does not — white
@@ -833,9 +857,9 @@ That flag is a property of a row's **neighbour**, which is what makes it interes
   where `refreshAlbumAt` already does the same thing for album grouping. Album membership
   had this problem first and solved it the same way.
 
-The gutter is reserved for **every** flat-mode row, including the continuations that draw
-no avatar in it; otherwise the second message of a run slides left and the column comes
-apart.
+The gutter is reserved by `hasGutter`, which asks about the *chat* rather than the
+message — a continuation draws no avatar and still has to clear the gutter, or the second
+message of a run slides left and the column comes apart.
 
 ::: info Bubble mode still draws one avatar per message
 Telegram hangs a single avatar off the **last** message of a run there, because that is

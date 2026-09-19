@@ -32,14 +32,19 @@ Item {
           + (root.sided ? 30 : 28);
     width: parent.width
 
-    // Both read once here because the pills below live inside a Repeater, where `model`
-    // is the Repeater's own and the row's roles are out of reach - the same shadowing the
-    // album delegate documents. The id goes as a string rather than through the number
-    // role, which is the trip Common.hpp does not trust.
-    // Drawn as an outgoing message: sided right, on the accent balloon, white text. Not
-    // "who sent it" - with bubbles off nothing is sided and every row is laid out the way
-    // an incoming one always was. See appWindow.isSided.
-    property bool sided: appWindow.isSided(model.isOutgoing)
+    // Sided right: your own messages, in both layouts - the flat one drops the balloon,
+    // not the sides. Layout only.
+    property bool sided: model.isOutgoing
+
+    // ...and whether that side is the accent balloon, which is the separate question the
+    // colours ask: white reads on that balloon and on nothing else. See
+    // appWindow.isOnBubble.
+    property bool onBubble: appWindow.isOnBubble(model.isOutgoing)
+
+    // Read once here because the pills below live inside a Repeater, where `model` is the
+    // Repeater's own and the row's roles are out of reach - the same shadowing the album
+    // delegate documents. The id goes as a string rather than through the number role,
+    // which is the trip Common.hpp does not trust.
     property string messageId: model.idString
     // Empty for the messages nobody reacted to, which is nearly all of them - the model
     // answers that case without building anything, so a screenful costs a null check each.
@@ -53,31 +58,38 @@ Item {
     // Where that row ends and everything below it begins.
     property int stackTop: root.hasTopRow ? 46 : 16
 
+    // How much of the top row the timestamp and its tick are using. Zero in bubble mode,
+    // where the date is on the bottom line and shares the row with nothing. Only read by
+    // things measuring *back* from the right edge, so it cannot feed the date's own width
+    // and close a loop.
+    property int timeWidth: appWindow.showBubbles
+                                ? 0
+                                : messageDate.paintedWidth + (sendStateIcon.visible ? sendStateIcon.paintedWidth + 6 : 0)
+
     // ...and where that stack starts horizontally. On the outgoing side the parts are
     // pushed right by a fixed inset; everywhere else they clear the avatar gutter.
     property int stackLeft: root.sided ? 80 : 20 + root.avatarSpace
 
-    // An avatar in the left gutter, the way Telegram draws a group. In bubble mode the
-    // model decides which messages get one (showsSender), so the bubble needs to know
-    // nothing about the chat type - a private chat, a channel and your own messages get
-    // none and keep the layout they had. With bubbles off every message gets one,
-    // including your own: there is no side of the screen left to say who spoke.
+    // An avatar in the left gutter, the way Telegram draws a group. The model decides who
+    // gets one and says so with showsSender, so the bubble needs to know nothing about the
+    // chat type - a private chat, a channel and your own messages get none in either
+    // layout, because there is only ever one other person for it to be. The name is the
+    // looser rule: see senderLabel, which the flat layout shows everywhere.
     //
-    // In the flat layout only the message that opens a run draws one, the way Telegram
-    // does it: five messages in a row from one person carry one avatar and one name
-    // between them, not five of each.
+    // The flat layout adds one condition, that the message *opens* a run, so five in a row
+    // from one person carry one avatar between them rather than five.
     //
     // Bubble mode still draws one per message. Telegram hangs a single avatar off the
     // *last* of a run there, because that is where the balloon's tail points - the
     // opposite end from the flat layout, and a different rule rather than the same one
     // applied twice. Left as it was until bubble mode is worth revisiting.
-    property bool showAvatar: appWindow.showBubbles ? model.showsSender : model.opensRun
+    property bool showAvatar: model.showsSender && (appWindow.showBubbles || model.opensRun)
 
-    // Whether the gutter is reserved, which is not the same question: in the flat layout
-    // every message is indented past it, including the continuations that draw no avatar
-    // in it. Without that the second message of a run would slide left and the column
-    // would come apart.
-    property bool hasGutter: appWindow.showBubbles ? showAvatar : true
+    // Whether the gutter is reserved, which is not the same question: a continuation
+    // draws no avatar and still has to clear the gutter, or the second message of a run
+    // would slide left and the column would come apart. This asks about the chat rather
+    // than the message, which is exactly what showsSender answers.
+    property bool hasGutter: model.showsSender
     // Everything on the incoming side shifts by this, which is the whole cost of the
     // gutter - the bubble, the labels and the content all measure from parent.left.
     property int avatarSpace: hasGutter ? 52 : 0
@@ -264,15 +276,21 @@ Item {
     Label {
         id: senderLabel
         y: 18
-        width: parent.width -100
+        // Stops short of the timestamp rather than running under it: in the flat layout
+        // the two share the top row, and an outgoing name is right-aligned into the same
+        // corner the clock sits in.
+        width: appWindow.showBubbles ? parent.width - 100
+                                     : parent.width - root.stackLeft - 24 - root.timeWidth
         anchors {
             left: parent.left
             leftMargin: root.stackLeft
         }
-        // Coloured only where the avatar is: a name Telegram has picked a colour for is
-        // one of several people talking. Everywhere else it falls back to the bubble's
-        // own text colour.
-        color: root.sided ? "white" : root.showAvatar ? model.senderColor : appWindow.bubbleTextColor
+        // Coloured wherever it is doing work: several people talking, which is the
+        // avatar's rule, or the flat layout, where the name is what separates one run of
+        // messages from the next. On a balloon it is white like everything else there.
+        color: root.onBubble ? "white"
+             : root.showAvatar || !appWindow.showBubbles ? model.senderColor
+             : appWindow.bubbleTextColor
         // Cached in the model, so the emoji substitution runs once a row.
         text: model.senderHtml
         font.pixelSize: 20
@@ -280,6 +298,11 @@ Item {
         wrapMode: Text.WrapAnywhere
         maximumLineCount: 1
         horizontalAlignment: root.sided ? Text.AlignRight : Text.AlignLeft
+        // In the flat layout every run opens with a name, in a 1:1 chat as much as in a
+        // group and on your own messages as much as anyone's: with no balloon around
+        // them, the name and the timestamp are the whole of what separates one message
+        // from the next. The avatar keeps its narrower rule - it answers "several people
+        // are talking", which a 1:1 chat is not.
         visible: text !== "" && (appWindow.showBubbles || model.opensRun)
     }
 
@@ -295,7 +318,9 @@ Item {
 
         anchors {
             right: bubble.right
-            rightMargin: 13
+            // Clear of the timestamp in the flat layout, where the rank and the clock are
+            // on the same row and the balloon whose edge this hangs off is not drawn.
+            rightMargin: appWindow.showBubbles ? 13 : root.timeWidth + 8
             baseline: senderLabel.baseline
         }
         text: model.senderTitle
@@ -348,7 +373,7 @@ Item {
                             replyText.visible ? replyText.paintedWidth : 0) + 11 + 8
             height: parent.height + 6
             radius: 4
-            color: appWindow.tintOn(root.sided)
+            color: appWindow.tintOn(root.onBubble)
         }
 
         // Tapping the quote jumps to the message it points at. On the block rather than
@@ -379,8 +404,8 @@ Item {
 
             width: 3
             height: parent.height
-            color: root.sided ? "white" : appWindow.bubbleAccentColor
-            opacity: root.sided ? 0.6 : 1.0
+            color: root.onBubble ? "white" : appWindow.bubbleAccentColor
+            opacity: root.onBubble ? 0.6 : 1.0
         }
 
         Label {
@@ -390,7 +415,7 @@ Item {
             anchors { left: replyBar.right; leftMargin: 8; right: parent.right }
             text: model.replyToSender
             visible: text !== ""
-            color: root.sided ? "white" : appWindow.bubbleAccentColor
+            color: root.onBubble ? "white" : appWindow.bubbleAccentColor
             font.pixelSize: 18
             font.bold: true
             elide: Text.ElideRight
@@ -404,8 +429,8 @@ Item {
             anchors { left: replyBar.right; leftMargin: 8; right: parent.right }
             text: model.replyToText
             visible: text !== ""
-            color: root.sided ? "white" : appWindow.bubbleSecondaryColor
-            opacity: root.sided ? 0.75 : 1.0
+            color: root.onBubble ? "white" : appWindow.bubbleSecondaryColor
+            opacity: root.onBubble ? 0.75 : 1.0
             font.pixelSize: 18
             font.weight: Font.Light
             elide: Text.ElideRight
@@ -470,8 +495,8 @@ Item {
                     radius: 12
                     // Yours is filled, everyone else's is a tint of the bubble it sits on.
                     color: modelData.chosen
-                               ? (root.sided ? "white" : "#0077A8")
-                               : appWindow.tintOn(root.sided)
+                               ? (root.onBubble ? "white" : "#0077A8")
+                               : appWindow.tintOn(root.onBubble)
 
                     Row {
                         id: pill
@@ -504,8 +529,8 @@ Item {
                             visible: modelData.icon === ""
                             text: modelData.emoji
                             font.pixelSize: 16
-                            color: modelData.chosen && !root.sided ? "white"
-                                 : root.sided ? "black"
+                            color: modelData.chosen && !root.onBubble ? "white"
+                                 : root.onBubble ? "black"
                                  : appWindow.bubbleTextColor
                         }
 
@@ -516,8 +541,8 @@ Item {
                             // line under it are the one band of small text on a bubble.
                             font.pixelSize: 16
                             color: modelData.chosen
-                                       ? (root.sided ? "#0077A8" : "white")
-                                       : (root.sided ? "white" : appWindow.bubbleTextColor)
+                                       ? (root.onBubble ? "#0077A8" : "white")
+                                       : (root.onBubble ? "white" : appWindow.bubbleTextColor)
                         }
                     }
 
@@ -556,8 +581,7 @@ Item {
         // off, where one *starts* is the thing that needs marking, and a timestamp in the
         // same column at the head of every message is what makes the conversation
         // scannable. It costs no height: the row is there for the name already.
-        width: (appWindow.showBubbles ? parent.width - 100 : parent.width - root.stackLeft - 16)
-               - (sendStateIcon.visible ? sendStateIcon.paintedWidth + 6 : 0)
+        width: appWindow.showBubbles ? parent.width - 100 : parent.width - root.stackLeft - 16
         anchors {
             left: parent.left
             leftMargin: root.stackLeft
@@ -567,11 +591,11 @@ Item {
             topMargin: appWindow.showBubbles ? 4 : 22
         }
         text: model.date
-        color: root.sided ? "white" : appWindow.bubbleTextColor
+        color: root.onBubble ? "white" : appWindow.bubbleTextColor
         font.pixelSize: 16
         font.weight: Font.Light
-        // Right in the flat layout too: nothing is sided there, but a timestamp column
-        // only reads as one if it lines up.
+        // Right for everyone in the flat layout, incoming included: the timestamps only
+        // read as a column if they line up, and the label spans the row either way.
         horizontalAlignment: root.sided || !appWindow.showBubbles ? Text.AlignRight : Text.AlignLeft
     }
 
@@ -583,8 +607,14 @@ Item {
 
         visible: model.sendState !== ""
         anchors {
-            left: messageDate.right
-            leftMargin: 6
+            // Before the time, not after it - "done, at 13:06" rather than "13:06, done",
+            // which is the order Telegram writes it in. The label it hangs off is
+            // right-aligned and spans far more than its text, so this measures back from
+            // its right edge by what the text actually painted. Nothing feeds the other
+            // way: the label's width no longer subtracts this icon, which it had to when
+            // the icon sat outside the label's right edge.
+            right: messageDate.right
+            rightMargin: messageDate.paintedWidth + 6
             baseline: messageDate.baseline
         }
         text: model.sendState === "sending" ? icons.sending
