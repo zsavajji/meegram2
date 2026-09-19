@@ -20,7 +20,7 @@ Rectangle {
     // and the grid never has to lay itself out at zero height.
     visible: open
     clip: true
-    color: "white"
+    color: appWindow.panelColor
 
     onOpenChanged: {
         if (open && currentTab === -1)

@@ -245,6 +245,20 @@ constexpr int LanguagePackRefreshMs = 10000;
 // replay. See scheduleStateRestore.
 constexpr int StateRestoreDelayMs = 250;
 
+// How long to wait before reopening a connection meegramd dropped, and how many times to
+// try. Two seconds because the common causes all end with the daemon coming straight back
+// - D-Bus reactivates it on the very connect below - and the first attempt is the one that
+// has to lose a race with its listen(); five because a daemon that is not back by ten
+// seconds is not restarting, it is gone.
+constexpr int DaemonReconnectMs = 2000;
+constexpr int DaemonReconnectAttempts = 5;
+
+// How long one run of those attempts covers before a further disconnect counts as a new
+// problem rather than the same one. A minute: long enough that a dropped-and-retried
+// connection cannot loop, short enough that an app left open all day still recovers from
+// an unrelated daemon restart hours later.
+constexpr qint64 DaemonReconnectCooldownMs = 60000;
+
 }  // namespace
 
 AppManager::AppManager(QObject *parent)
@@ -258,6 +272,12 @@ AppManager::AppManager(QObject *parent)
     connect(qApp, SIGNAL(aboutToQuit()), this, SLOT(close()));
 
     connect(m_client.get(), SIGNAL(result(td::td_api::Object *)), SLOT(handleResult(td::td_api::Object *)));
+
+    // The socket is opened once, in Client's constructor, and every send after it dies is
+    // dropped before it is encoded - so losing meegramd mid-run used to end the run, in
+    // silence. Only the daemon transport can ever emit this; connected unconditionally so
+    // the wiring does not have to agree with the build about which signals exist.
+    connect(m_client.get(), SIGNAL(disconnected()), SLOT(handleDaemonGone()));
 
     // Here rather than in initialize(), and that is the whole point of it: initialize() is
     // called from main.qml's Component.onCompleted, by which time the root page has been
@@ -301,6 +321,11 @@ bool AppManager::isAuthorized() const noexcept
 bool AppManager::isServiceUnreachable() const noexcept
 {
     return m_serviceUnreachable;
+}
+
+const QString &AppManager::serviceError() const noexcept
+{
+    return m_serviceError;
 }
 
 bool AppManager::isSignedOut() const noexcept
@@ -447,7 +472,7 @@ void AppManager::initialize() noexcept
     }
 }
 
-void AppManager::retry() noexcept
+bool AppManager::retry() noexcept
 {
     // The reconnect is the half that cannot be skipped: with the socket gone, Client::send
     // drops every request before it is encoded, so re-running initialize() on its own
@@ -456,7 +481,7 @@ void AppManager::retry() noexcept
     if (!m_client->reconnect())
     {
         qWarning() << "retry: still nothing to connect to; leaving the message up";
-        return;
+        return false;
     }
 
     m_serviceUnreachable = false;
@@ -465,7 +490,58 @@ void AppManager::retry() noexcept
     // Back to the spinner, with a fresh stall deadline behind it - so an attempt that goes
     // the same way as the last one puts the message back up on its own, and the button
     // with it.
+    //
+    // ponytail: a reconnect while signed in leaves the chat list as stale as the moment the
+    // socket died - handleAuthorizationState returns early once there is a ChatManager, so
+    // the getCurrentState replay does not run a second time. Everything sent from here on
+    // works and new updates arrive; what is missing is whatever happened while nothing was
+    // listening. Replay into live models if that ever shows.
     initialize();
+
+    return true;
+}
+
+void AppManager::handleDaemonGone() noexcept
+{
+    // The budget is per *episode*, not per disconnect. A connection that lived for an hour
+    // and then died is a new problem and gets five fresh attempts; five disconnects inside
+    // a minute are one problem being retried, and resetting on each of them is an
+    // unbounded loop - which is precisely what a daemon that accepts a connection and
+    // closes it immediately produces. That is not hypothetical: a peer check this binary
+    // could not pass did it 5461 times in a single run.
+    const auto now = QDateTime::currentMSecsSinceEpoch();
+
+    if (now - m_lastReconnectEpisode >= DaemonReconnectCooldownMs)
+    {
+        m_lastReconnectEpisode = now;
+        m_reconnectsLeft = DaemonReconnectAttempts;
+    }
+
+    if (m_reconnectsLeft <= 0)
+    {
+        qWarning() << "meegramd went away again within the cooldown; not reconnecting";
+        return;
+    }
+
+    qWarning() << "meegramd went away; reconnecting in" << DaemonReconnectMs << "ms";
+
+    QTimer::singleShot(DaemonReconnectMs, this, SLOT(reconnectToDaemon()));
+}
+
+void AppManager::reconnectToDaemon() noexcept
+{
+    if (retry())
+        return;
+
+    if (--m_reconnectsLeft <= 0)
+    {
+        // The end of the automatic half. The manual one is still there - MainPage's button
+        // if startup never finished, and the next launch otherwise.
+        qWarning() << "meegramd did not come back after" << DaemonReconnectAttempts << "attempts; giving up";
+        return;
+    }
+
+    QTimer::singleShot(DaemonReconnectMs, this, SLOT(reconnectToDaemon()));
 }
 
 void AppManager::setParameters() noexcept
@@ -727,15 +803,36 @@ void AppManager::reportInitializationStall() noexcept
                << "| connection" << (m_connectionStateString.isEmpty() ? QLatin1String("never reported") : QLatin1String("reported"))
                << m_connectionStateString << "| authorized" << m_isAuthorized;
 
-    // The half that cannot release itself. Nothing has come back from TDLib at all, and
-    // nothing will: under the daemon transport the socket is opened once in Client's
-    // constructor and there is no reconnect, so this is a dead run - a failed connect, a
-    // connection the daemon's peer check refused, or a daemon that is not there. The
-    // spinner has nothing to resolve to, and the warning above reaches no log the user
-    // can read: D-Bus activation and the launcher both run the app through invoker, which
-    // discards stderr. So say it on screen instead. MainPage swaps the spinner for it.
+    // The half that cannot release itself. Nothing has come back from TDLib at all - a
+    // failed connect, a connection the daemon's peer check refused, or a daemon that is not
+    // there - and the spinner has nothing to resolve to. The warning above reaches no log
+    // the user can read either: D-Bus activation and the launcher both run the app through
+    // invoker, which discards stderr. So say it on screen instead; MainPage swaps the
+    // spinner for it.
+    //
+    // Deliberately no automatic retry from here, which is what this used to do and had to
+    // be taken back out. retry() calls initialize(), initialize() arms this deadline, and a
+    // transport that reconnects but still never answers comes straight back here - so the
+    // screen and the spinner alternated on a ten-second cycle for as long as the app was
+    // open, which is worse than the dead end it replaced. The button is the retry at
+    // startup; the automatic one belongs to handleDaemonGone, which fires on a real
+    // disconnect and cannot re-trigger itself.
+    //
+    // A cold D-Bus activation of meegramd claims the bus name in 0.10 s and has its socket
+    // bound 0.02 s later, measured with 900 MB pushed through the page cache first - so
+    // nothing here is waiting on a slow start, and there is nothing for a timer to win.
     if (!m_initializationStatus[0])
     {
+        // The transport's own account of itself, if it has one. It does not when the socket
+        // opened and TDLib simply never answered over it, which is a different failure and
+        // has to read as one - the daemon is there, it is what is behind the daemon that is
+        // not. Untranslated for the same reason the screen is: on a first launch this is
+        // what has stopped the language pack from arriving.
+        m_serviceError = m_client->lastConnectError();
+
+        if (m_serviceError.isEmpty())
+            m_serviceError = QLatin1String("meegramd answered, but TDLib behind it did not.");
+
         m_serviceUnreachable = true;
         emit serviceUnreachableChanged();
     }

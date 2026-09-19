@@ -212,7 +212,7 @@ Item {
     // which reads as broken rather than as empty.
     Label {
         anchors.centerIn: parent
-        color: "#505050"
+        color: appWindow.secondaryColor
         text: qsTr("NoResult")
         visible: model.filter !== "" && model.count === 0 && !model.loading
     }

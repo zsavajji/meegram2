@@ -1,5 +1,22 @@
 <aegis>
+    <!-- The credential meegramd checks a connecting UI for. Namespaced by package name by
+         aegis itself, so the daemon looks for "meegram::Client".
+
+         It exists because the socket in $HOME carries a logged-in Telegram session, and
+         the check that used to guard it - comparing the peer's /proc/<pid>/exe against the
+         binary installed next to meegramd - cannot work on a device with aegis enforcing:
+         the UI below is granted credentials, a credentialed process is not dumpable, and
+         an unprivileged daemon gets EACCES reading its /proc entry. A token is held by the
+         kernel against the connection instead, so verifying it needs no privilege at all.
+
+         Granted to the UI only. meegramd requests nothing: it is the one checking. -->
+    <provide>
+        <credential name="Client" />
+    </provide>
+
     <request policy="add">
+        <credential name="meegram::Client" />
+
         <credential name="Location" />
         <credential name="TrackerReadAccess" />
         <credential name="TrackerWriteAccess" />

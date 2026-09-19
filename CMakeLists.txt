@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(MeeGram VERSION 0.3.5 LANGUAGES CXX)
+project(MeeGram VERSION 0.3.7 LANGUAGES CXX)
 
 # Without this an unset CMAKE_BUILD_TYPE means no -O flag at all, i.e. -O0.
 # This codebase leans on std::ranges views and templates, which -O0 punishes hard.
@@ -358,7 +358,12 @@ if (MEEGRAM_JSON_TRANSPORT)
     endif()
 
     add_executable(meegramd src/daemon/main.cpp src/daemon/Notifier.cpp)
-    target_link_libraries(meegramd PRIVATE Td::TdJsonStatic Threads::Threads ${DBUS_LIBRARY})
+    # libcreds2 is how the peer check asks aegis what the process on the other end of the
+    # socket is, which is the only form of that question a device with aegis enforcing will
+    # answer - see isPeerTrusted in src/daemon/main.cpp. Part of the platform, so it is in
+    # the sysroot and on every device; no find_library guard, because a build that cannot
+    # find it should say so rather than silently produce a daemon that trusts the uid alone.
+    target_link_libraries(meegramd PRIVATE Td::TdJsonStatic Threads::Threads ${DBUS_LIBRARY} creds)
     target_compile_options(meegramd PRIVATE -Wall -Wextra -Wno-psabi)
 
     # src/Log.hpp, shared with the app. The only header meegramd takes from outside its own

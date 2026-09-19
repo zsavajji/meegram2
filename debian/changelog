@@ -1,3 +1,39 @@
+meegram (0.3.7) unstable; urgency=low
+
+  * Fixes a device the app could never run on at all. The background process checks that
+    whatever connects to it is this app, by reading which program the connecting process
+    is running - and on a stock phone the system will not answer that question, so the
+    check said no to the app itself and hung up on it, every launch. Nothing reached
+    Telegram and the screen said it could not be reached. The app is now given a
+    credential of its own that the phone vouches for, which is what the background
+    process checks first - it needs no permission to read and cannot be imitated by
+    another program. Where the phone hands out no credentials, as on a device with
+    security checks switched off, it falls back to the old check and then to the user
+    the connection comes from, and says in its log which of the three answered.
+  * The failure screen no longer alternates with the spinner every ten seconds when it
+    cannot get through - 0.3.6 retried on a timer that re-armed itself. Retrying is now
+    the button on that screen, and it happens on its own only when a connection that was
+    working is lost, at most five times a minute.
+  * When the background process hangs up on the app, the screen says so instead of
+    blaming Telegram - the two look the same from the app's side and are not the same
+    problem.
+
+ -- Andrea Faggin <hellothere@andreafagg.in>  Mon, 14 Sep 2026 21:40:00 +0200
+
+meegram (0.3.6) unstable; urgency=low
+
+  * The app no longer goes quiet for good when the background process behind it stops.
+    That process holds the Telegram connection, and if it went away - the session ending
+    under it, an upgrade restarting it - the app kept running against a connection that
+    could not answer: nothing sent, nothing received, no error, and nothing to do but
+    close it and open it again. It now notices and reopens the connection by itself.
+  * When the app cannot reach that process at startup, the screen that says so now says
+    which part failed instead of the same three lines every time - whether the process
+    would not start, started but never opened its socket, or answered while Telegram
+    behind it did not. It also keeps trying on its own rather than waiting to be told.
+
+ -- Andrea Faggin <hellothere@andreafagg.in>  Mon, 14 Sep 2026 20:30:00 +0200
+
 meegram (0.3.5) unstable; urgency=low
 
   * Reactions. The pills sit inside the bubble, under the message: each one is the emoji,

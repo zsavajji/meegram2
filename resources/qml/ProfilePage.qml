@@ -143,7 +143,7 @@ Page {
                 Label {
                     width: parent.width
                     text: chatInfo.status
-                    color: "#505050"
+                    color: appWindow.secondaryColor
                     font.pixelSize: 22
                     font.weight: Font.Light
                     wrapMode: Text.WordWrap
@@ -163,7 +163,7 @@ Page {
                             width: parent.width
                             height: 1
                             opacity: 0.5
-                            color: "#cccccc"
+                            color: appWindow.separatorColor
                         }
 
                         Item {
@@ -192,7 +192,7 @@ Page {
                             // pack. A key it does not carry shows as its own name; swap
                             // it if one turns up bare on device.
                             text: qsTr(modelData.key)
-                            color: "#505050"
+                            color: appWindow.secondaryColor
                             font.pixelSize: 20
                             font.weight: Font.Light
                         }
@@ -216,7 +216,7 @@ Page {
                         width: parent.width
                         height: 1
                         opacity: 0.5
-                        color: "#cccccc"
+                        color: appWindow.separatorColor
                     }
 
                     Item {
@@ -226,7 +226,7 @@ Page {
 
                     Label {
                         text: qsTr("GroupMembers")
-                        color: "#505050"
+                        color: appWindow.secondaryColor
                         font.pixelSize: 20
                         font.weight: Font.Light
                     }
@@ -313,7 +313,7 @@ Page {
                                         anchors { right: parent.right; baseline: memberName.baseline }
                                         text: modelData.tag
                                         visible: text !== ""
-                                        color: "#505050"
+                                        color: appWindow.secondaryColor
                                         font.pixelSize: 18
                                         font.weight: Font.Light
                                     }
@@ -322,7 +322,7 @@ Page {
                                 Label {
                                     width: parent.width
                                     text: modelData.status
-                                    color: "#505050"
+                                    color: appWindow.secondaryColor
                                     font.pixelSize: 20
                                     font.weight: Font.Light
                                     elide: Text.ElideRight

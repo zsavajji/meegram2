@@ -71,7 +71,7 @@ Item {
             width: visible ? 30 : 0
             font.family: icons.fontFamily
             font.pixelSize: 24
-            color: "#505050"
+            color: appWindow.secondaryColor
             text: icons.channel
         }
 
@@ -82,9 +82,9 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             font.bold: true
             font.pixelSize: 26
-            // Text colour is constant across states: the Harmattan spec signals
-            // "down" with the background fill alone.
-            color: "#282828"
+            // No colour of its own: Label already takes the theme foreground, which
+            // is what inverts it. Constant across states either way - the Harmattan
+            // spec signals "down" with the background fill alone.
             elide: Text.ElideRight
             // elideEmoji, not replaceEmoji: emoji markup makes this rich text, and
             // rich text ignores the elide above. Plain titles come back untouched and
@@ -98,7 +98,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             font.weight: Font.Light
             font.pixelSize: 20
-            color: "#505050"
+            color: appWindow.secondaryColor
             text: model.date
         }
     }
@@ -117,7 +117,7 @@ Item {
             font.pixelSize: 22
             // LastMessageRole is a plain string, so the old `model.lastMessage.isService`
             // test was always undefined and the selection-colour branch never ran.
-            color: "#505050"
+            color: appWindow.secondaryColor
             elide: Text.ElideRight
             // ChatModel already strips the line breaks and caches the result, so this
             // is a plain read - and plain text, so say so rather than let AutoText

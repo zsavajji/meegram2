@@ -151,7 +151,7 @@ Page {
 
     Label {
         anchors.centerIn: listView
-        color: "#505050"
+        color: appWindow.secondaryColor
         visible: root.model.searched && !root.model.loading && root.model.count === 0
         text: qsTr("NoResult")
     }

@@ -34,6 +34,8 @@
 
 #include <dbus/dbus.h>
 
+#include <sys/creds.h>
+
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -438,6 +440,47 @@ std::string expectedPeerExecutable()
     return std::string(self, static_cast<size_t>(slash - self)) + "/meegram";
 }
 
+// The credential debian/meegram.aegis defines and grants to the UI binary, and to nothing
+// else. Namespaced by package name, which is aegis's own convention - every third-party
+// token in /usr/share/aegis-manifest-dev/api/*.csv reads the same way.
+constexpr auto ClientCredential = "meegram::Client";
+
+// Whether the peer carries that credential.
+//
+// creds_getpeer(fd), not creds_gettask(pid): it reads what the kernel attached to this
+// socket when the peer connected, so there is no pid to resolve, nothing in /proc anyone
+// has to be permitted to read, and no window in which the pid could be recycled underneath
+// the check. sys/creds.h says as much about the alternative - creds_gettask "should be
+// used only in order to obtain a credential set either for process itself or for its
+// children. Otherwise its usage maybe not secure."
+bool peerCarriesClientCredential(int fd)
+{
+    // Resolved once: the name-to-token lookup goes to the credentials database, and the
+    // answer cannot change while this process runs.
+    static creds_value_t value = CREDS_BAD;
+    static creds_type_t type = CREDS_BAD;
+    static bool resolved = false;
+
+    if (!resolved)
+    {
+        resolved = true;
+        type = static_cast<creds_type_t>(creds_str2creds(ClientCredential, &value));
+    }
+
+    if (type == CREDS_BAD)
+        return false;
+
+    creds_t credentials = creds_getpeer(fd);
+    if (!credentials)
+        return false;
+
+    const bool carried = creds_have_p(credentials, type, value) != 0;
+
+    creds_free(credentials);
+
+    return carried;
+}
+
 // Whether a freshly accepted connection is the UI and not some other process on the
 // device that noticed an open socket.
 //
@@ -470,10 +513,38 @@ bool isPeerTrusted(int fd, const std::string &expected)
         return false;
     }
 
+    // The check that holds on a device with aegis switched on, which is most of them. The
+    // credential is held by the kernel against this socket: a different program at this uid
+    // does not carry it, cannot claim it, and - unlike the executable path below - nothing
+    // about verifying it depends on this process being allowed to read another one's /proc.
+    //
+    // This is the primary check, and the two below it are what a device with aegis in open
+    // mode falls back to: there no process carries any token at all, so this answers false
+    // for the real UI as well.
+    if (peerCarriesClientCredential(fd))
+    {
+        static bool reported = false;
+
+        if (!reported)
+        {
+            reported = true;
+            std::fprintf(stderr, "meegramd: peer carries %s\n", ClientCredential);
+        }
+
+        return true;
+    }
+
     if (expected.empty())
     {
-        std::fprintf(stderr, "meegramd: cannot resolve own path, so no peer can be verified\n");
-        return false;
+        static bool reported = false;
+
+        if (!reported)
+        {
+            reported = true;
+            std::fprintf(stderr, "meegramd: no %s and no own path to compare; trusting the uid alone from here\n", ClientCredential);
+        }
+
+        return true;
     }
 
     // Read immediately. The pid is a snapshot taken at connect() time, so if that process
@@ -484,10 +555,46 @@ bool isPeerTrusted(int fd, const std::string &expected)
 
     char peer[PATH_MAX];
     const ssize_t peerLength = ::readlink(link, peer, sizeof(peer) - 1);
+
+    // The kernel refusing to answer is not the same as the process not being there, and
+    // only one of the two is a reason to hang up.
+    //
+    // A stock N9 clears the dumpable flag on a process aegis has given credentials to, so
+    // /proc/<pid>/exe there belongs to root and this readlink fails with EACCES for every
+    // connection the UI will ever make. Failing closed then is not a defence, it is the
+    // app never reaching TDLib at all: measured on such a device, 5461 consecutive
+    // rejections in one run with "Can't reach TDLib" on screen throughout. A device where
+    // /proc is readable - a developer one, an open-mode kernel - never sees this branch,
+    // which is exactly why it went unnoticed.
+    //
+    // So fall back to the uid, which is kernel-supplied and unforgeable. What that gives
+    // up is stopping a *different* program at this uid from connecting, and the note above
+    // already concedes that boundary: anything running as this user can ptrace the real
+    // meegram and drive the socket from inside it, or skip the socket entirely and read
+    // ~/.meegram/tdlib, which is unencrypted. This trades the weaker half of a check that
+    // was never a security boundary for an app that runs.
     if (peerLength <= 0)
     {
-        std::fprintf(stderr, "meegramd: cannot read %s; rejecting\n", link);
-        return false;
+        // Any failure, not a list of the ones worth forgiving. The affected device is not
+        // in front of anyone who can read its errno, and a fallback that only covers the
+        // errno guessed at from a log line is a fix that may simply not apply - EACCES
+        // from a process aegis has made undumpable and ENOENT from one that exited between
+        // the accept and here both arrive as "this cannot be checked", and neither is a
+        // reason to hang up on a connection from the right uid. The errno is logged, so the
+        // next report says which it was.
+        //
+        // Once, not per connection: this fired 5461 times in a single run on the device
+        // that reported it, which is also how it rotated a 256 KB log twice.
+        static bool reported = false;
+
+        if (!reported)
+        {
+            reported = true;
+            std::fprintf(stderr, "meegramd: no %s, and %s is not readable (%s); trusting the uid alone from here\n",
+                         ClientCredential, link, peerLength < 0 ? std::strerror(errno) : "empty link");
+        }
+
+        return true;
     }
 
     peer[peerLength] = '\0';

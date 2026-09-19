@@ -47,6 +47,12 @@ bool Client::reconnect()
     return true;
 }
 
+QString Client::lastConnectError() const
+{
+    // Nothing to connect to and so nothing to fail: TDLib is in this process.
+    return QString();
+}
+
 void Client::initialize()
 {
     // A worker thread using std::jthread for automatic joining

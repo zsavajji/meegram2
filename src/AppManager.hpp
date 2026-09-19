@@ -40,6 +40,11 @@ class AppManager : public QObject
     // is not having heard from TDLib at all. See reportInitializationStall.
     Q_PROPERTY(bool serviceUnreachable READ isServiceUnreachable NOTIFY serviceUnreachableChanged)
 
+    // Which of the ways it failed, in one line, for the screen that reports it. Empty until
+    // there is something to say. Changes with serviceUnreachable and is notified by it -
+    // the two are set together and read together.
+    Q_PROPERTY(QString serviceError READ serviceError NOTIFY serviceUnreachableChanged)
+
     // Whether to offer the sign-in screen. Distinct from !authorized, which is also true
     // before TDLib has said anything - and MainPage used !chatManager for this, so the
     // moment appInitialized fired ahead of authorizationStateReady a signed-in user was
@@ -70,6 +75,8 @@ public:
     bool isAuthorized() const noexcept;
 
     bool isServiceUnreachable() const noexcept;
+
+    const QString &serviceError() const noexcept;
 
     bool isSignedOut() const noexcept;
 
@@ -110,10 +117,11 @@ public slots:
 
     void initialize() noexcept;
 
-    // The "Try again" button on MainPage's unreachable screen. Reopens the connection and
-    // runs startup again from the top; does nothing but say so if there is still no daemon
-    // to reach, so it can be pressed as many times as it takes.
-    void retry() noexcept;
+    // The "Try again" button on MainPage's unreachable screen, and the one thing that gets
+    // a dead transport moving again. Reopens the connection and runs startup from the top;
+    // false, and nothing changed, if there is still no daemon to reach - so it can be
+    // pressed, or scheduled, as many times as it takes.
+    bool retry() noexcept;
 
 private slots:
     // The endpoint's tap, held back until there is a QML scene to receive it.
@@ -130,6 +138,17 @@ private slots:
     void handleChatRequested(const QString &chatId) noexcept;
 
     void handleResult(td::td_api::Object *object);
+
+    // meegramd went away under a running app. Arms the reconnect below rather than
+    // reconnecting here: the daemon is usually on its way back - D-Bus reactivates it, an
+    // upgrade restarts it - and an attempt made the instant it died is the one attempt
+    // guaranteed to find nothing.
+    void handleDaemonGone() noexcept;
+
+    // One reconnect attempt, re-arming itself until the budget runs out. A slot so it can
+    // be a timer, and separate from retry() so the button does not inherit a background
+    // loop the user did not ask for.
+    void reconnectToDaemon() noexcept;
 
     void loadLanguagePack() noexcept;
 
@@ -191,11 +210,23 @@ private:
     // otherwise push two chat pages.
     QString m_pendingChatId;
 
-    // One way. Set at the stall deadline and never cleared: there is no reconnect path -
-    // the socket is opened once, in Client's constructor - so a transport that is dead at
-    // eight seconds is dead for the run. If TDLib does answer late, appInitialized fires
-    // and MainPage leaves this state on `initialized` without consulting it.
+    // Set at the stall deadline, cleared by a reconnect that works. If TDLib does answer
+    // late, appInitialized fires and MainPage leaves this state on `initialized` without
+    // consulting it.
     bool m_serviceUnreachable{false};
+
+    // What to put under "Can't reach TDLib". See reportInitializationStall.
+    QString m_serviceError;
+
+    // Automatic reconnect attempts left for the disconnect being recovered from. Counted
+    // rather than retried forever: a daemon that is coming back is back within a couple of
+    // seconds, and one that is not would otherwise have this process blocking its own UI
+    // thread inside connect() every few seconds for the rest of the run.
+    int m_reconnectsLeft{0};
+
+    // When the current run of those attempts started, so a disconnect that arrives while
+    // one is still in progress does not hand out a fresh budget. See handleDaemonGone.
+    qint64 m_lastReconnectEpisode{0};
 
     // Seeded in the constructor from Settings::wasAuthorized, not default-initialised: the
     // whole point is to be right before TDLib answers.

@@ -16,6 +16,15 @@ PageStackWindow {
 
     property bool isPortrait: screen.currentOrientation !== Screen.Landscape
 
+    // Dark theme. The platform inverts everything it draws itself off theme.inverted -
+    // page background, Labels with no colour of their own, toolbars, list highlights - so
+    // the only colours left to decide are the literals this app paints. These three are
+    // the ones it repeats; anything drawn on a bubble, a count bubble or the picker
+    // headers already carries its own background and is right in both themes.
+    property color secondaryColor: theme.inverted ? "#8c8c8c" : "#505050"
+    property color separatorColor: theme.inverted ? "#3c3c3c" : "#cccccc"
+    property color panelColor: theme.inverted ? "#1e1e1e" : "white"
+
     // Latched from appManager's one-shot appInitialized. It lives here rather than on a
     // page because appWindow is created once and never destroyed - a page that misses the
     // signal, or is recreated after it, can never recover it.

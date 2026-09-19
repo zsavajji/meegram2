@@ -126,6 +126,23 @@ Page {
                     width: parent.width - 40
                 }
 
+                // Which of them failed, in the transport's own words. Without it this screen
+                // said the same three lines whether the bus would not start meegramd, or
+                // meegramd started and never opened its socket, or the socket was fine and
+                // TDLib behind it never answered - three different bugs, on a device whose
+                // log the person reporting it cannot read. A report of this screen could
+                // never say more than "it did not start".
+                Text {
+                    text: appManager.serviceError
+                    visible: text !== ""
+                    wrapMode: Text.Wrap
+                    font.pixelSize: 18
+                    color: "#777777"
+                    horizontalAlignment: Text.AlignHCenter
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: parent.width - 40
+                }
+
                 // Reopens the connection and runs startup again. A failed attempt leaves
                 // this screen exactly as it is, so it can be pressed again; a successful
                 // one goes back to the spinner, and the stall deadline behind it puts this

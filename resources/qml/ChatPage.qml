@@ -236,7 +236,6 @@ Page {
                 Label {
                     anchors.horizontalCenter: parent.horizontalCenter
                     anchors.verticalCenter: parent.verticalCenter
-                    color: "black"
                     font.bold: true
                     font.pixelSize: 18
                     verticalAlignment: Text.AlignVCenter
@@ -679,7 +678,7 @@ Page {
         Label {
             anchors.centerIn: parent
 
-            color: "#505050"
+            color: appWindow.secondaryColor
             font.pixelSize: 24
             horizontalAlignment: Text.AlignHCenter
             text: qsTr("NoMessages")
@@ -704,7 +703,7 @@ Page {
                 // Three rows at most: it sits over the conversation, and a longer list
                 // says less than typing one more letter does.
                 height: visible ? Math.min(mentionModel.count, 3) * 64 : 0
-                color: "white"
+                color: appWindow.panelColor
 
                 ListView {
                     anchors.fill: parent
@@ -745,7 +744,7 @@ Page {
                     anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
                     height: 1
                     opacity: 0.5
-                    color: "#cccccc"
+                    color: appWindow.separatorColor
                 }
             }
 
@@ -757,7 +756,7 @@ Page {
                 visible: root.canSend && (composeState.replyId !== 0 || composeState.editId !== 0)
                 width: parent.width
                 height: visible ? 60 : 0
-                color: "white"
+                color: appWindow.panelColor
 
                 Rectangle {
                     id: replyBannerBar
@@ -799,7 +798,7 @@ Page {
                         top: replyBannerSender.bottom
                     }
                     text: composeState.preview
-                    color: "#505050"
+                    color: appWindow.secondaryColor
                     font.pixelSize: 18
                     font.weight: Font.Light
                     elide: Text.ElideRight
@@ -817,7 +816,7 @@ Page {
                     text: icons.close
                     font.family: icons.fontFamily
                     font.pixelSize: 32
-                    color: "#505050"
+                    color: appWindow.secondaryColor
 
                     MouseArea {
                         anchors.fill: parent
@@ -837,7 +836,7 @@ Page {
                     anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
                     height: 1
                     opacity: 0.5
-                    color: "#cccccc"
+                    color: appWindow.separatorColor
                 }
             }
 
@@ -876,7 +875,7 @@ Page {
                 visible: root.canSend
                 height: 0
                 clip: true
-                color: "white"
+                color: appWindow.panelColor
 
                 Rectangle {
                     anchors.left: parent.left
@@ -885,7 +884,7 @@ Page {
                     anchors.rightMargin: 16
                     height: 1
                     opacity: 0.5
-                    color: "#cccccc"
+                    color: appWindow.separatorColor
                 }
 
                 Label {

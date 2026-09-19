@@ -4,6 +4,7 @@
 #include <td/telegram/td_api.h>
 
 #include <QObject>
+#include <QString>
 
 #include <functional>
 #include <memory>
@@ -44,6 +45,11 @@ public:
     // before it is encoded, so no amount of re-sending reaches anyone.
     bool reconnect();
 
+    // Why the last attempt to reach meegramd failed, or empty if it did not. Read by the
+    // screen that reports the failure; see connectError() in ClientProxy.cpp. Always empty
+    // on the in-process transport, where there is nothing to reach.
+    QString lastConnectError() const;
+
     // Feeds a locally built object into result() as if TDLib had sent it.
     //
     // TDLib emits updateAuthorizationState only when the state *changes*. In process that
@@ -67,6 +73,20 @@ public:
 
 signals:
     void result(td::td_api::Object *object);
+
+    // meegramd went away under a running app: the reader lost the socket without this
+    // process having asked it to. Emitted from the reader thread, so every connection to it
+    // is queued.
+    //
+    // It matters because nothing else can notice. Client::send drops every request before
+    // it is encoded once the socket is dead, so a UI that loses the daemon mid-run - the
+    // session bus going away under it (see the poll loop in src/daemon/main.cpp), a daemon
+    // killed by an upgrade, a client dropped for falling too far behind - goes quiet with
+    // no error anywhere the user can see it. The stall deadline in AppManager only ever
+    // fires once, seconds into startup, so after that there was no way back at all.
+    //
+    // Never emitted by the in-process transport, where there is no connection to lose.
+    void disconnected();
 
 private slots:
     // Frees an update after every queued result() slot invocation has run. See the

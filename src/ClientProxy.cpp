@@ -35,6 +35,7 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <atomic>
 #include <mutex>
 
 namespace {
@@ -52,6 +53,39 @@ std::string socketPath()
 // Matches resources/com.meegram.Daemon.service and BusName in src/daemon/main.cpp.
 // Distinct from `com.meegram`, which this process owns via NotificationManager.
 constexpr auto DaemonService = "com.meegram.Daemon";
+
+// Why the last connect failed, in one line, for the screen that has to explain itself.
+//
+// Every branch below already says this to qWarning, and on this device that is a file no
+// user can read: the launcher runs the app through invoker, which discards stderr, so the
+// only copy is in ~/.meegram/meegram.log on a phone whose owner is the only person who can
+// see the failure. The four failures are not interchangeable - a bus that would not
+// activate meegramd, a meegramd that never bound its socket, and a socket that was there
+// all along are three different bugs - and the screen used to flatten all of them into
+// "Nothing has come back since startup".
+//
+// A static because the connect happens in Client's member initialiser, before there is a
+// Client to hang it on. Written only from connectToDaemon, which runs on the UI thread.
+QString &connectError()
+{
+    static QString reason;
+    return reason;
+}
+
+// Whether meegramd hung up on its own since the last connect. Cleared by every attempt,
+// set by the reader.
+//
+// Separate from the string above, and an atomic rather than a second QString, because the
+// reader thread writes this one while the UI thread reads it - and all it has to carry is
+// which of two stories to tell. It matters because the two are indistinguishable from the
+// connect alone: a daemon that accepts and then closes gives a connect() that succeeded,
+// so the screen reported "meegramd answered, but TDLib behind it did not" for a daemon
+// that had hung up on the app 5461 times.
+std::atomic<bool> &daemonDropped()
+{
+    static std::atomic<bool> dropped{false};
+    return dropped;
+}
 
 // One attempt, no diagnostics - the caller decides whether a failure is worth reporting,
 // because the first one never is.
@@ -84,6 +118,7 @@ bool startDaemonService()
     if (!interface)
     {
         qWarning("Client: no session bus, so meegramd cannot be activated. Start it by hand.");
+        connectError() = QLatin1String("No session bus, so meegramd could not be started.");
         return false;
     }
 
@@ -97,6 +132,12 @@ bool startDaemonService()
     if (!reply.isValid())
     {
         qWarning("Client: cannot activate %s: %s", DaemonService, qPrintable(reply.error().message()));
+
+        // Verbatim, because the distinction is the diagnosis. A name dbus-daemon does not
+        // know reads as ServiceUnknown and means the package is half installed; a meegramd
+        // that exits before it claims the name reads as NoReply, twenty-five seconds later,
+        // and means meegramd itself failed - its own log says why.
+        connectError() = QString::fromLatin1("meegramd would not start: ") + reply.error().message();
         return false;
     }
 
@@ -106,6 +147,11 @@ bool startDaemonService()
 int connectToDaemon()
 {
     const std::string path = socketPath();
+
+    // Cleared here rather than at each success: this is the one entry point, and a reconnect
+    // that works must not leave the previous failure on screen.
+    connectError().clear();
+    daemonDropped() = false;
 
     MEEGRAM_MARK("daemon-connect-begin");
 
@@ -155,6 +201,8 @@ int connectToDaemon()
 
     qWarning("Client: activated %s but no socket on %s: %s", DaemonService, path.c_str(), std::strerror(errno));
 
+    connectError() = QString::fromLatin1("meegramd started but never opened ") + QString::fromStdString(path);
+
     return -1;
 }
 
@@ -175,19 +223,36 @@ Client::Client(QObject *parent)
 
 Client::~Client()
 {
-    // The reader is parked in read(). A stop_token cannot interrupt that, so shut the
-    // socket down first: read() returns 0 and the loop falls out on its own. Without this
-    // ~jthread would join a thread that is never going to wake.
+    // Before the shutdown, not after. The reader treats a read that ends while the token is
+    // unset as meegramd going away and emits disconnected() - so the stop request is the
+    // only thing that tells a socket this process closed from one that closed on it.
+    m_worker.request_stop();
+
+    // The reader is parked in read(). A stop_token cannot interrupt that, so the socket has
+    // to be shut down as well: read() returns 0 and the loop falls out on its own. Without
+    // this ~jthread would join a thread that is never going to wake.
     if (m_socket >= 0)
         ::shutdown(m_socket, SHUT_RDWR);
-
-    m_worker.request_stop();
 
     if (m_worker.joinable())
         m_worker.join();
 
     if (m_socket >= 0)
         ::close(m_socket);
+}
+
+QString Client::lastConnectError() const
+{
+    if (!connectError().isEmpty())
+        return connectError();
+
+    // The connect succeeded and the daemon hung up anyway, which is what a peer meegramd
+    // will not accept looks like from this side - and is not the same failure as a socket
+    // that works with nothing behind it.
+    if (daemonDropped())
+        return QLatin1String("meegramd closed the connection. Its own log says why.");
+
+    return QString();
 }
 
 int Client::clientId() const noexcept
@@ -255,14 +320,15 @@ void Client::send(td::td_api::object_ptr<td::td_api::Function> request, std::fun
 bool Client::reconnect()
 {
     // The destructor's sequence, plus an open at the end - and the order is the whole
-    // function. The reader is parked in read() on m_socket and a stop_token cannot
-    // interrupt that, so the socket has to be shut down before the join; and the old
-    // thread has to be joined before m_socket is reassigned, or it wakes up reading the
-    // connection that replaced it.
+    // function. The stop is requested first so the reader does not report a socket this
+    // function is replacing as one meegramd dropped; the reader is parked in read() on
+    // m_socket and a stop_token cannot interrupt that, so the socket is shut down as well;
+    // and the old thread has to be joined before m_socket is reassigned, or it wakes up
+    // reading the connection that replaced it.
+    m_worker.request_stop();
+
     if (m_socket >= 0)
         ::shutdown(m_socket, SHUT_RDWR);
-
-    m_worker.request_stop();
 
     if (m_worker.joinable())
         m_worker.join();
@@ -307,16 +373,14 @@ void Client::initialize()
         {
             const ssize_t n = ::read(m_socket, buffer, sizeof(buffer));
             if (n == 0)
-            {
-                qWarning("Client: meegramd closed the connection");
                 break;
-            }
             if (n < 0)
             {
                 if (errno == EINTR)
                     continue;
 
-                qWarning("Client: read from meegramd failed: %s", std::strerror(errno));
+                if (!token.stop_requested())
+                    qWarning("Client: read from meegramd failed: %s", std::strerror(errno));
                 break;
             }
 
@@ -330,6 +394,24 @@ void Client::initialize()
                 if (!line.empty())
                     handleLine(line);
             }
+        }
+
+        // A stop that was asked for is this process closing its own socket - the destructor
+        // and reconnect() both request it before they shut the socket down. Anything else is
+        // meegramd going away under a running app, and nothing used to notice: send() drops
+        // every request before it is encoded once the socket is dead, so the UI sat on a
+        // connection that could not answer for the rest of the run, with no error and no way
+        // back. AppManager::handleDaemonGone reopens it.
+        //
+        // Queued by Qt, because this is the reader thread and every receiver is on the main
+        // one.
+        if (!token.stop_requested())
+        {
+            qWarning("Client: meegramd closed the connection");
+
+            daemonDropped() = true;
+
+            emit disconnected();
         }
     });
 }
