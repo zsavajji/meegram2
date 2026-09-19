@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(MeeGram VERSION 0.3.8 LANGUAGES CXX)
+project(MeeGram VERSION 0.4.0 LANGUAGES CXX)
 
 # Without this an unset CMAKE_BUILD_TYPE means no -O flag at all, i.e. -O0.
 # This codebase leans on std::ranges views and templates, which -O0 punishes hard.
@@ -323,7 +323,11 @@ if (MEEGRAM_JSON_TRANSPORT)
             -march=armv7-a -mtune=cortex-a8 -mfpu=neon -mfloat-abi=hard -mthumb)
         target_link_options(json_roundtrip PRIVATE
             -Wl,-rpath,/opt/meegram/lib -Wl,--dynamic-linker=/lib/ld-linux.so.3 -pie -rdynamic)
-        target_link_libraries(json_roundtrip PRIVATE -static-libstdc++)
+        # rt: clock_gettime lived in librt until glibc 2.17 and Harmattan is 2.10. The app
+        # never has to say so because Qt4::QtCore pulls rt in; this target links no Qt, so
+        # it is the one place the dependency is visible - as an undefined reference from
+        # td::Clocks at link time.
+        target_link_libraries(json_roundtrip PRIVATE -static-libstdc++ rt)
     endif()
 
     # The daemon. Deliberately minimal - td_json_client is installed public API, so this

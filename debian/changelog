@@ -1,3 +1,38 @@
+meegram (0.4.0) unstable; urgency=low
+
+  * Opening a chat is about four tenths of a second quicker. The page a chat is drawn on
+    is the largest piece of layout in the app, and it used to be built the instant you
+    first tapped a chat - 413 milliseconds of that wait, measured on the phone. It is now
+    built three seconds after the chat list appears, while you are not doing anything, so
+    the tap finds it ready. Tapping a notification reaches the chat in about three
+    quarters of a second where it took one and a fifth.
+  * Starting up is two and a half seconds quicker on the days the app refreshes its
+    translations, which it does every couple of days. The translations arrive as one very
+    long line, and the app used to search everything that had arrived so far for the end
+    of that line each time another piece of it came in - work that grows with the square
+    of the line's length. It now remembers how far it had already looked.
+  * The emoji picker no longer rebuilds a tab's contents every time you visit it. Going
+    through all seven tabs twice cost half a second of rebuilding; it now costs a seventh
+    of a second, and going through them again costs nothing at all.
+  * Animated stickers draw into the same image over and over instead of allocating a new
+    one for each frame, thirty times a second.
+  * Photos are no longer decoded larger than the screen can show at full zoom.
+  * Chats and files no longer keep a whole copy of what Telegram said about them beside
+    the handful of fields actually shown, and the emoji table no longer keeps a prepared
+    image tag for each of its 3773 entries. Honestly measured this did not show up as
+    less memory in use - it is well under a megabyte against about sixty - but it was
+    memory doing nothing.
+  * The background process no longer recopies its entire backlog of pending output after
+    every write to a connection that is reading slowly. It holds about four megabytes
+    more at its busiest moment in exchange.
+  * Updates from Telegram now reach the parts of the app that care about them in one step
+    instead of five, which is most of what the app spent its time on during the two
+    thousand updates it receives at startup.
+  * Two warnings that were written to the log for every row of a list are gone. They were
+    harmless, but each was a write to a file.
+
+ -- Andrea Faggin <hellothere@andreafagg.in>  Sat, 19 Sep 2026 16:50:00 +0200
+
 meegram (0.3.8) unstable; urgency=low
 
   * A dark theme, and a switch for it in Settings. The phone's own styling does most of

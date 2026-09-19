@@ -396,3 +396,191 @@ tree. `src/ScopeTimer.hpp` documents the mechanism; the sites that matter for a 
 
 Raw logs from this session are not in the repo. Their headers carry the arm, scenario and
 test chat; reproduce by rerunning the gestures above.
+
+## Fourth session: `feature/optimization`, arm A against arm B (2026-09-19)
+
+The first session with a **real baseline arm and medians of three**, which the list above
+says the earlier ones lacked. Arm A is `bc03881` built from a worktree; arm B is the
+branch. Both `-DMEEGRAM_PROFILE=ON -DMEEGRAM_JSON_TRANSPORT=ON`, Release, same GCC 14.2
+cross toolchain, installed as `.deb`s named by arm because `dpkg -l` reports 0.3.8 for
+both.
+
+### Conditions, including two that invalidated runs before they were noticed
+
+- Account: 557 chats, 5.7 MB `getCurrentState` replay, 2282 top-level updates.
+- **Screen on and unlocked**, verified per run via `mce`'s `get_display_status` /
+  `get_tklock_mode`. Two early runs were taken with the screen blanked and had to be
+  thrown away: a blanked screen is not rendering, and every delta containing a paint came
+  out ~30% low (`chatpage-compiled → chatpage-completed` read 520-639 ms locked against
+  797 ms unlocked on the same build). The compile delta is unaffected, being pure QML
+  compilation.
+- **The launcher's whole environment**, copied from `meegotouchhome`'s
+  `/proc/<pid>/environ`, not a hand-made `DISPLAY` + bus address. The session also carries
+  `QT_IM_MODULE=MInputContext` (without which the virtual keyboard never opens - it reads
+  as a UI regression and is not one), `LANG=it`, and
+  `MALLOC_TRIM_THRESHOLD_`/`MALLOC_MMAP_THRESHOLD_`, which change glibc's trimming and so
+  every RSS number. Section 3's launch template in the plan omitted all of these.
+- USB 500 mA, not the wall charger: SSH to this device is over USB and the charger would
+  cost the remote workflow. Both arms measured identically, so the comparison holds; the
+  absolute numbers are for a device on host power.
+- Load average under 0.5 before each window, recorded per run.
+- Chat opens were driven by `dbus-send --session --print-reply --dest=com.meegram
+  /notification com.meegram.Notification.openChat string:<id>`. **`--print-reply` is
+  load-bearing** - without it dbus-send exits 0 and nothing happens at all.
+
+### M1 - chat open, warm daemon, 22 s idle first
+
+Medians of three. Same chat both arms, same script, fresh UI per run.
+
+| delta | arm A | arm B | change |
+|---|---:|---:|---:|
+| `chat-selected → chatpage-compiled` | **413 ms** (423/413/411) | **0 ms** (0/0/0) | −413 ms |
+| `chatpage-compiled → chatpage-completed` | 670 ms (670/631/677) | 639 ms (653/639/639) | unchanged |
+| `chatpage-completed → chatpage-pushed` | 94 ms (94/94/103) | 98 ms (95/98/107) | unchanged |
+| `notification-tap → chatpage-pushed` | **1195 ms** | **756 ms** | **−37%** |
+
+#1 does what it claims and the marker goes to literally zero. Two qualifications the plan
+did not anticipate:
+
+- **The compile costs ~413 ms here, not the ~980 ms the plan predicted.** That figure came
+  from `docs/notification-startup.md`, where it was measured during a *cold-start* tap with
+  the replay still saturating the GUI thread. On a warm, idle app the compile gets an
+  uncontended CPU. Both numbers are real and answer different questions; #1's saving is
+  ~413 ms warm and larger in the cold-tap case it was written for.
+- The next two rows being flat is the useful part: #1 **removed** the compile rather than
+  displacing it into the page's construction, which a single arm could not have shown.
+
+### The cold tap is not compile-bound at all
+
+Tapping 2.7 s after `chat-layout-loaded`, before the 3 s warm-up Timer fires, produced two
+`chat-open-begin` markers 4.58 s apart: `openChat` found the chat absent from the store,
+fell through to `fetchChat`, and waited for the replay to reach it. By the retry the
+warm-up had long since fired, so the compile was a cache hit anyway.
+
+On this account the warm-up (~5.7 s) always wins the race against the store being populated
+(~10 s), so **the un-warmed path is not reachable via a notification tap** and arm A is the
+only way to price the compile. More usefully: on a cold start the binding constraint is
+**4.6 s of waiting for the chat to exist**, six times the entire warm tap-to-page path. That
+is the `getCurrentState` replay, and demand-loading the chat list via `fetchChat` - already
+on `CLAUDE.md`'s "Not done" list - is worth more than anything measured here.
+
+### M3 - language pack refresh (the 1.8 MB single line)
+
+`rm langpack.cache`, `languagePackFetchedAt=0`, relaunch. Reader-thread CPU sampled at
+t=30 s; `LANG=it` in both.
+
+| measure | arm A | arm B | change |
+|---|---:|---:|---:|
+| reader thread CPU @ 30 s | 323 jiffies (3.23 s) | 197 jiffies (1.97 s) | **−39%** |
+| `app-initialized` | 6586 ms | 4076 ms | **−2.51 s** |
+| `chat-layout-loaded` | 6992 ms | 4487 ms | **−2.51 s** |
+| `undecodable` lines | 0 | 0 | gate passes both |
+
+**The plan under-sold this one.** It expected the timing difference to hide under the 16%
+noise and treated the grep as the only real gate. Instead #3 takes **two and a half seconds
+off user-visible startup** every time the pack refreshes, which `AppManager` does every two
+days.
+
+A host harness (`scan_check.cpp`, the loop copied verbatim and checked against the old one
+as an oracle at every chunk boundary from 1 to 17 bytes) puts the mechanism at **580 MB of
+scanning reduced to 3 MB, 193x**, for a 3 MB line in 8 KB reads. Wall time on x86 is
+identical either way - a desktop `memchr` runs at tens of GB/s - which is why this only
+shows up on an A8.
+
+### M4 - memory
+
+| scenario | arm A | arm B | change |
+|---|---:|---:|---:|
+| settled chat list, no refresh | 63,320 kB | 63,304 kB | **~0** |
+| during a pack refresh | 68,872 kB | 66,984 kB | −1.84 MB |
+| `meegramd` `VmHWM`, pack refresh | 54,256 kB | 58,568 kB | **+4.2 MB** |
+| idle drift, 12 min | — | 63,304 → 64,152 kB | one 812 kB step, then flat |
+
+**#5 and #6 do not produce a visible steady-state saving.** The plan predicted 1-1.5 MB;
+measured, it is within noise of zero. The arithmetic agrees in hindsight: 557 chats at a
+few hundred bytes plus 3773 emoji tags at ~50 UTF-16 characters is roughly half a megabyte
+against a 63 MB process. The −1.84 MB that does appear shows up **only during a pack
+refresh**, which points at #3's buffer handling rather than at the smaller objects.
+
+**#4 costs 4.2 MB of daemon peak.** Predicted from reading the diff before it ran: the send
+cursor only compacts at `sent > size/2`, so `outgoing` can hold roughly twice the unsent
+backlog, making the effective per-connection ceiling ~2x `MaxOutgoingBytes` rather than the
+8 MiB the constant implies. Bounded, and the daemon is the small process, but it is a real
+trade and #4's CPU benefit was never measured on device - only in a host harness.
+
+**The drift is #2's leak check, and it passes.** `dispatch` frees each update when the last
+subscriber returns. Twelve minutes idle: flat within 12 kB for six minutes, then a single
+812 kB step at t+8 and flat again through t+12, with `VmHWM` following the step and then
+holding. One discrete allocation on a live account - a message arriving, an avatar landing
+- not steady growth. Read at six minutes it looks perfectly flat and at eight it looks like
+a leak; neither is the answer, which is why the window has to be long enough to see the
+plateau after the step.
+
+### M7 - emoji picker
+
+Seven tabs, twice round, both arms.
+
+| dump | arm A calls / total | arm B calls / total |
+|---:|---|---|
+| 1 | 2 / 46.8 ms | 4 / 68.5 ms |
+| 2 | 12 / 179.2 ms | 16 / 150.0 ms |
+| 3 | 24 / 346.5 ms | 26 / **150.1 ms** |
+| 4 | 34 / **492.7 ms** | 26 / **150.1 ms** |
+
+Arm A grows linearly at a flat 14.5 ms per call and never stops. Arm B plateaus: its last
+ten calls cost 0.1 ms between them. Normalised to equal visits, arm A would be ~377 ms
+against 150.1 ms, and the gap widens with every further tab switch.
+
+### Relay fidelity (#4)
+
+`daemon_probe` asking a warm daemon for `getCurrentState`, app killed so nothing else is on
+the wire:
+
+| | arm A | arm B |
+|---|---:|---:|
+| bytes | 5,703,496 | 5,709,417 |
+| top-level updates before the `ok` | 2284 | 2282 |
+| longest line | 15,422 B | 17,000 B |
+
+Per-type histograms are identical except `updateUser` at 357 against 355 - live-account
+drift over the ~15 minutes between captures. No type appears in one arm and not the other,
+and no line approaches a size that would suggest the split failed. #4 relays equivalently.
+
+A host harness (`flush_check.cpp`) covers the cursor itself: byte-exact delivery under a
+scripted socket that accepts 7 bytes at a time, compaction firing at `sent > size/2` and
+not at exactly half, EINTR retried, EPIPE fatal, and the queue clearing on drain.
+
+### Where the plan was wrong
+
+`PERF-TEST-PLAN.md` was deleted per its own section 4 once these numbers landed. Four of its
+specifications did not survive contact and are recorded here so they are not rediscovered:
+
+- **M7's gate is unmeasurable as written.** It asks that `Utils::emojiCategory` calls equal
+  the number of *distinct* categories visited, but `MEEGRAM_SCOPE` sits above the cache
+  lookup, so every invocation is counted whether it hits or not. Arm B shows 26 calls and
+  passes anyway. **Total time plateauing** is the criterion.
+- **Section 5's failure hypothesis for #5 is backwards.** It says `File::setFile` "returns
+  early on a null object where it used to fall through". The old path also emitted nothing
+  for a null file - it assigned `m_file` and `updateFileProperties()` returned false on
+  `!m_file`. Behaviour is identical; if avatars stop updating, #5 is not the cause.
+- **Section 2 item 12 describes a 16 px big-emoji tier that does not exist.**
+  `Utils::emojiOnlySize` maps 1 emoji to 32 px, 2 and 3 to 24 px, and 4 or more to not
+  enlarged at all (`MaxBigEmoji = 3`). There are two big sizes, not three.
+- **Arm A's ~980 ms compile did not reproduce**; see M1 above.
+
+### What is not measured, this session
+
+- **M5, animated-sticker CPU.** Never run. #8 is functionally correct - the tgs sticker
+  animates, replays after its delegate is rebuilt, and webp and webm are unaffected - but
+  its cost was never priced. There is no Lottie scope to read; `frame` is the scene repaint
+  counter in `main.cpp`, not a Lottie frame.
+- **M6, and #9's clamp.** The largest photo the official client would send is 1536 px wide
+  and the cap computes to 1920 (`min(854,480) x 4`), so `sourceSize` never engaged.
+  Item 16 can only show no regression below the cap. Note also that the cap uses the
+  screen's **short** side, so a landscape photo at 4x zoom is softer than it need be - a
+  deliberate memory trade, but not for the reason the comment gives.
+- **#4's CPU benefit on device.** Both daemons had accumulated different uptimes, so no
+  clean comparison exists. Only the memory cost was measured.
+- **A matched steady-state RSS pair.** Arm A's reading is from a cold-daemon launch and arm
+  B's from a warm one; close enough to rule out a 1-1.5 MB saving, not tight enough to
+  resolve a 100 kB one.

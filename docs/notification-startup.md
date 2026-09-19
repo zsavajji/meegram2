@@ -126,6 +126,38 @@ TDLib/network operation downstream of everything here and it was always in this 
 the old measurements just had it hidden behind a 20 s wait. Time to the *chat page* is now
 stable at ~4.2 s; time to *messages* is not, and that is the next thing to measure.
 
+### After `feature/optimization` (2026-09-19)
+
+`bc03881` against the branch, medians of three, screen on and unlocked, warm daemon, the
+app idle 22 s on the chat list before the tap. Full conditions and the rest of the arms in
+`docs/profiling.md`, "Fourth session".
+
+| | `bc03881` | branch |
+|---|---:|---:|
+| **running app**, tap → chat page | 1195 ms | **756 ms** |
+| `chat-selected → chatpage-compiled` | 413 ms | **0 ms** |
+| `chatpage-compiled → chatpage-completed` | 670 ms | 639 ms |
+
+`ChatPage.qml` is now compiled once at idle, three seconds after the chat list appears, and
+kept on `appWindow.chatPageComponent`, so a tap finds it ready. The compile marker goes to
+zero and the two rows after it do not move — it was removed, not displaced.
+
+**The ~980 ms quoted above for the compile is a cold-start figure.** Measured on a warm,
+idle app with an uncontended GUI thread it is 413 ms. Both are real; the compile costs
+roughly twice as much when it competes with the replay, which is the case this section was
+originally written about.
+
+**The cold tap is still not compile-bound.** Tapping before the warm-up fires produces two
+`chat-open-begin` markers 4.58 s apart: `openChat` finds the chat absent from the store and
+waits for `fetchChat`. The warm-up (~5.7 s) always beats the store being populated (~10 s)
+on a 557-chat account, so that 4.6 s — six times the whole warm tap-to-page path — is now
+the largest item here, and it is the `getCurrentState` replay, not this page. Demand-loading
+the chat list via `fetchChat` remains the fix.
+
+**Reproducing a tap needs `--print-reply`** — see the command in `CLAUDE.md`. Without it
+`dbus-send` exits 0 and nothing happens, which looks exactly like the cold-start miss
+`AppManager.hpp` documents.
+
 ## Verifying the split is faithful
 
 The fake UI counts what arrives, so the split can be checked against the monolith it

@@ -251,9 +251,17 @@ cmake --build build-app --target package            # needs `mad set <target>`; 
   and the applauncherd launcher line. Missing credentials fail silently; open-mode dev
   phones enforce nothing; run `accli -I` on both devices first.
 - Logs: `~/.meegram/meegram.log` and `~/.meegram/meegramd.log` on device. Repro a
-  notification tap with `dbus-send --session --dest=com.meegram /notification
-  com.meegram.Notification.openChat string:<chatId>`; wait for load average < 0.5 after
+  notification tap with `dbus-send --session --print-reply --dest=com.meegram
+  /notification com.meegram.Notification.openChat string:<chatId>` — **`--print-reply` is
+  load-bearing**: without it dbus-send exits 0 and nothing happens, which looks exactly
+  like the cold-start tap `AppManager.hpp` documents (verified on device, screen on and
+  unlocked, two chat ids, flag the only variable). Wait for load average < 0.5 after
   a kill (applauncherd prestarts other apps and skews every number 10×).
+- **Measure with the screen on and unlocked.** A blanked screen is not rendering and every
+  delta containing a paint comes out ~30% low (`chatpage-compiled → chatpage-completed`
+  read 520–639 ms locked against 797 ms unlocked on the same build). `mce`'s
+  `get_display_status` / `get_tklock_mode` report it; `req_display_blanking_pause` holds
+  the screen awake for the window.
 - Env switches: `MEEGRAM_HEADLESS=1` (sync without a scene), `MEEGRAM_KEEPALIVE=1`
   (teardown experiment, measured useless), `MEEGRAM_QML_BENCH=N` (profile build only).
 
