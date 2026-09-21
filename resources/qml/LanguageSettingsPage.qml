@@ -67,16 +67,54 @@ Page {
             }
 
             onClicked: {
+                if (settings.languagePackId === model.id) {
+                    appWindow.pageStack.pop()
+                    return
+                }
+
                 settings.languagePackId = model.id
                 settings.languagePluralId = model.pluralCode
 
-                appWindow.pageStack.pop()
+                // Tell TDLib straight away. Nothing in *this* process reads it again until
+                // the next launch, but meegramd does: it follows language_pack_id through
+                // updateOption and re-requests the strings it composes banners from, so
+                // notifications change language now rather than at the next restart.
+                appManager.setOption("language_pack_id", model.id)
+
+                // And deliberately do *not* reload this process's own Locale. QML1 never
+                // retranslates - every qsTr on a built page is already a plain string - so
+                // swapping the pack under a running scene leaves the pages that exist in
+                // the old language and gives the new one only to pages pushed afterwards.
+                // Half a translated app is worse than a consistent one.
+                //
+                // The cache is keyed by language id (Locale::loadCache), so the next
+                // launch drops it, asks for the new pack and comes up translated.
+                restartDialog.open()
             }
         }
     }
 
     ScrollDecorator {
         flickableItem: listView
+    }
+
+    // A query dialog rather than a banner: the choice does not take effect until the app is
+    // restarted, and the platform reserves this for the case where the user has to act for
+    // something to happen. Closing is offered rather than done, because a settings page is
+    // not a place anybody expects to lose what they were doing.
+    QueryDialog {
+        id: restartDialog
+
+        // Deliberately not qsTr: Telegram has no key for this, and the language pack that
+        // would translate it is the *old* one anyway - which is the right language to say
+        // this in, since it is the one still on screen.
+        titleText: "Language changed"
+        message: "MeeGram shows the new language after it restarts. Notifications change now."
+        acceptButtonText: "Close now"
+        rejectButtonText: "Later"
+
+        onAccepted: Qt.quit()
+        onRejected: appWindow.pageStack.pop()
     }
 
     tools: ToolBarLayout {
