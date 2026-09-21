@@ -793,8 +793,8 @@ theme is set to.
 ### The balloons are drawn, not pasted
 
 A message balloon is a `Rectangle` with `radius: 13` and a colour, where it used to be a
-nine-slice PNG per direction per state per theme — eight files, now deleted. The colours
-are the assets' own, sampled out of them before they went:
+nine-slice PNG per direction per state per theme — eight files. The colours are the
+assets' own, sampled out of them:
 
 | | normal | pressed |
 |---|---|---|
@@ -846,6 +846,36 @@ That is why `model.isOutgoing ? … : …` turned out to be **two questions wear
 condition**, and separating them is most of the change:
 
 | the question | reads | decides |
+#### Skeumorphic bubbles
+
+The eight PNGs are back, behind a Settings switch of that name, **off by default**. On, the
+balloon is the 2012 asset again — tail, gradient and pressed state — and the drawn shape
+goes transparent behind it.
+
+It is a `BorderImage` *inside* the `Rectangle`, not instead of it, which is what keeps the
+change to one item: the quote block, the rank, the date and the avatar all measure off
+`bubble`, and they keep one thing to measure. The asset's box is bigger than the drawn
+shape and sits higher — that transparent margin again — so the image is anchored at
+`topMargin: sided ? -10 : -3` with `height: parent.height + 13 + (sided ? 0 : 2)`, which
+is exactly the difference between the two boxes. **The ink therefore lands in the same
+place either way**, because the rectangle's edges are where the ink used to be, and
+nothing else in the layout moves when the switch is flipped.
+
+The one thing that does move is the avatar, and it should: it hangs off the balloon's
+bottom edge, which with a tail is 12px lower. `bubble.balloonBottom` is that edge for
+whichever of the two is drawn.
+
+The switch is **disabled while "Show bubbles" is off** — there is no balloon to skeuomorph
+— and `ListItem` dims itself and disables its own `MouseArea` from `enabled`, so the row
+reads as unavailable rather than as off. The stored value survives that, so turning
+bubbles back on returns to whichever balloon was last chosen.
+
+::: info The generator no longer makes these
+`tools/make_inverted_assets.py` lost its bubble half in 0.3.8, along with the assets. The
+dark PNGs are the ones restored from git, so they exist without it; regenerating them
+would mean putting that half back.
+:::
+
 |---|---|---|
 | which side is this on | `model.isOutgoing` | margins and alignment — the same in both layouts |
 | is this painted on the accent balloon | `appWindow.isOnBubble(…)` | every colour, because `"white"` reads on that balloon and on nothing else |

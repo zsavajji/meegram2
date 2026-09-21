@@ -15,6 +15,10 @@ Settings::Settings(QObject *parent)
     // everywhere else.
     m_showBubbles = m_settings->value("showBubbles", true).toBool();
 
+    // Defaults false: the drawn balloon is what the app ships with, and the assets are
+    // here for the people who preferred the old one.
+    m_skeuomorphicBubbles = m_settings->value("skeuomorphicBubbles", false).toBool();
+
     m_languagePackId = m_settings->value("languagePackId", DefaultLanguageCode).toString();
     m_languagePluralId = m_settings->value("languagePluralId", DefaultLanguageCode).toString();
 
@@ -39,6 +43,21 @@ void Settings::setShowBubbles(bool value)
         m_showBubbles = value;
         m_settings->setValue("showBubbles", m_showBubbles);
         emit showBubblesChanged();
+    }
+}
+
+bool Settings::skeuomorphicBubbles() const
+{
+    return m_skeuomorphicBubbles;
+}
+
+void Settings::setSkeuomorphicBubbles(bool value)
+{
+    if (m_skeuomorphicBubbles != value)
+    {
+        m_skeuomorphicBubbles = value;
+        m_settings->setValue("skeuomorphicBubbles", m_skeuomorphicBubbles);
+        emit skeuomorphicBubblesChanged();
     }
 }
 

@@ -10,6 +10,7 @@ class Settings : public QObject
     Q_OBJECT
     Q_PROPERTY(bool invertedTheme READ invertedTheme WRITE setInvertedTheme NOTIFY invertedThemeChanged)
     Q_PROPERTY(bool showBubbles READ showBubbles WRITE setShowBubbles NOTIFY showBubblesChanged)
+    Q_PROPERTY(bool skeuomorphicBubbles READ skeuomorphicBubbles WRITE setSkeuomorphicBubbles NOTIFY skeuomorphicBubblesChanged)
 
     Q_PROPERTY(QString languagePackId READ languagePackId WRITE setLanguagePackId NOTIFY languagePackIdChanged)
     Q_PROPERTY(QString languagePluralId READ languagePluralId WRITE setLanguagePluralId NOTIFY languagePluralIdChanged)
@@ -25,6 +26,15 @@ public:
     // coloured name rather than by which side it is on.
     bool showBubbles() const;
     void setShowBubbles(bool value);
+
+    // Draws the balloon from the nine-slice PNGs the drawn shape replaced in 0.3.8 -
+    // tail, gradient and all - instead of a Rectangle. Off by default: the flat shape is
+    // what the app ships with, and this is for people who want the 2012 look back.
+    //
+    // Only meaningful with showBubbles on; there is no balloon to skeuomorph otherwise,
+    // and the settings row is disabled to say so.
+    bool skeuomorphicBubbles() const;
+    void setSkeuomorphicBubbles(bool value);
 
     QString languagePackId() const;
     void setLanguagePackId(const QString &value);
@@ -50,6 +60,7 @@ public:
 signals:
     void invertedThemeChanged();
     void showBubblesChanged();
+    void skeuomorphicBubblesChanged();
 
     void languagePackIdChanged();
     void languagePluralIdChanged();
@@ -59,6 +70,7 @@ private:
 
     bool m_invertedTheme;
     bool m_showBubbles;
+    bool m_skeuomorphicBubbles;
     bool m_wasAuthorized;
 
     qint64 m_languagePackFetchedAt;

@@ -50,6 +50,12 @@ PageStackWindow {
     // which side of the screen it sits on.
     property bool showBubbles: settings.showBubbles
 
+    // The balloon drawn from the nine-slice assets rather than as a rounded Rectangle -
+    // tail and gradient included. Requires showBubbles: with no balloon there is nothing
+    // to draw either way, and the settings row disables itself to say so. Both are read
+    // here rather than in the delegate so a message never has to ask two settings.
+    property bool skeuomorphicBubbles: settings.showBubbles && settings.skeuomorphicBubbles
+
     // Whether a message is painted *on the accent balloon*, which is the only thing the
     // colour of its contents depends on: white reads on that balloon and on nothing else,
     // so with bubbles off every one of those whites has to become a page colour.

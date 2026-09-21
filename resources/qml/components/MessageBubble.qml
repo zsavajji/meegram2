@@ -156,6 +156,10 @@ Item {
     Rectangle {
         id: bubble
 
+        // Where the balloon's bottom edge actually is. The two differ: the skeuomorphic
+        // asset's tail hangs below this rectangle, and the avatar hangs off the tail.
+        property real balloonBottom: y + (skeuomorph.visible ? skeuomorph.y + skeuomorph.height : height)
+
         // The rectangle *is* the balloon. The nine-slice it replaced was a balloon with
         // transparent margin around it - a tail's worth of empty pixels along the bottom
         // of the incoming asset and the top of the outgoing one - and that margin was the
@@ -188,12 +192,12 @@ Item {
             topMargin: 11
         }
 
-        // A drawn shape. The colours are the deleted assets' own, sampled from them
-        // before they went, so the palette is unchanged; what went with them is the tail.
+        // A drawn shape. The colours are the assets' own, sampled from them, so the
+        // palette is the same whichever of the two is drawn; what the shape drops is the
+        // tail.
         //
-        // 13px is the radius the balloon assets were drawn with, measured off them
-        // before they were deleted: their corner curve reached the left edge 13 rows
-        // below the top one.
+        // 13px is the radius the balloon assets were drawn with, measured off them:
+        // their corner curve reached the left edge 13 rows below the top one.
         //
         // smooth for antialiased corners. On Qt 4's software raster that is a real cost
         // per paint where the nine-slice was a blit, and it is unmeasured: `frame` in a
@@ -204,9 +208,50 @@ Item {
         // menu, swipe to reply - and an invisible item receives no events in QtQuick, so
         // hiding this took all three with it. A transparent fill draws nothing and keeps
         // them. The quote block and the rank measure from its edges either way.
-        color: appWindow.showBubbles ? internal.bubbleColor() : "transparent"
+        //
+        // Transparent for the skeuomorphic balloon too: that one is a child drawn over
+        // this rectangle, so a fill here would be a second shape behind a PNG with
+        // rounded corners of its own, showing at every corner.
+        color: appWindow.showBubbles && !appWindow.skeuomorphicBubbles ? internal.bubbleColor() : "transparent"
         // The antialiased path is only worth asking for when there is a shape to draw.
-        smooth: appWindow.showBubbles
+        smooth: appWindow.showBubbles && !appWindow.skeuomorphicBubbles
+
+        // The 2012 balloon, off by default (Settings, "Skeumorphic bubbles"). A child of
+        // the rectangle rather than a replacement for it, so everything that measures off
+        // `bubble` - the quote block, the rank, the date, the avatar - keeps one item to
+        // measure against and neither layout has to know which one is painted.
+        //
+        // The geometry is the interesting part. The asset is a balloon inside a
+        // transparent margin: a tail's worth of empty pixels along the bottom of the
+        // incoming one and the top of the outgoing one. Its *box* is therefore bigger
+        // than the drawn shape and sits higher, and the numbers below are exactly that
+        // difference - box top 1 (outgoing) or 8 (incoming) against the rectangle's 11,
+        // and 13px more height, plus the 2px the incoming asset carries under its tail.
+        //
+        // Which means the ink lands in the same place either way: the rectangle's own
+        // edges are where the asset's ink used to be (that is what 11 and 13 were chosen
+        // for), so padding, content and every sibling stay put when this is switched on.
+        // Only the tail appears - and the avatar, which hangs off it, follows through
+        // bubble.balloonBottom.
+        BorderImage {
+            id: skeuomorph
+
+            visible: appWindow.skeuomorphicBubbles
+            // Nothing is decoded while it is off, the same way the flat layout draws no
+            // balloon at all rather than an invisible one.
+            source: visible ? internal.getBubbleImage() : ""
+
+            border { left: 22; right: 22; bottom: 22; top: 22; }
+
+            anchors {
+                left: parent.left
+                right: parent.right
+                top: parent.top
+                topMargin: root.sided ? -10 : -3
+            }
+
+            height: parent.height + 13 + (root.sided ? 0 : 2)
+        }
 
         MouseArea {
             id: mouseArea
@@ -251,7 +296,7 @@ Item {
             // used to be. The flat layout opens with the name, so it sits at the top
             // there instead. Expressed as an offset rather than by swapping which anchor
             // is set, because clearing an anchor means assigning undefined to it.
-            topMargin: appWindow.showBubbles ? Math.max(0, bubble.y + bubble.height - height - 2) : 10
+            topMargin: appWindow.showBubbles ? Math.max(0, bubble.balloonBottom - height - 2) : 10
         }
 
         sourceSize.width: width
@@ -664,9 +709,25 @@ Item {
     QtObject {
         id: internal
 
-        // The bubble's fill, in the four states the assets used to carry. Sampled from
-        // them: #f5f5f5 / #939393 light incoming, #0aa7cc / #06657b light outgoing, and
-        // the two dark pairs tools/make_inverted_assets.py derives.
+        // The nine-slice balloon, for the skeuomorphic setting: direction, then pressed
+        // state, then theme. Four names over eight files.
+        function getBubbleImage() {
+            var imageSrc = "qrc:/images/";
+
+            imageSrc += model.isOutgoing ? "outgoing" : "incoming"
+            imageSrc += mouseArea.pressed ? "-pressed" : "-normal"
+
+            // Same file recoloured, from tools/make_inverted_assets.py - the shape and
+            // the 22px nine-slice insets are the light asset's, byte for byte.
+            if (theme.inverted)
+                imageSrc += "-inverted";
+
+            return imageSrc + ".png";
+        }
+
+        // The bubble's fill, in the four states the assets carry. Sampled from them:
+        // #f5f5f5 / #939393 light incoming, #0aa7cc / #06657b light outgoing, and the
+        // two dark pairs tools/make_inverted_assets.py derives.
         function bubbleColor() {
             if (root.sided)
                 return mouseArea.pressed ? (theme.inverted ? "#0e8aa8" : "#06657b")

@@ -95,6 +95,48 @@ Page {
                 checked: settings.showBubbles
             }
         }
+
+        // The 2012 balloon - the nine-slice PNGs with the tail - instead of the drawn
+        // shape. Off by default.
+        //
+        // Dead while the flat layout is on, because there is no balloon to draw either
+        // way: ListItem dims itself and disables its own MouseArea from `enabled`, so the
+        // row cannot be tapped and reads as unavailable rather than as off. The stored
+        // value is left alone by that - turning bubbles back on returns to whichever of
+        // the two was last chosen, rather than silently resetting it.
+        ListItem {
+            enabled: settings.showBubbles
+
+            onClicked: settings.skeuomorphicBubbles = !settings.skeuomorphicBubbles
+
+            Label {
+                anchors {
+                    left: parent.left
+                    leftMargin: 12
+                    right: skeuomorphSwitch.left
+                    rightMargin: 12
+                    verticalCenter: parent.verticalCenter
+                }
+                elide: Text.ElideRight
+                font.pixelSize: 26
+                font.bold: true
+                // Not qsTr, for the same reason as the row above: Telegram's language
+                // pack has no key for a setting Telegram does not have, and an absent key
+                // renders as the key itself.
+                text: "Skeumorphic bubbles"
+            }
+
+            Switch {
+                id: skeuomorphSwitch
+
+                anchors {
+                    right: parent.right
+                    rightMargin: 16
+                    verticalCenter: parent.verticalCenter
+                }
+                checked: settings.skeuomorphicBubbles
+            }
+        }
     }
 
     tools: ToolBarLayout {
