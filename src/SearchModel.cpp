@@ -193,7 +193,7 @@ bool SearchModel::searched() const noexcept
     return m_searched;
 }
 
-int SearchModel::beginRequest(int pendingResponses)
+void SearchModel::clear()
 {
     beginResetModel();
     m_rows.clear();
@@ -202,6 +202,11 @@ int SearchModel::beginRequest(int pendingResponses)
     endResetModel();
 
     emit countChanged();
+}
+
+int SearchModel::beginRequest(int pendingResponses)
+{
+    clear();
 
     if (m_searched)
     {

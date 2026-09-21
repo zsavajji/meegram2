@@ -120,6 +120,10 @@ public:
     static QString getContent(MessageContent *content, int contentType, bool isOutgoing, std::shared_ptr<Locale> locale) noexcept;
     static QString getServiceContent(Message *message, std::shared_ptr<StorageManager> storage, std::shared_ptr<Locale> locale, bool openUser = false) noexcept;
 
+    // Bytes as "1.4 MB". Qt 4.7 has no QLocale::formattedDataSize. Empty for 0 or less,
+    // which is what both callers want to show for "nothing here".
+    static QString formatSize(qlonglong bytes) noexcept;
+
     static QString getChatTitle(std::shared_ptr<Chat> chat, std::shared_ptr<StorageManager> storage, bool showSavedMessages = true) noexcept;
 
     // The public "@name" a chat can be reached by, empty for the ones that have none

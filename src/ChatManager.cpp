@@ -827,6 +827,51 @@ void ChatManager::popContext(int token) noexcept
     setOpenChat(active ? active->chat()->id() : 0);
 }
 
+void ChatManager::reset() noexcept
+{
+    // Every context goes through disposeLater for the same reason popContext uses it: a
+    // page may still be evaluating bindings against one.
+    for (auto &context : m_contextStack)
+    {
+        disposeLater(context);
+    }
+
+    m_contextStack.clear();
+
+    // Not through setOpenChat: there is no TDLib to tell any more - a sign-out is what got
+    // us here - and the request would be sent into a client that is closing.
+    m_openChatId = 0;
+    m_fetchingChatId = 0;
+
+    // The models stay, and stay bound: clear() is a beginResetModel/endResetModel pair,
+    // which is what every refresh already does to them.
+    if (m_mainModel)
+        m_mainModel->clear();
+
+    if (m_archivedModel)
+        m_archivedModel->clear();
+
+    for (auto &model : m_folderModels)
+    {
+        if (model)
+            model->clear();
+    }
+
+    if (m_searchModel)
+        m_searchModel->clear();
+
+    // The folder tab strip is built from what the store holds, so it empties with it. Its
+    // own setter rather than a clear(): an empty vector is exactly what "no folders" is,
+    // and it is what updateChatFolders would deliver for an account with none.
+    if (m_folderModel)
+        m_folderModel->setItems({});
+
+    // Nothing to notify: everything QML reads off this object - mainModel, folderModel,
+    // the rest - is a CONSTANT property pointing at an object that is still here and now
+    // empty. The per-chat things are on ChatContext, and every context has just been
+    // retired.
+}
+
 void ChatManager::openProfile(const QString &target) noexcept
 {
     // A mention carries either a user id, which is also the id of the private chat with

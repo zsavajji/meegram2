@@ -20,7 +20,14 @@
         <credential name="Location" />
         <credential name="TrackerReadAccess" />
         <credential name="TrackerWriteAccess" />
-        <!-- Reading the gallery index for the photo picker. -->
+        <!-- Two things now: reading the gallery index for the photo picker, and the
+             camera the QR scanner reads frames from - both go through the same GStreamer
+             pipeline. Harmattan has no camera-specific credential; this is the one that
+             covers video.
+
+             Unverified for the camera: this device runs aegis in open mode, which enforces
+             nothing, so a missing credential here would only show up on a closed-mode
+             phone - silently, as a viewfinder that stays black. Run accli -I on one. -->
         <credential name="GRP::video" />
 
         <for path="/opt/meegram/bin/meegram" />

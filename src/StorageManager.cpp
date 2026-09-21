@@ -186,6 +186,28 @@ void StorageManager::fetchChat(qlonglong chatId) noexcept
     });
 }
 
+void StorageManager::clear() noexcept
+{
+    m_chats.clear();
+    m_users.clear();
+    m_basicGroup.clear();
+    m_supergroup.clear();
+    m_supergroupFullInfo.clear();
+    m_files.clear();
+    m_userBios.clear();
+    m_chatFolders.clear();
+    m_fetchingChats.clear();
+
+    // Options go too: my_id belongs to the account that just left, and a stale one makes
+    // isMeChat answer for the wrong person. m_myId is the memo in front of it.
+    m_options.clear();
+    m_myId = 0;
+
+    // Deliberately silent. Everything that reads this has been emptied by
+    // ChatManager::reset in the same turn, and a fan-out of eleven signals for an account
+    // that no longer exists is eleven chances to rebuild something from nothing.
+}
+
 void StorageManager::clearChatFetch(qlonglong chatId) noexcept
 {
     m_fetchingChats.erase(chatId);

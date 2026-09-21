@@ -19,6 +19,8 @@ Settings::Settings(QObject *parent)
     // here for the people who preferred the old one.
     m_skeuomorphicBubbles = m_settings->value("skeuomorphicBubbles", false).toBool();
 
+    m_animateStickers = m_settings->value("animateStickers", true).toBool();
+
     m_languagePackId = m_settings->value("languagePackId", DefaultLanguageCode).toString();
     m_languagePluralId = m_settings->value("languagePluralId", DefaultLanguageCode).toString();
 
@@ -58,6 +60,21 @@ void Settings::setSkeuomorphicBubbles(bool value)
         m_skeuomorphicBubbles = value;
         m_settings->setValue("skeuomorphicBubbles", m_skeuomorphicBubbles);
         emit skeuomorphicBubblesChanged();
+    }
+}
+
+bool Settings::animateStickers() const
+{
+    return m_animateStickers;
+}
+
+void Settings::setAnimateStickers(bool value)
+{
+    if (m_animateStickers != value)
+    {
+        m_animateStickers = value;
+        m_settings->setValue("animateStickers", m_animateStickers);
+        emit animateStickersChanged();
     }
 }
 

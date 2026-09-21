@@ -221,6 +221,31 @@ std::optional<bool> connectionState(const char *line, size_t length)
     return std::strstr(line, "connectionStateReady") != nullptr || std::strstr(line, "connectionStateUpdating") != nullptr;
 }
 
+// Whether TDLib has just closed itself, which after a logOut it does: the request destroys
+// the database and then shuts the instance down, and that client id is dead for the rest of
+// the process. Same prefix-match discipline as connectionState above.
+//
+// The daemon answers by exiting. It is the one process that must not be left holding a dead
+// TDLib - every UI that connects afterwards would sit on a socket nobody is pumping - and
+// exiting is already a supported state: com.meegram.Daemon is D-Bus activated, the UI's
+// reconnect budget covers the gap (it exists for `killall` during an upgrade), and a fresh
+// process comes up with a fresh client on WaitTdlibParameters, which is exactly where a
+// signed-out UI wants it.
+//
+// It also throws away what the notifier is holding - chat titles, user names, photo paths -
+// which is account data this process would otherwise keep until someone killed it.
+bool authorizationClosed(const char *line, size_t length)
+{
+    constexpr char Prefix[] = "{\"@type\":\"updateAuthorizationState\"";
+
+    if (length < sizeof(Prefix) - 1 || std::memcmp(line, Prefix, sizeof(Prefix) - 1) != 0)
+        return false;
+
+    // Not authorizationStateClosing, which is the state on the way there and still has
+    // updates behind it.
+    return std::strstr(line, "\"authorizationStateClosed\"") != nullptr;
+}
+
 // Returns the following element, so it can drive a loop that erases as it walks.
 // Callers must already hold connectionsMutex.
 std::vector<Connection>::iterator closeConnection(std::vector<Connection>::iterator it)
@@ -971,6 +996,29 @@ int main(int argc, char *argv[])
                     broadcast(line, length);
 
                 notifier->onUpdate(line, length);
+
+                if (authorizationClosed(line, length))
+                {
+                    // Relayed first, above: the UI needs this line to reach its own
+                    // authorization state machine, or it stays on the chat list of an
+                    // account that no longer exists. flushOutgoing runs from the poll
+                    // loop, so give it a moment to drain before the process goes - the
+                    // socket buffer holds a line this size many times over, but the
+                    // handoff is between two threads and this is the last chance either
+                    // of them gets.
+                    std::fprintf(stderr, "meegramd: TDLib closed after logout; exiting so the next UI gets a fresh one\n");
+                    std::fflush(stderr);
+
+                    wakePollLoop();
+                    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+
+                    // _exit rather than exit: the receive thread is detached and parked in
+                    // td_receive, the poll loop is in poll(), and running static
+                    // destructors under both of them is how a clean shutdown turns into a
+                    // crash in the log of a process that did its job.
+                    std::fflush(nullptr);
+                    _exit(0);
+                }
             }
             else
             {

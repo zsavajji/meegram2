@@ -974,6 +974,27 @@ QString Utils::getServiceContent(Message *message, std::shared_ptr<StorageManage
     }
 }
 
+QString Utils::formatSize(qlonglong bytes) noexcept
+{
+    if (bytes <= 0)
+        return QString();
+
+    static const char *const Units[] = {"B", "KB", "MB", "GB"};
+
+    double value = static_cast<double>(bytes);
+    int unit = 0;
+
+    while (value >= 1024.0 && unit < 3)
+    {
+        value /= 1024.0;
+        ++unit;
+    }
+
+    // Whole bytes with a decimal reads as nonsense ("512.0 B"), so only scaled units
+    // get one.
+    return QString::number(value, 'f', unit == 0 ? 0 : 1) + QLatin1Char(' ') + QLatin1String(Units[unit]);
+}
+
 QString Utils::getChatTitle(std::shared_ptr<Chat> chat, std::shared_ptr<StorageManager> storage, bool showSavedMessages) noexcept
 {
     // isMeChat guards this, chat->title() below did not. StorageManager::chat() returns

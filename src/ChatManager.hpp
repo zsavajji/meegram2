@@ -274,6 +274,17 @@ public:
     // stacked ChatPages reopens the one below rather than leaving nothing open.
     Q_INVOKABLE void popContext(int token) noexcept;
 
+    // Empties every model and drops every context, without destroying any of them. Called
+    // on sign-out, when what is stale is the contents rather than the objects: QML is bound
+    // to these models and to this object, and replacing them is the hazard
+    // docs/troubleshooting.md calls "Destroying an object QML is still bound to" - while
+    // clearing them is what ChatModel::clear() already does on every refresh.
+    //
+    // The caller has to have got QML off the pages first. Delegates hold raw Chat* and
+    // File* owned by StorageManager, so the store may only drop its last reference once
+    // the stack is back at the chat list; see AppManager::handleAuthorizationState.
+    void reset() noexcept;
+
     // Mention autocomplete: members of the chat being read whose name or username matches
     // what is being typed. Answers on mentionsFound, with an empty list for anything that
     // is not a group - so the composer does not have to know what kind of chat it is in.

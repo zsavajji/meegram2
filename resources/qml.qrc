@@ -10,9 +10,11 @@
         <file>qml/components/MessageBubble.qml</file>
         <file>qml/components/MessageDelegate.qml</file>
         <file>qml/components/MyCountBubble.qml</file>
+        <file>qml/components/SectionHeader.qml</file>
         <file>qml/components/ServiceMessageDelegate.qml</file>
         <file>qml/components/TopBar.qml</file>
         <file>qml/components/UIConstants.js</file>
+        <file>qml/AccountSettingsPage.qml</file>
         <file>qml/ArchivedChatPage.qml</file>
         <file>qml/AuthenticationPage.qml</file>
         <file>qml/ChatPage.qml</file>
@@ -28,6 +30,8 @@
         <file>qml/PhotoViewPage.qml</file>
         <file>qml/ProfilePage.qml</file>
         <file>qml/QrCodePage.qml</file>
+        <file>qml/QrScannerPage.qml</file>
+        <file>qml/SessionsPage.qml</file>
         <file>qml/SettingsPage.qml</file>
         <file>qml/SignInPage.qml</file>
         <file>qml/SignUpPage.qml</file>

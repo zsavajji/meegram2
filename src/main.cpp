@@ -25,6 +25,7 @@
 #include <malloc.h>
 #endif
 
+#include "Account.hpp"
 #include "AppManager.hpp"
 #include "Authorization.hpp"
 #include "Log.hpp"
@@ -41,8 +42,10 @@
 #include "Message.hpp"
 #include "MessageService.hpp"
 #include "QrCodeItem.hpp"
+#include "QrScanner.hpp"
 #include "VoiceNote.hpp"
 #include "ScopeTimer.hpp"
+#include "SessionModel.hpp"
 #include "Settings.hpp"
 #include "StickerProvider.hpp"
 #include "StorageManager.hpp"
@@ -373,9 +376,12 @@ Q_DECL_EXPORT int main(int argc, char *argv[])
 
     qmlRegisterType<LottieAnimation>("MyComponent", 1, 0, "LottieAnimation");
     qmlRegisterType<QrCodeItem>("MyComponent", 1, 0, "QrCode");
+    qmlRegisterType<QrScanner>("MyComponent", 1, 0, "QrScanner");
     qmlRegisterType<VoiceNote>("MyComponent", 1, 0, "VoiceNote");
 
     qmlRegisterUncreatableType<Client>("MyComponent", 1, 0, "Client", "Client cannot be created from QML.");
+    qmlRegisterUncreatableType<Account>("MyComponent", 1, 0, "Account", "Account cannot be created from QML.");
+    qmlRegisterUncreatableType<SessionModel>("MyComponent", 1, 0, "SessionModel", "SessionModel cannot be created from QML.");
     qmlRegisterUncreatableType<Authorization>("MyComponent", 1, 0, "Authorization", "Authorization cannot be created from QML.");
     qmlRegisterUncreatableType<Locale>("MyComponent", 1, 0, "Locale", "Locale cannot be created from QML.");
     qmlRegisterUncreatableType<Settings>("MyComponent", 1, 0, "Settings", "Settings cannot be created from QML.");

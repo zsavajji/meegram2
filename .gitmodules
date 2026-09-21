@@ -4,3 +4,6 @@
 [submodule "cmake/sanitizers-cmake"]
 	path = cmake/sanitizers-cmake
 	url = https://github.com/arsenm/sanitizers-cmake.git
+[submodule "lib/quirc"]
+	path = lib/quirc
+	url = https://github.com/dlbeer/quirc

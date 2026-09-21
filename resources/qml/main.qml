@@ -56,6 +56,10 @@ PageStackWindow {
     // here rather than in the delegate so a message never has to ask two settings.
     property bool skeuomorphicBubbles: settings.showBubbles && settings.skeuomorphicBubbles
 
+    // Whether a tgs sticker plays or falls back to its emoji. Read here rather than in the
+    // delegate so a screenful of stickers asks one property rather than one setting each.
+    property bool animateStickers: settings.animateStickers
+
     // Whether a message is painted *on the accent balloon*, which is the only thing the
     // colour of its contents depends on: white reads on that balloon and on nothing else,
     // so with bubbles off every one of those whites has to become a page colour.
@@ -147,6 +151,21 @@ PageStackWindow {
     Connections {
         target: settings
         onInvertedThemeChanged: theme.inverted = settings.invertedTheme
+    }
+
+    // A sign-out can arrive from anywhere: this device's own Log out, or another client
+    // ending this session - in which case whatever page is open belongs to an account that
+    // is gone, and a ChatPage is the likeliest one.
+    //
+    // Popping is also what lets AppManager empty the store a turn later: the delegates
+    // holding Chat* and File* have to be gone before the last reference to them is.
+    Connections {
+        target: appManager
+
+        onSignedOutChanged: {
+            if (appManager.signedOut && pageStack.depth > 1)
+                pageStack.pop(null, true)
+        }
     }
 
     Connections {

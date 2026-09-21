@@ -11,6 +11,7 @@ class Settings : public QObject
     Q_PROPERTY(bool invertedTheme READ invertedTheme WRITE setInvertedTheme NOTIFY invertedThemeChanged)
     Q_PROPERTY(bool showBubbles READ showBubbles WRITE setShowBubbles NOTIFY showBubblesChanged)
     Q_PROPERTY(bool skeuomorphicBubbles READ skeuomorphicBubbles WRITE setSkeuomorphicBubbles NOTIFY skeuomorphicBubblesChanged)
+    Q_PROPERTY(bool animateStickers READ animateStickers WRITE setAnimateStickers NOTIFY animateStickersChanged)
 
     Q_PROPERTY(QString languagePackId READ languagePackId WRITE setLanguagePackId NOTIFY languagePackIdChanged)
     Q_PROPERTY(QString languagePluralId READ languagePluralId WRITE setLanguagePluralId NOTIFY languagePluralIdChanged)
@@ -35,6 +36,13 @@ public:
     // and the settings row is disabled to say so.
     bool skeuomorphicBubbles() const;
     void setSkeuomorphicBubbles(bool value);
+
+    // Whether a tgs sticker plays. Off, it falls back to its emoji, which is exactly what
+    // a webm sticker already does - rlottie renders every frame on the GUI thread of a
+    // single-core device, so this is the one appearance setting that is also a performance
+    // one. Defaults on, because playing is what a sticker is for.
+    bool animateStickers() const;
+    void setAnimateStickers(bool value);
 
     QString languagePackId() const;
     void setLanguagePackId(const QString &value);
@@ -61,6 +69,7 @@ signals:
     void invertedThemeChanged();
     void showBubblesChanged();
     void skeuomorphicBubblesChanged();
+    void animateStickersChanged();
 
     void languagePackIdChanged();
     void languagePluralIdChanged();
@@ -71,6 +80,7 @@ private:
     bool m_invertedTheme;
     bool m_showBubbles;
     bool m_skeuomorphicBubbles;
+    bool m_animateStickers;
     bool m_wasAuthorized;
 
     qint64 m_languagePackFetchedAt;

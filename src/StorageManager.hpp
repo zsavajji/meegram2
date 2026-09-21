@@ -101,6 +101,15 @@ public slots:
     // invocation: the maps below are only ever written on the GUI thread.
     void fetchChat(qlonglong chatId) noexcept;
 
+    // Drops everything this holds. The object survives - 19 files hold a shared_ptr to it
+    // and QML delegates hold raw Chat* and File* that come out of these maps, so what is
+    // stale after a sign-out is the contents rather than the instance.
+    //
+    // Ordering is the caller's job and it matters: the last reference to a Chat goes when
+    // it leaves m_chats, so every page bound to one has to be gone first. See
+    // AppManager::handleAuthorizationState, which pops the stack and then queues this.
+    void clear() noexcept;
+
 private slots:
     void handleResult(td::td_api::Object *object);
 

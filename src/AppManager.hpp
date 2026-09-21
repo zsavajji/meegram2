@@ -1,7 +1,8 @@
 #pragma once
 
 #include "LanguagePackInfoModel.hpp"
-// Included rather than forward declared: unique_ptr needs the complete type wherever
+#include "SessionModel.hpp"
+// Both included rather than forward declared: unique_ptr needs the complete type wherever
 // AppManager's implicit destructor is instantiated.
 //
 // Two of them, one per transport. With meegramd in the picture the notifications are
@@ -21,6 +22,7 @@
 #include <atomic>
 #include <memory>
 
+class Account;
 class Authorization;
 class ChatManager;
 class Client;
@@ -62,6 +64,12 @@ class AppManager : public QObject
     // All built in the constructor and never replaced, so no change to notify.
     Q_PROPERTY(Client *client READ client CONSTANT)
     Q_PROPERTY(Authorization *authorization READ authorization CONSTANT)
+    Q_PROPERTY(Account *account READ account CONSTANT)
+
+    // Every device this account is signed in on. Empty until the page that shows it calls
+    // load(): there is no update behind it, so keeping it current for a page nobody has
+    // opened would be a request per launch for nothing.
+    Q_PROPERTY(SessionModel *sessionModel READ sessionModel CONSTANT)
     Q_PROPERTY(Locale *locale READ locale CONSTANT)
     Q_PROPERTY(Settings *settings READ settings CONSTANT)
     Q_PROPERTY(StorageManager *storageManager READ storageManager CONSTANT)
@@ -69,6 +77,19 @@ class AppManager : public QObject
     Q_PROPERTY(ChatManager *chatManager READ chatManager NOTIFY chatManagerChanged)
 
     Q_PROPERTY(LanguagePackInfoModel *languagePackInfoModel READ languagePackInfoModel NOTIFY languagePackInfoModelChanged)
+
+    // What TDLib's cache is costing, preformatted ("14.2 MB"), plus this app's own avatar
+    // cache - which TDLib knows nothing about and which a "clear cache" that left it behind
+    // would be lying about. Empty until requestStorageStatistics has answered.
+    Q_PROPERTY(QString cacheSize READ cacheSize NOTIFY cacheSizeChanged)
+
+    // Whether each notification scope is muted. Three of them because Telegram keeps three,
+    // and a phone wants groups silent far more often than it wants everything silent.
+    // False until loadNotificationSettings has answered, which is also what they read as
+    // before there is an account.
+    Q_PROPERTY(bool privateChatsMuted READ privateChatsMuted NOTIFY notificationSettingsChanged)
+    Q_PROPERTY(bool groupChatsMuted READ groupChatsMuted NOTIFY notificationSettingsChanged)
+    Q_PROPERTY(bool channelChatsMuted READ channelChatsMuted NOTIFY notificationSettingsChanged)
 public:
     explicit AppManager(QObject *parent = nullptr);
 
@@ -84,6 +105,13 @@ public:
 
     Client *client() const noexcept;
     Authorization *authorization() const noexcept;
+
+    // The signed-in user's own profile, for the account settings page. Built with the rest
+    // of the graph rather than on authorization: it reads through StorageManager, which
+    // answers with empty strings until there is an account, and a page that binds to it
+    // before then shows empty fields rather than failing to resolve.
+    Account *account() const noexcept;
+    SessionModel *sessionModel() const noexcept;
     Locale *locale() const noexcept;
     Settings *settings() const noexcept;
     StorageManager *storageManager() const noexcept;
@@ -91,6 +119,12 @@ public:
     ChatManager *chatManager() const noexcept;
 
     LanguagePackInfoModel *languagePackInfoModel() const noexcept;
+
+    const QString &cacheSize() const noexcept;
+
+    bool privateChatsMuted() const noexcept;
+    bool groupChatsMuted() const noexcept;
+    bool channelChatsMuted() const noexcept;
 
 signals:
     void chatManagerChanged();
@@ -104,6 +138,9 @@ signals:
 
     void connectionStateChanged();
 
+    void cacheSizeChanged();
+    void notificationSettingsChanged();
+
     void appInitialized();
 
     // Forwarded from NotificationManager: a system notification was tapped.
@@ -111,6 +148,44 @@ signals:
     void chatRequested(const QString &chatId);
 
 public slots:
+    // Signs the account out and leaves nothing of it on disk. TDLib's own logOut destroys
+    // its database and then closes the instance; what it does not know about is this app's
+    // avatar cache, so that goes first - from here rather than from QML, because a page
+    // should not have to know what this process writes where.
+    //
+    // Under the daemon transport this closes *the daemon's* TDLib, which is the one thing
+    // AppManager::close is careful never to do. Here it is the point: meegramd exits when
+    // TDLib reports authorizationStateClosed, and the UI's reconnect re-activates it with
+    // a fresh instance, which is also what clears the titles and names the notifier is
+    // holding. See src/daemon/main.cpp.
+    //
+    // Deliberately keeps the device's own preferences - theme, bubble layout, language -
+    // and the language-pack cache. They are not the account's, and a fresh sign-in on the
+    // same phone should not arrive in a different theme and with 1.8 MB to re-download.
+    void logOut() noexcept;
+
+    // Asks TDLib what its cache weighs. getStorageStatisticsFast rather than
+    // getStorageStatistics: the slow one walks every file to attribute bytes per chat, which
+    // is a page this app does not have, and on eMMC it is seconds of it.
+    void requestStorageStatistics() noexcept;
+
+    // Throws the cache away: TDLib's downloaded files, and this app's masked-avatar cache
+    // with them. Keeps the databases - they are the chat list and the message history, not
+    // cache - so this frees space without costing a resync.
+    void clearCache() noexcept;
+
+    // The mute switch for one scope. `scope` is 0 private, 1 groups, 2 channels, matching
+    // the order the settings page lists them in; anything else is ignored.
+    //
+    // mute_for is a duration rather than a flag - 0 is unmuted, and Telegram's own clients
+    // use 2^31-1 for "forever", which is what a switch means by muted. Every other field of
+    // scopeNotificationSettings is sent back as it came, because this is a mute switch and
+    // not a notification-settings editor: writing defaults into show_preview or the sound id
+    // would quietly reset choices made in another client.
+    void setScopeMuted(int scope, bool muted) noexcept;
+
+    void loadNotificationSettings() noexcept;
+
     void close() noexcept;
     void setOption(const QString &name, const QVariant &value);
     void downloadFile(int fileId, int priority, qlonglong offset, qlonglong limit, bool synchronous);
@@ -136,6 +211,23 @@ private slots:
     // main.qml's own pendingChatId cannot cover this - it lives inside the handler that
     // never runs.
     void handleChatRequested(const QString &chatId) noexcept;
+
+    // Queued from the getStorageStatisticsFast callback, which runs on the TDLib worker
+    // thread. Takes the byte count rather than the formatted string so the avatar cache can
+    // be added to it here, on the thread that owns the property.
+    void setCacheBytes(qlonglong bytes) noexcept;
+
+    // Empties the session's models and the entity store, one turn after signedOut went
+    // true. The delay is the point: QML reacts to signedOut by popping the stack and
+    // swapping MainPage's Loader, and a chat delegate holds raw Chat* and File* that the
+    // store owns - so the last reference may only go once those pages are gone.
+    //
+    // A zero timer rather than a direct call: Qt drains posted events, including the
+    // deleteLater the pop schedules, before it runs timers.
+    void clearSession() noexcept;
+
+    // The same, for one scope's answer. See setScopeMuted for what `scope` means.
+    void setScopeMuteState(int scope, bool muted) noexcept;
 
     void handleResult(td::td_api::Object *object);
 
@@ -239,6 +331,12 @@ private:
 
     QString m_connectionStateString;
 
+    QString m_cacheSize;
+
+    // Indexed by the same 0/1/2 the QML side uses. std::array rather than three members
+    // because every path through them is the same three lines with one index changed.
+    std::array<bool, 3> m_scopeMuted{{false, false, false}};
+
     std::shared_ptr<Client> m_client;
     std::shared_ptr<Authorization> m_authorization;
     std::shared_ptr<Locale> m_locale;
@@ -246,6 +344,11 @@ private:
 
     std::shared_ptr<ChatManager> m_chatManager;
     std::shared_ptr<StorageManager> m_storageManager;
+
+    // After m_storageManager, and it has to stay there: members are constructed in
+    // declaration order, and this one is handed that pointer.
+    std::shared_ptr<Account> m_account;
+    std::unique_ptr<SessionModel> m_sessionModel;
 
     std::unique_ptr<LanguagePackInfoModel> m_languagePackInfoModel;
 

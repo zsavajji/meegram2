@@ -429,8 +429,10 @@ Item {
                 property bool downloaded: model.content.file && model.content.file.isDownloadingCompleted
 
                 // tgs goes through rlottie, webp through StickerProvider and libwebp.
-                // webm has no decoder here and falls through to the emoji.
-                property bool animated: downloaded && model.content.format === "tgs"
+                // webm has no decoder here and falls through to the emoji - and so does a
+                // tgs with "Animated stickers" turned off, which is the same fallback for
+                // the same reason: nothing here can draw it, so draw what it means instead.
+                property bool animated: downloaded && model.content.format === "tgs" && appWindow.animateStickers
                 property bool still: downloaded && model.content.format === "webp"
 
                 anchors {
@@ -481,6 +483,12 @@ Item {
             // one to show an emoji beside it would be pure cost.
             Component.onCompleted: {
                 if (model.content.format !== "tgs" && model.content.format !== "webp")
+                    return
+
+                // Nor a tgs nobody is going to play. A delegate rebuilt after the setting
+                // is turned back on runs this again, so the download is deferred rather
+                // than skipped for good.
+                if (model.content.format === "tgs" && !appWindow.animateStickers)
                     return
 
                 var file = model.content.file

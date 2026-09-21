@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
-project(MeeGram VERSION 0.4.0 LANGUAGES CXX)
+# C as well as C++ since lib/quirc, the QR decoder, is C99. The toolchain file already
+# names a C compiler; nothing else in this project uses one.
+project(MeeGram VERSION 0.4.0 LANGUAGES CXX C)
 
 # Without this an unset CMAKE_BUILD_TYPE means no -O flag at all, i.e. -O0.
 # This codebase leans on std::ranges views and templates, which -O0 punishes hard.
@@ -55,6 +57,7 @@ endif()
 set(QML_IMPORT_PATH "${QT_SDK_PATH}/Simulator/Qt/gcc/imports" CACHE STRING "QML import path for the Qt Creator code model")
 
 include(cmake/qr_code_generator.cmake)
+include(cmake/quirc.cmake)
 
 # Move TDLib out of the UI process and into the resident meegramd, reached over a Unix
 # socket with td_api objects carried as JSON (docs/restructuring.md). The UI keeps the
@@ -115,6 +118,7 @@ endif()
 
 set(SRC_FILES
     src/AppManager.cpp
+    src/Account.cpp
     src/Authorization.cpp
     src/BasicGroup.cpp
     src/Chat.cpp
@@ -138,7 +142,9 @@ set(SRC_FILES
     src/OggOpus.cpp
     src/PluralRules.cpp
     src/QrCodeItem.cpp
+    src/QrScanner.cpp
     src/SearchModel.cpp
+    src/SessionModel.cpp
     src/Settings.cpp
     src/StickerProvider.cpp
     src/StorageManager.cpp
@@ -151,6 +157,7 @@ set(SRC_FILES
 
 set(HEADER_FILES
     src/AppManager.hpp
+    src/Account.hpp
     src/Authorization.hpp
     src/BasicGroup.hpp
     src/Chat.hpp
@@ -175,9 +182,11 @@ set(HEADER_FILES
     ${MEEGRAM_CLIENT_HEADERS}
     src/PluralRules.hpp
     src/QrCodeItem.hpp
+    src/QrScanner.hpp
     src/ScopeTimer.hpp
     src/SearchModel.hpp
     src/StickerProvider.hpp
+    src/SessionModel.hpp
     src/Settings.hpp
     src/StorageManager.hpp
     src/Supergroup.hpp
@@ -238,6 +247,7 @@ target_compile_definitions(meegram PRIVATE $<$<BOOL:${MEEGRAM_FILE_LOG}>:MEEGRAM
 
 target_link_libraries(meegram PRIVATE
     Lib::QRCode
+    Lib::Quirc
     Td::TdStatic
     rlottie::rlottie
     WebP::webpdecoder
@@ -254,6 +264,30 @@ target_link_libraries(meegram PRIVATE
     ZLIB::ZLIB
     Threads::Threads
 )
+
+# The camera, which the QR scanner reads frames from. QtMultimediaKit is QtMobility 1.2's
+# multimedia module - distinct from Qt4::QtMultimedia above, which is Qt's own and is what
+# VoiceNote uses for audio. Optional for the same reason the address book is: a desktop
+# Qt 4 usually has neither, and src/QrScanner.cpp builds a scanner that reports itself
+# unavailable when this is missing.
+#
+# find_path/find_library rather than pkg_check_modules, for the sysroot reason spelled out
+# at the dbus block further down.
+find_path(QTMULTIMEDIAKIT_INCLUDE_DIR QCamera PATH_SUFFIXES qt4/QtMultimediaKit)
+find_library(QTMULTIMEDIAKIT_LIBRARY QtMultimediaKit)
+
+# No QtMobility include here, and no QTM_USE_NAMESPACE in the source: these headers open
+# QT_BEGIN_NAMESPACE rather than QTM_BEGIN_NAMESPACE, so unlike QtContacts below they are
+# plain Qt as far as the compiler is concerned.
+if (QTMULTIMEDIAKIT_INCLUDE_DIR AND QTMULTIMEDIAKIT_LIBRARY)
+    target_compile_definitions(meegram PRIVATE MEEGRAM_QR_SCANNER)
+    target_include_directories(meegram SYSTEM PRIVATE ${QTMULTIMEDIAKIT_INCLUDE_DIR})
+    target_link_libraries(meegram PRIVATE ${QTMULTIMEDIAKIT_LIBRARY})
+
+    message(STATUS "QR scanner: QtMultimediaKit found, camera enabled")
+else()
+    message(STATUS "QR scanner: no QtMultimediaKit, scanning disabled")
+endif()
 
 # The phone's address book, which "find contacts on Telegram" reads. QtMobility 1.2 is
 # what Harmattan ships; a desktop Qt 4 generally has no QtContacts, so this is optional

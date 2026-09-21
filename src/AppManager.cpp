@@ -1,17 +1,21 @@
 #include "AppManager.hpp"
 
+#include "Account.hpp"
 #include "Authorization.hpp"
 #include "Chat.hpp"
 #include "ChatManager.hpp"
 #include "Common.hpp"
 #include "Localization.hpp"
+#include "SessionModel.hpp"
 #include "Settings.hpp"
 #include "StorageManager.hpp"
+#include "Utils.hpp"
 
 #include <QApplication>
 #include <QDateTime>
 #include <QDebug>
 #include <QDir>
+#include <QFileInfo>
 #include <QLocale>
 #include <QTimer>
 
@@ -268,6 +272,8 @@ AppManager::AppManager(QObject *parent)
     , m_locale(std::make_shared<Locale>())
     , m_settings(std::make_shared<Settings>())
     , m_storageManager(std::make_shared<StorageManager>(m_client))
+    , m_account(std::make_shared<Account>(m_storageManager))
+    , m_sessionModel(std::make_unique<SessionModel>(m_client))
 {
     connect(qApp, SIGNAL(aboutToQuit()), this, SLOT(close()));
 
@@ -348,6 +354,16 @@ Authorization *AppManager::authorization() const noexcept
     return m_authorization.get();
 }
 
+Account *AppManager::account() const noexcept
+{
+    return m_account.get();
+}
+
+SessionModel *AppManager::sessionModel() const noexcept
+{
+    return m_sessionModel.get();
+}
+
 Locale *AppManager::locale() const noexcept
 {
     return m_locale.get();
@@ -371,6 +387,213 @@ ChatManager *AppManager::chatManager() const noexcept
 LanguagePackInfoModel *AppManager::languagePackInfoModel() const noexcept
 {
     return m_languagePackInfoModel.get();
+}
+
+const QString &AppManager::cacheSize() const noexcept
+{
+    return m_cacheSize;
+}
+
+bool AppManager::privateChatsMuted() const noexcept
+{
+    return m_scopeMuted[0];
+}
+
+bool AppManager::groupChatsMuted() const noexcept
+{
+    return m_scopeMuted[1];
+}
+
+bool AppManager::channelChatsMuted() const noexcept
+{
+    return m_scopeMuted[2];
+}
+
+namespace {
+
+// The three scopes in the order the settings page lists them. Null for an index that is
+// not one of them, which the callers treat as "do nothing".
+td::td_api::object_ptr<td::td_api::NotificationSettingsScope> toScope(int scope) noexcept
+{
+    switch (scope)
+    {
+        case 0:
+            return td::td_api::make_object<td::td_api::notificationSettingsScopePrivateChats>();
+        case 1:
+            return td::td_api::make_object<td::td_api::notificationSettingsScopeGroupChats>();
+        case 2:
+            return td::td_api::make_object<td::td_api::notificationSettingsScopeChannelChats>();
+        default:
+            return nullptr;
+    }
+}
+
+// What a switch means by "muted". Telegram's own clients write this rather than a year in
+// seconds, and anything above the current time reads as muted to every other client.
+constexpr auto MuteForever = 2147483647;
+
+}  // namespace
+
+void AppManager::requestStorageStatistics() noexcept
+{
+    m_client->send(td::td_api::make_object<td::td_api::getStorageStatisticsFast>(), [this](auto &&response) {
+        // TDLib worker thread: read it and hand the number on.
+        if (response->get_id() != td::td_api::storageStatisticsFast::ID)
+            return;
+
+        const auto *statistics = static_cast<const td::td_api::storageStatisticsFast *>(response.get());
+
+        // files_size only. The databases are the chat list and the history, which clearCache
+        // deliberately does not touch, so counting them here would offer to free space that
+        // clearing cannot free.
+        QMetaObject::invokeMethod(this, "setCacheBytes", Qt::QueuedConnection, Q_ARG(qlonglong, statistics->files_size_));
+    });
+}
+
+void AppManager::setCacheBytes(qlonglong bytes) noexcept
+{
+    // TDLib's files plus this app's own avatar cache, which is not in its accounting and is
+    // 16 KiB per avatar per size - a few hundred chats' worth of it.
+    QDir avatars(QDir::homePath() + QLatin1String("/.meegram/avatars"));
+
+    if (avatars.exists())
+    {
+        const auto cached = avatars.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
+
+        for (const auto &entry : cached)
+        {
+            bytes += entry.size();
+        }
+    }
+
+    const auto formatted = Utils::formatSize(bytes);
+
+    if (m_cacheSize == formatted)
+        return;
+
+    m_cacheSize = formatted;
+
+    emit cacheSizeChanged();
+}
+
+void AppManager::clearCache() noexcept
+{
+    // Every zero is "no limit of this kind": no size ceiling to stay under, no age cutoff,
+    // no count cutoff, and no immunity window protecting recent files. Empty vectors are
+    // every file type and every chat. The result is "delete what can be re-downloaded".
+    auto request = td::td_api::make_object<td::td_api::optimizeStorage>(0, 0, 0, 0, std::vector<td::td_api::object_ptr<td::td_api::FileType>>(),
+                                                                       std::vector<std::int64_t>(), std::vector<std::int64_t>(), false, 0);
+
+    m_client->send(std::move(request), [this](auto &&) {
+        // Whatever it says, ask again rather than guessing: the answer is a storageStatistics
+        // whose shape this does not otherwise need, and the number on screen has to come from
+        // the same place it came from before.
+        QMetaObject::invokeMethod(this, "requestStorageStatistics", Qt::QueuedConnection);
+    });
+
+    // Ours to clear, and TDLib will not: same list AppManager::logOut removes.
+    QDir avatars(QDir::homePath() + QLatin1String("/.meegram/avatars"));
+
+    if (avatars.exists())
+    {
+        const auto cached = avatars.entryList(QDir::Files | QDir::NoDotAndDotDot);
+
+        for (const auto &name : cached)
+        {
+            avatars.remove(name);
+        }
+    }
+}
+
+void AppManager::loadNotificationSettings() noexcept
+{
+    for (int scope = 0; scope < 3; ++scope)
+    {
+        auto request = td::td_api::make_object<td::td_api::getScopeNotificationSettings>(toScope(scope));
+
+        m_client->send(std::move(request), [this, scope](auto &&response) {
+            if (response->get_id() != td::td_api::scopeNotificationSettings::ID)
+                return;
+
+            const auto *settings = static_cast<const td::td_api::scopeNotificationSettings *>(response.get());
+
+            QMetaObject::invokeMethod(this, "setScopeMuteState", Qt::QueuedConnection, Q_ARG(int, scope),
+                                      Q_ARG(bool, settings->mute_for_ > 0));
+        });
+    }
+}
+
+void AppManager::setScopeMuteState(int scope, bool muted) noexcept
+{
+    if (scope < 0 || scope > 2 || m_scopeMuted[scope] == muted)
+        return;
+
+    m_scopeMuted[scope] = muted;
+
+    emit notificationSettingsChanged();
+}
+
+void AppManager::setScopeMuted(int scope, bool muted) noexcept
+{
+    auto target = toScope(scope);
+
+    if (!target)
+        return;
+
+    // Read, change one field, write it back. A blind setScopeNotificationSettings would
+    // reset show_preview, the notification sound and the pinned-message and mention
+    // switches to whatever this app happened to send - choices this app has no UI for and
+    // therefore no business overwriting.
+    auto request = td::td_api::make_object<td::td_api::getScopeNotificationSettings>(toScope(scope));
+
+    m_client->send(std::move(request), [this, scope, muted](auto &&response) {
+        if (response->get_id() != td::td_api::scopeNotificationSettings::ID)
+            return;
+
+        auto settings = td::td_api::move_object_as<td::td_api::scopeNotificationSettings>(response);
+
+        settings->mute_for_ = muted ? MuteForever : 0;
+
+        // Still the worker thread, and Client::send is what both threads use to reach
+        // TDLib - so the write goes out from here rather than costing a hop each way.
+        m_client->send(td::td_api::make_object<td::td_api::setScopeNotificationSettings>(toScope(scope), std::move(settings)), {});
+
+        QMetaObject::invokeMethod(this, "setScopeMuteState", Qt::QueuedConnection, Q_ARG(int, scope), Q_ARG(bool, muted));
+    });
+}
+
+void AppManager::clearSession() noexcept
+{
+    if (m_chatManager)
+        m_chatManager->reset();
+
+    m_storageManager->clear();
+}
+
+void AppManager::logOut() noexcept
+{
+    // Before the request, not after: logOut takes the network with it and the reply that
+    // confirms it is the authorization state going to Closed, by which point the daemon
+    // this is talking to may already be on its way out. Nothing here needs the network.
+    //
+    // QDir::removeRecursively is Qt 5. This directory is one flat level of files that
+    // ChatPhotoProvider wrote itself, so a listing and an unlink each is the whole job -
+    // and if a name in there is not ours to remove, leaving it is better than recursing
+    // through a home directory.
+    QDir avatars(QDir::homePath() + QLatin1String("/.meegram/avatars"));
+
+    if (avatars.exists())
+    {
+        const auto cached = avatars.entryList(QDir::Files | QDir::NoDotAndDotDot);
+
+        for (const auto &name : cached)
+        {
+            if (!avatars.remove(name))
+                qWarning() << "logOut: could not remove cached avatar" << name;
+        }
+    }
+
+    m_authorization->logOut();
 }
 
 void AppManager::close() noexcept
@@ -913,6 +1136,15 @@ void AppManager::handleAuthorizationState(const td::td_api::AuthorizationState &
         m_settings->setWasAuthorized(!m_signedOut);
 
         emit signedOutChanged();
+
+        // Signing out leaves a ChatManager and a StorageManager full of an account that is
+        // gone, and handleAuthorizationState only ever *creates* a ChatManager - so without
+        // this, signing back in without restarting shows the previous account's chats.
+        //
+        // Cleared rather than destroyed, and queued rather than immediate. See
+        // clearSession().
+        if (m_signedOut)
+            QTimer::singleShot(0, this, SLOT(clearSession()));
     }
 
     if (authorizationState.get_id() != td::td_api::authorizationStateReady::ID)

@@ -1,32 +1,8 @@
 #include "File.hpp"
 
 #include "ScopeTimer.hpp"
+#include "Utils.hpp"
 
-namespace {
-
-// Qt 4.7 has no QLocale::formattedDataSize, and this is the only caller.
-QString formatSize(qint64 bytes) noexcept
-{
-    if (bytes <= 0)
-        return QString();
-
-    static const char *const Units[] = {"B", "KB", "MB", "GB"};
-
-    double value = static_cast<double>(bytes);
-    int unit = 0;
-
-    while (value >= 1024.0 && unit < 3)
-    {
-        value /= 1024.0;
-        ++unit;
-    }
-
-    // Whole bytes with a decimal reads as nonsense ("512.0 B"), so only scaled units
-    // get one.
-    return QString::number(value, 'f', unit == 0 ? 0 : 1) + QLatin1Char(' ') + QLatin1String(Units[unit]);
-}
-
-}  // namespace
 
 File::File(td::td_api::object_ptr<td::td_api::file> file, QObject *parent)
     : QObject(parent)
@@ -101,7 +77,7 @@ bool File::updateFileProperties(const td::td_api::file &file)
     // Total size, not downloaded size - it does not move as chunks land, so putting it
     // in the guard costs at most one extra notification (when an expected size is
     // replaced by the real one) rather than one per packet.
-    const auto size = formatSize(file.size_ > 0 ? file.size_ : file.expected_size_);
+    const auto size = Utils::formatSize(file.size_ > 0 ? file.size_ : file.expected_size_);
 
     changed = changed || m_size != size;
 

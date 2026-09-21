@@ -57,6 +57,10 @@ public:
     bool loading() const noexcept;
     bool searched() const noexcept;
 
+    // Empties the rows. Shared by beginRequest, which starts every query with a clean
+    // model, and by sign-out - see ChatManager::reset.
+    void clear();
+
     // Contacts by name or username, and everybody else by public username. An empty query
     // just clears the model.
     Q_INVOKABLE void search(const QString &query);
