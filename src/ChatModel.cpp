@@ -252,11 +252,59 @@ bool ChatModel::insertChatIfInList(qlonglong chatId)
 
 void ChatModel::requestMoreChats()
 {
-    if (m_requestPending || m_listFullyLoaded)
-        return;
-
     auto client = m_storageManager->client();
     if (!client)
+        return;
+
+    m_wantCount += ChatSliceLimit;
+
+    // Ask what is in the list rather than waiting to be told what joins it. loadChats
+    // below only reports chats TDLib has not loaded yet, and it reports them with
+    // updateNewChat - which TDLib emits once per process, because send_update_new_chat
+    // latches per chat. meegramd's TDLib outlives every UI, so against a resident daemon
+    // that answer is a 404 and no updates at all: the whole list was announced to a run
+    // that has since exited.
+    //
+    // That hole used to be filled by AppManager::restoreState replaying getCurrentState,
+    // which is 5.7 MB on a 557-chat account - and every row of this list, plus any chat
+    // the user tapped a notification for, waited behind all of it in the reader thread.
+    // getChats is the narrow question: ids only, in list order, from what TDLib holds.
+    // Each one the store does not have costs a 14 KB getChat, so a first screen is about
+    // ten of those against the whole account (docs/notification-startup.md).
+    //
+    // Sent every time, including once loadChats has reported the list exhausted: on a
+    // warm daemon that is the *usual* state, and a bigger limit here is then the only
+    // thing that pages.
+    auto chats = td::td_api::make_object<td::td_api::getChats>();
+    chats->chat_list_ = Utils::toChatList(m_list);
+    chats->limit_ = m_wantCount;
+
+    // The storage is captured as a shared_ptr of its own rather than read off `this`:
+    // this callback runs on the TDLib worker thread, folder models are destroyed
+    // whenever the folder list changes, and the fetches below have to keep working
+    // through that. The rows come back through StorageManager's signals either way.
+    client->send(std::move(chats), [this, storage = m_storageManager, alive = m_alive](auto &&response) {
+        if (response->get_id() != td::td_api::chats::ID)
+            return;
+
+        const auto &chatIds = static_cast<const td::td_api::chats *>(response.get())->chat_ids_;
+
+        // Queued one id at a time: fetchChat writes GUI-thread-owned maps, and a
+        // per-id invocation needs no metatype registered for a list of them.
+        for (const auto chatId : chatIds)
+        {
+            QMetaObject::invokeMethod(storage.get(), "fetchChat", Qt::QueuedConnection, Q_ARG(qlonglong, chatId));
+        }
+
+        // Only the search chain below needs the model back, and only to ask for a bigger
+        // slice - so the fetches above are deliberately outside this guard: they are the
+        // useful half, they touch nothing of this object, and a folder model being
+        // replaced mid-flight should not cost the store the chats it just asked for.
+        if (alive->load())
+            QMetaObject::invokeMethod(this, "handleChatIds", Qt::QueuedConnection, Q_ARG(int, static_cast<int>(chatIds.size())));
+    });
+
+    if (m_requestPending || m_listFullyLoaded)
         return;
 
     auto request = td::td_api::make_object<td::td_api::loadChats>();
@@ -280,6 +328,21 @@ void ChatModel::requestMoreChats()
         // removes its pending posted events.
         QMetaObject::invokeMethod(this, "handleChatsLoaded", Qt::QueuedConnection, Q_ARG(bool, exhausted));
     });
+}
+
+void ChatModel::handleChatIds(int received)
+{
+    // Every id was handed to StorageManager::fetchChat before this was queued, so the
+    // rows arrive through handleChatItem as the chats land - there is nothing to do here
+    // for the ordinary case.
+    //
+    // A search is the exception: it wants the whole list rather than the first screen.
+    // The chain for that lives in handleChatsLoaded, driven by loadChats - which against
+    // a warm daemon answers 404 on the first call and never runs the chain again. So it
+    // lives here too, for as long as the answers keep coming back full. A short answer
+    // means TDLib has nothing more loaded, and loadChats is what asks for more of it.
+    if (!m_filter.isEmpty() && received >= m_wantCount)
+        requestMoreChats();
 }
 
 void ChatModel::handleChatsLoaded(bool listExhausted)
@@ -400,6 +463,10 @@ void ChatModel::refresh()
     m_populated = false;
     m_listFullyLoaded = false;
     m_emptyRetries = 0;
+
+    // Back to one slice. requestMoreChats() grows this, and a refresh is asking for the
+    // first screen again - the rest comes back as the view reaches the bottom of it.
+    m_wantCount = 0;
 
     // Without this, a refresh() while a loadChats is still in flight is dropped by the
     // guard in requestMoreChats() and m_loading never clears - the spinner stays up
@@ -534,6 +601,17 @@ void ChatModel::revealAll()
     endInsertRows();
 
     emit countChanged();
+
+    // The list has rows on it, so the spinner is wrong whatever the requests are still
+    // doing. This used to be cleared only by the loadChats reply, which against a warm
+    // daemon is an immediate 404 with an empty model behind it - so it took the
+    // cold-cache retry path and held the spinner for up to five seconds over a list that
+    // the demand fetches had already filled.
+    if (m_loading)
+    {
+        m_loading = false;
+        emit loadingChanged();
+    }
 }
 
 void ChatModel::loadMore()

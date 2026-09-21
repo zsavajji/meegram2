@@ -13,6 +13,7 @@
 
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 
 class StorageManager : public QObject
 {
@@ -87,8 +88,24 @@ public slots:
 
     QVariant getOption(const QString &name) const noexcept;
 
+    // Puts a chat in the store that TDLib has already announced to somebody else. Does
+    // nothing for a chat already held, and nothing for one already being fetched.
+    //
+    // updateNewChat is emitted once per TDLib process - send_update_new_chat latches
+    // d->is_update_new_chat_sent - and meegramd's TDLib outlives every UI that attaches
+    // to it. So for a resident daemon, "the update that would have told us" has already
+    // been sent to a run that is gone, and asking is the only way left. getChat answers
+    // in ~10 ms with ~14 KB, and the reply *is* the chat.
+    //
+    // A slot, because ChatModel calls it from the TDLib worker thread with a queued
+    // invocation: the maps below are only ever written on the GUI thread.
+    void fetchChat(qlonglong chatId) noexcept;
+
 private slots:
     void handleResult(td::td_api::Object *object);
+
+    // Queued from the getChat callback in fetchChat, for the same reason setUserBio is.
+    void clearChatFetch(qlonglong chatId) noexcept;
 
     // Queued from the getUserFullInfo callback, so the map is only ever written on this
     // thread. See loadUserFullInfo.
@@ -116,4 +133,9 @@ private:
     std::unordered_map<qlonglong, std::shared_ptr<SupergroupFullInfo>> m_supergroupFullInfo;
     std::unordered_map<qlonglong, std::shared_ptr<User>> m_users;
     std::unordered_map<qlonglong, QString> m_userBios;
+
+    // In flight in fetchChat. A chat list asks for the same ids on every page it loads -
+    // getChats returns the whole slice each time, not just the new tail - so without this
+    // a scroll to the bottom re-requests every row above it.
+    std::unordered_set<qlonglong> m_fetchingChats;
 };

@@ -89,6 +89,10 @@ private slots:
     // Invoked (queued) from the TDLib worker thread - see the note in sendSearch().
     void handleResults(int requestId, const QVariantList &chatIds);
 
+    // A chat this query asked StorageManager to fetch has arrived. Anything else the
+    // store says is not this model's business.
+    void handleChatFetched(qlonglong chatId);
+
 private:
     struct Row
     {
@@ -115,6 +119,11 @@ private:
     // watch for it.
     void ensurePhotoDownloaded(const Row &row) const;
 
+    // Turns ids into rows and appends the ones that resolve. Shared by the search
+    // answers and by a chat arriving later, so a late row is built exactly like an
+    // immediate one.
+    void appendRows(const QVariantList &chatIds);
+
     std::shared_ptr<StorageManager> m_storage;
 
     std::vector<Row> m_rows;
@@ -132,6 +141,10 @@ private:
     int m_pending{0};
 
     QSet<qlonglong> m_seenIds;
+
+    // Ids this query asked StorageManager::fetchChat for and has not seen land yet.
+    // Emptied by a new query, so an answer to an abandoned one inserts nothing.
+    QSet<qlonglong> m_awaitingChats;
 
     // Survives a new query on purpose - see toggleSelection. Emptied only by
     // clearSelection(), which the picker calls on its way in.

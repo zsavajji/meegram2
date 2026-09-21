@@ -113,6 +113,9 @@ void postIds(SearchModel *model, const std::shared_ptr<std::atomic_bool> &alive,
 SearchModel::SearchModel(std::shared_ptr<StorageManager> storage)
     : m_storage(std::move(storage))
 {
+    // For search hits the store does not hold - see appendRows.
+    connect(m_storage.get(), SIGNAL(chatUpdated(qlonglong)), SLOT(handleChatFetched(qlonglong)));
+
     setRoleNames(roleNames());
 }
 
@@ -195,6 +198,7 @@ int SearchModel::beginRequest(int pendingResponses)
     beginResetModel();
     m_rows.clear();
     m_seenIds.clear();
+    m_awaitingChats.clear();
     endResetModel();
 
     emit countChanged();
@@ -375,14 +379,8 @@ void SearchModel::importPhoneContacts()
     });
 }
 
-void SearchModel::handleResults(int requestId, const QVariantList &chatIds)
+void SearchModel::appendRows(const QVariantList &chatIds)
 {
-    if (requestId != m_requestId)
-        return;  // a slower answer to a query that has since been typed past
-
-    if (m_pending > 0)
-        --m_pending;
-
     std::vector<Row> incoming;
     incoming.reserve(chatIds.size());
 
@@ -406,29 +404,60 @@ void SearchModel::handleResults(int requestId, const QVariantList &chatIds)
             row.user = m_storage->user(chatId);
 
             if (!row.user)
-                continue;  // an id we were told about but hold nothing for
+            {
+                // An id TDLib answered with and this process holds nothing for. Against a
+                // resident daemon that is ordinary rather than exceptional: updateNewChat
+                // for a public chat is emitted once per TDLib process, and the chat list
+                // is demand-loaded, so there is no longer a replay seeding the store with
+                // everything. Ask, and let handleChatFetched put the row in when it lands.
+                m_awaitingChats.insert(chatId);
+                m_storage->fetchChat(chatId);
+                continue;
+            }
         }
 
         m_seenIds.insert(chatId);
         incoming.push_back(std::move(row));
     }
 
-    if (!incoming.empty())
+    if (incoming.empty())
+        return;
+
+    const auto first = static_cast<int>(m_rows.size());
+
+    beginInsertRows(QModelIndex(), first, first + static_cast<int>(incoming.size()) - 1);
+
+    for (auto &row : incoming)
     {
-        const auto first = static_cast<int>(m_rows.size());
-
-        beginInsertRows(QModelIndex(), first, first + static_cast<int>(incoming.size()) - 1);
-
-        for (auto &row : incoming)
-        {
-            ensurePhotoDownloaded(row);
-            m_rows.push_back(std::move(row));
-        }
-
-        endInsertRows();
-
-        emit countChanged();
+        ensurePhotoDownloaded(row);
+        m_rows.push_back(std::move(row));
     }
+
+    endInsertRows();
+
+    emit countChanged();
+}
+
+void SearchModel::handleChatFetched(qlonglong chatId)
+{
+    // chatUpdated fires for every chat in the store on every update it takes, so this
+    // has to be cheap and has to answer "no" for all of them: only an id this query
+    // asked for and could not resolve is interesting.
+    if (!m_awaitingChats.remove(chatId))
+        return;
+
+    appendRows(QVariantList() << QString::number(chatId));
+}
+
+void SearchModel::handleResults(int requestId, const QVariantList &chatIds)
+{
+    if (requestId != m_requestId)
+        return;  // a slower answer to a query that has since been typed past
+
+    if (m_pending > 0)
+        --m_pending;
+
+    appendRows(chatIds);
 
     // The other half of a search is still to come: staying on the spinner keeps "nothing
     // matched" off the screen until it is actually true.

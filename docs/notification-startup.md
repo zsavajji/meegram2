@@ -226,19 +226,36 @@ designing anything, the same way this was: the fake UI can ask a warm daemon for
 `getChatHistory` directly and time the reply, which separates "TDLib is slow to answer"
 from "the answer is slow to arrive".
 
-**The replay is still 5.5 MB.** It no longer blocks anything the user is watching and it
-costs 1.69 s of reader thread rather than 11.86, but it grows with the account rather than
-with the screen, so the account that is twice this size pays twice.
+~~**The replay is still 5.5 MB.**~~ It was, and it cost 1.69 s of reader thread rather
+than the original 11.86 — but it grew with the account rather than with the screen, so an
+account twice this size paid twice. **Addressed 2026-09-21** by the demand-loaded list
+below: the chat bulk is no longer relayed. `updateUser` still is, so the property has not
+gone away, it has been cut by roughly 4.4 of 5.7 MB. Unmeasured.
 
-**The chat list should be demand-loaded, and `fetchChat` is now the primitive for it.**
-`getChats(chatList, limit)` returns ids from the already-loaded list — small, and it does
-not 404 the way `loadChats` does on a warm daemon. `getChat` on each row being rendered is
-14 KB and 10 ms, and now lands in `StorageManager` by itself. A first screen is ~10 chats,
-so ~140 KB against 5.5 MB, and flat as the account grows.
+**The chat list is demand-loaded** — built 2026-09-21, **not measured on device**.
+`ChatModel::requestMoreChats` sends `getChats(chatList, limit)` for the ids, which does not
+404 the way `loadChats` does on a warm daemon, and `StorageManager::fetchChat` pulls each
+row the store lacks: 14 KB and 10 ms each, landing as an injected `updateNewChat`. Paging
+is a longer prefix, since `getChats` takes no offset. `SearchModel` fetches its own hits
+the same way, and re-inserts the row when one lands.
 
-What has to be got right: `positions` (ordering) rides on the `chat` object and on
-`updateChatLastMessage`, so `ChatModel` has to keep working from the first of those alone.
-That is the piece to design before touching it.
+The piece that had to be got right turned out to be already right. `positions` rides on the
+`chat` object as well as on `updateChatLastMessage`, and `Chat`'s constructor takes them
+from it (`Chat.cpp:30`), so an injected `updateNewChat` sorts and lists correctly on its
+own — which is exactly what `ChatManager::fetchChat` had been relying on for the
+notification tap since August.
+
+With the rows asked for rather than waited for, the replay's chat bulk is dead weight, so
+`broadcastSplit` drops it: `updateNewChat`, `updateChatLastMessage` and the three
+`*FullInfo` updates, ~4.4 MB of the 5.7 MB. Only the replay is filtered — live updates go
+through `broadcast()` untouched, which is what makes filtering by type safe at all. What
+still scales with the account is `updateUser`, ~780 KB.
+
+**What to measure**, against these same markers: `notification-tap → chatpage-pushed` on a
+warm daemon, the cold tap's `chat-open-begin` pair (4.58 s before this), the reader thread's
+CPU at t=30 s (1.69 s before), and `chat-layout-loaded`. The last one is the risk: the list
+now costs one round trip per row instead of arriving in bulk, so a first screen should be
+quicker and a *full* scroll to the bottom of a 557-chat account may well not be.
 
 Two things measured along the way that are *not* worth chasing:
 

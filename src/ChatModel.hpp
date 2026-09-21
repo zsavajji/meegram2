@@ -90,6 +90,9 @@ private slots:
     // thread - see the note in requestMoreChats().
     void handleChatsLoaded(bool listExhausted);
 
+    // The same, for the getChats callback. `received` is how many ids came back.
+    void handleChatIds(int received);
+
     void requestMoreChats();
 
     void handleChatItem(qlonglong chatId);
@@ -142,9 +145,14 @@ private:
     bool m_populated{false};
 
     // Guards against stacking loadChats requests, and stops asking once TDLib has
-    // reported the list exhausted.
+    // reported the list exhausted. Neither gates getChats: see requestMoreChats().
     bool m_requestPending{false};
     bool m_listFullyLoaded{false};
+
+    // How many chats getChats is asked for. It answers from the beginning of the list
+    // every time - there is no offset in the request - so paging means asking for a
+    // longer prefix, one ChatSliceLimit at a time.
+    int m_wantCount{0};
 
     // On a cold cache TDLib answers 404 before the server has pushed any chats, so
     // an exhausted reply is only believed once the model actually holds something.

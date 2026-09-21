@@ -29,12 +29,40 @@ process. See [Video and GIFs](#video-and-gifs).
 
 ## Chat list
 
-**Loading is demand-driven.** `refresh()` asks TDLib for one page via `loadChats`;
-reaching the bottom of the list calls `ChatModel::loadMore()` for the next. QML1's
-`ListView` has no `fetchMore` of its own — that is a Qt Widgets view API — so the
+**Loading is demand-driven, and the rows are fetched one by one.** `requestMoreChats()`
+asks two questions at once: `getChats` for the ids in this list, and `loadChats` for more
+of it than TDLib has loaded. Every id the store does not already hold goes to
+`StorageManager::fetchChat`, which is a 14 KB `getChat` whose reply is injected as
+`updateNewChat`. Reaching the bottom of the list calls `ChatModel::loadMore()`, which
+asks for a longer prefix — `getChats` has no offset, so paging means a bigger limit.
+
+The reason it cannot simply wait to be told, which is what it used to do: `updateNewChat`
+is emitted **once per TDLib process**, and `meegramd`'s TDLib outlives every UI. Against a
+resident daemon `loadChats` answers 404 and sends nothing, because the whole list was
+announced to a run that has since exited. That hole was filled by replaying
+`getCurrentState` — 5.7 MB on a 557-chat account, every launch, with the chat list and any
+tapped notification queued behind all of it. The daemon now drops the chat bulk from that
+replay (`broadcastSplit`), so what is left of it is ~1.3 MB and mostly `updateUser`.
+
+**A message in a chat below the loaded window brings it in by itself.**
+`updateChatLastMessage` and `updateChatPosition` for a chat the store does not hold used
+to be dropped — with the whole account seeded by the replay that was unreachable, and
+with demand loading it is the ordinary case of somebody writing to you. Both now call
+`StorageManager::fetchChat`, and the reply carries `last_message_` and `positions_` as
+they stand, so the row arrives complete and sorts to the top rather than the update being
+lost. This is the one place where demand loading needs the update stream to do something
+the seeded store used to make unnecessary.
+
+QML1's `ListView` has no `fetchMore` of its own — that is a Qt Widgets view API — so the
 demand signal comes from `onAtYEndChanged` in `ChatListView.qml`. Everything the model
 holds is visible (`revealAll()`); a `ListView` only builds delegates for rows in view
 plus its `cacheBuffer`, however large `rowCount` is.
+
+::: warning Measured on nothing yet
+The numbers above are what the replay cost before this change, not what it costs after.
+Nothing in this section has been through a device run — see
+[Profiling](/profiling), whose fourth session is the shape a real one takes.
+:::
 
 **Membership** is "the chat has a position for this list". TDLib documents an order of
 `0` as "not in the list", but in practice only pinned chats arrive with a real order, so
@@ -903,8 +931,8 @@ would apply here too, and cost nothing. Not done; it is a visible change to a la
 was not what this work set out to alter.
 :::
 
-**"Show bubbles" is the one untranslated string in the app**: Telegram's language pack has
-no key for it (it is not a setting Telegram has), and an absent key renders as the key
+**The bubble-layout switches are the app's untranslated strings**: Telegram's language
+pack has no key for a setting Telegram does not have, and an absent key renders as the key
 itself.
 
 ### Theme glyphs need a second asset, not a colour

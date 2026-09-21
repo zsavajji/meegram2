@@ -1,15 +1,19 @@
 # MeeGram — agent context
 
 Telegram client for the Nokia N9 (MeeGo 1.2 Harmattan). Read this first; it replaces
-reading the tree. Written 2026-09-19 against HEAD `bc03881` (version 0.3.8).
+reading the tree. Written 2026-09-19, updated 2026-09-21 against HEAD `ac90ef1`
+(version 0.4.0).
 
 The long-form reasoning lives in `docs/` and is more complete than this file. The N9
-platform reference lives outside the repo at `../harmattan-basic-docs/AGENTS/` (load its
+platform reference lives outside the repo at `../harmattan-basics/AGENTS/` (load its
 README plus the task-specific file before any QML, C++/platform or packaging change).
 
-On branch `feature/optimization`: `PERF-TEST-PLAN.md` at the repo root is the validation
-runbook for that branch's ten performance changes. If you are the agent with the Linux
-build box and the device, start there.
+The ten performance changes of `feature/optimization` are **merged and measured** (arm A
+against arm B, medians of three). `PERF-TEST-PLAN.md` was deleted per its own section 4;
+the results are `docs/profiling.md` "Fourth session" and the tail of
+`docs/notification-startup.md`. Largest item left is not on that list: a cold notification
+tap waited **4.6 s for the chat to exist** — the `getCurrentState` replay. The chat list
+is demand-loaded as of 2026-09-21 to close that; see **Status**, and measure it.
 
 ## Stack and constraints
 
@@ -28,18 +32,21 @@ build box and the device, start there.
 
 ## Working rules for this repo
 
-- **Do not build, package or commit on the user's behalf.** Edits happen on macOS; the
-  cross-build runs on a Linux box into `build-app/`. `build/` belongs to
-  `tools/setup-dependencies.sh` (zlib, OpenSSL, TDLib, rlottie, webp, ogg, opus trees
-  and their skip-stamps). Verify C++ with a standalone `g++` compile of the logic where
-  possible and say plainly what was not verified.
+- **Build, package and `scp` to the device as part of finishing a change; never commit.**
+  The cross-build goes into `build-app/`, which is already configured — do not
+  reconfigure. `build/` belongs to `tools/setup-dependencies.sh` (zlib, OpenSSL, TDLib,
+  rlottie, webp, ogg, opus trees and their skip-stamps). The `dpkg -i` is the user's:
+  `user` cannot become root over ssh. Land the `.deb` in `/home/user/MyDocs`, not `/tmp`
+  (4 MB tmpfs), and hand over `killall meegram meegramd` with the install — `invoker
+  --single-instance` re-focuses the old process otherwise and the change looks unshipped.
+  Say plainly what was not verified.
 - Comments in this codebase explain *why*, often with the measured number and the bug
   that motivated the line. Keep that style. clang-format: Google base, 160 columns,
   braces on their own line, 4-space indent.
 - `-Wall -Wextra -pedantic`; Debug adds `-Werror`. Release defines `QT_NO_DEBUG_OUTPUT`,
   so use `qWarning` for anything that must reach the device log.
 - Deliberate ceilings are marked `ponytail:` in a comment naming the upgrade path.
-  There are 39 of them; `grep -rn "ponytail:" src resources/qml` is the debt ledger.
+  There are 38 of them; `grep -rn "ponytail:" src resources/qml` is the debt ledger.
 - Language-pack strings: `qsTr("Key")` resolves through `Locale::getString`; a key the
   pack lacks renders **as the key itself** with nothing in a release log. Verify new keys
   against Telegram's Android pack on device. The on-disk cache is UTF-16, so `grep` finds
@@ -95,7 +102,8 @@ meegramd (src/daemon/)                       meegram (src/)
   td_json_client ── receive thread ──┐         Client (ClientProxy.cpp) ── reader jthread
   broadcast every line to every UI   │  unix     │ posts dispatch(Object*) → emit result
   broadcastSplit: getCurrentState    │ socket    ▼
-    → one update per line + "ok"     ├────────┬──────────┬──────────────┬──────────
+    → one update/line, minus the     ├────────┬──────────┬──────────────┬──────────
+      demand-loaded types, + "ok"    │
   Notifier: updateNotificationGroup  │  StorageManager  AppManager   Authorization  MessageModel
     → MNotificationManager (libdbus) │  (entity cache,  (auth/conn   (login state  (one per open chat)
   poll loop: accept, peer check,     │   11 signals)     state, root)  machine)
@@ -283,10 +291,17 @@ memo) applied.
 forwarding; message search; location/contact/poll delegates; inline video; download
 progress (spinner only); custom-emoji and paid reactions; sending your own typing
 action; recents/skin tones in the emoji picker; the daemon posts blocking D-Bus from its
-receive thread; the `getCurrentState` replay still grows with the account
-(demand-loading the chat list via `fetchChat` is the planned fix).
+receive thread.
 
-**Housekeeping**: "Show bubbles" is the one untranslated string by design.
+**The chat list is demand-loaded** (2026-09-21, unmeasured on device). `ChatModel` asks
+`getChats` for the ids in its list and `StorageManager::fetchChat` pulls each row the
+store lacks; `broadcastSplit` drops `updateNewChat`, `updateChatLastMessage` and the
+three `*FullInfo` updates from the `getCurrentState` replay, which is ~4.4 MB of the 5.7
+MB it used to carry. `SearchModel` demand-fetches its hits the same way. What is still
+replayed, and still grows with the account: `updateUser`.
+
+**Housekeeping**: the Settings switches Telegram has no equivalent for are untranslated by
+design — the pack has no key, and an absent key renders as the key itself.
 `docs/architecture.md`'s notification data-flow section describes the transport-OFF
 path and says so.
 
@@ -301,4 +316,4 @@ path and says so.
 | Build errors, device traps, past wrong diagnoses | `docs/troubleshooting.md` |
 | Toolchain, dependencies, patches applied to `td/`, packaging | `docs/building.md` |
 | Scroll-path profiling numbers and verdicts | `docs/profiling.md` |
-| N9 platform rules, theme graphics, UX guidelines, aegis, device workflow | `../harmattan-basic-docs/AGENTS/` |
+| N9 platform rules, theme graphics, UX guidelines, aegis, device workflow | `../harmattan-basics/AGENTS/` |

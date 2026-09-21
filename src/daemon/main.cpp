@@ -357,6 +357,52 @@ std::string extraValue(const char *begin, const char *end)
     return {};
 }
 
+// The part of the replay the UI now asks for by id instead of being told. ChatModel sends
+// getChats for the ids in a list and StorageManager::fetchChat pulls each row it does not
+// hold, so relaying the whole of it is 3.5 MB of updateNewChat and updateChatLastMessage -
+// measured on a 557-chat account - decoded to rebuild a list that shows nine rows. The
+// full-info siblings are another 930 KB that nothing on screen reads at startup.
+//
+// This is a type check, not a parse: the same first-field match the "updates" prefix above
+// already relies on, against TDLib emitting "@type" first. The relay still does not read
+// what it carries.
+//
+// It applies to the replay only. Live updates go out through broadcast() untouched, which
+// is what makes this safe to do by type at all - a chat arriving now is news, while the
+// same update inside a getCurrentState answer is a chat the UI can ask about whenever it
+// needs to. Filtering the live stream would lose the first, and this function is never
+// handed it.
+bool isReplayBulk(const char *element, size_t length)
+{
+    constexpr char TypePrefix[] = "{\"@type\":\"";
+    constexpr size_t prefixLength = sizeof(TypePrefix) - 1;
+
+    if (length < prefixLength || std::memcmp(element, TypePrefix, prefixLength) != 0)
+        return false;
+
+    // The closing quote is part of each name, so a longer type that merely starts with
+    // one of these cannot match.
+    // updateChatPosition is in this list for a second reason, and it is the one that would
+    // have bitten: StorageManager fetches a chat it does not hold when a position update
+    // names it, so relaying these to a UI whose store the filter has just emptied would
+    // ask for the whole list back, one getChat at a time. Positions ride on the chat
+    // object, so a demand-fetched chat has them anyway.
+    static constexpr const char *DemandLoaded[] = {
+        "updateNewChat\"",          "updateChatLastMessage\"",    "updateChatPosition\"",
+        "updateUserFullInfo\"",     "updateBasicGroupFullInfo\"", "updateSupergroupFullInfo\"",
+    };
+
+    for (const char *name : DemandLoaded)
+    {
+        const size_t nameLength = std::strlen(name);
+
+        if (length >= prefixLength + nameLength && std::memcmp(element + prefixLength, name, nameLength) == 0)
+            return true;
+    }
+
+    return false;
+}
+
 // Relays a multi-update response as its constituent updates. Returns false if this is not
 // one, or if the scan does not come out even - in which case the caller relays the line
 // whole, exactly as it did before. Nothing is written until the scan has finished, so a
@@ -430,8 +476,20 @@ bool broadcastSplit(const char *line, size_t length)
     if (!arrayEnd || depth != 0 || inString)
         return false;
 
+    size_t dropped = 0;
+
     for (const auto &element : elements)
+    {
+        if (isReplayBulk(element.first, element.second))
+        {
+            ++dropped;
+            continue;
+        }
+
         broadcast(element.first, element.second);
+    }
+
+    std::fprintf(stderr, "meegramd: replayed %zu updates, %zu demand-loaded\n", elements.size() - dropped, dropped);
 
     // The caller is still waiting on its request id, and it gets an answer: the updates
     // have been delivered. AppManager::restoreState reads this as "the replay is complete".

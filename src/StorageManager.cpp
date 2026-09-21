@@ -2,6 +2,8 @@
 
 #include "Utils.hpp"
 
+#include <QDebug>
+
 #include <algorithm>
 #include <ranges>
 #include <unordered_set>
@@ -153,6 +155,42 @@ void StorageManager::loadUserFullInfo(qlonglong userId) noexcept
     });
 }
 
+void StorageManager::fetchChat(qlonglong chatId) noexcept
+{
+    // ponytail: no ceiling on how many of these can be in flight. The two update handlers
+    // that call it do so for a chat the store has never seen, which on a UI attaching to a
+    // daemon that has been catching up can be every chat with a new message in it - each
+    // one a 14 KB request. It is bounded by chats with activity, and those are the rows
+    // the user is about to look at, so it is useful work rather than waste. A cap plus a
+    // queue is the upgrade if a long offline stretch turns it into a stampede.
+    if (m_chats.contains(chatId) || m_fetchingChats.contains(chatId))
+        return;
+
+    m_fetchingChats.insert(chatId);
+
+    m_client->send(td::td_api::make_object<td::td_api::getChat>(chatId), [this, chatId](auto &&response) {
+        // Runs on the TDLib worker thread. The injected update is a queued call of its
+        // own and Qt delivers queued calls to a thread in the order they were posted, so
+        // the chat is in the store by the time the latch below is cleared.
+        if (response->get_id() == td::td_api::chat::ID)
+        {
+            m_client->injectUpdate(td::td_api::make_object<td::td_api::updateNewChat>(td::td_api::move_object_as<td::td_api::chat>(response)));
+        }
+        else if (response->get_id() == td::td_api::error::ID)
+        {
+            const auto *error = static_cast<const td::td_api::error *>(response.get());
+            qWarning() << "fetchChat" << chatId << "failed:" << error->code_ << QString::fromStdString(error->message_);
+        }
+
+        QMetaObject::invokeMethod(this, "clearChatFetch", Qt::QueuedConnection, Q_ARG(qlonglong, chatId));
+    });
+}
+
+void StorageManager::clearChatFetch(qlonglong chatId) noexcept
+{
+    m_fetchingChats.erase(chatId);
+}
+
 void StorageManager::setUserBio(qlonglong userId, const QString &bio) noexcept
 {
     m_userBios.insert_or_assign(userId, bio);
@@ -224,6 +262,19 @@ void StorageManager::handleResult(td::td_api::Object *object)
                 emit chatLastMessageChanged(update->chat_id_);
                 emit chatPositionUpdated(update->chat_id_);
             }
+            else
+            {
+                // A message in a chat this process has never heard of. Before the chat
+                // list was demand-loaded that could not happen - the startup replay put
+                // every chat in the store - so the update was simply dropped, and with
+                // demand loading that dropped the row: a message arriving in a chat
+                // further down the list than anything loaded would not bring it to the
+                // top, or on screen at all.
+                //
+                // Fetching recovers the whole update rather than just the chat, because
+                // the reply carries last_message_ and positions_ as they now stand.
+                fetchChat(update->chat_id_);
+            }
             break;
         }
         case td::td_api::updateChatAction::ID: {
@@ -252,6 +303,13 @@ void StorageManager::handleResult(td::td_api::Object *object)
                 it->second->setPositions(std::move(result));
                 emit chatUpdated(update->chat_id_);
                 emit chatPositionUpdated(update->chat_id_);
+            }
+            else
+            {
+                // The same hole as updateChatLastMessage above, for the other update that
+                // decides list membership: a chat pinned, archived or moved into a folder
+                // from another client, below whatever this list has loaded.
+                fetchChat(update->chat_id_);
             }
             break;
         }
