@@ -36,6 +36,13 @@ Page {
         // the moment it is not - including on the way to a dialog.
         active: root.status === PageStatus.Active && !root.handled
 
+        // The sensor is mounted landscape, so the preview needs a quarter turn to stand up
+        // in a portrait page. 90 rather than 270, checked on the device - 270 was upside
+        // down. Only the preview: quirc reads a code at any angle, so the scanner worked
+        // either way. The menu still turns it over, for the next person holding a phone
+        // whose camera is mounted differently.
+        frameRotation: 90
+
         onScanned: {
             // A QR code is a QR code; only a login link is any of our business, and the
             // camera will happily read a poster on the wall behind the screen.
@@ -90,10 +97,28 @@ Page {
         }
     }
 
+    Menu {
+        id: menu
+
+        MenuLayout {
+            MenuItem {
+                // Not qsTr: no pack key for it, and an absent key renders as the key.
+                text: "Turn preview over"
+                onClicked: scanner.frameRotation = scanner.frameRotation + 180
+            }
+        }
+    }
+
     tools: ToolBarLayout {
         ToolIcon {
             platformIconId: "toolbar-back"
             onClicked: appWindow.pageStack.pop()
+        }
+
+        ToolIcon {
+            platformIconId: "toolbar-view-menu"
+            visible: scanner.available
+            onClicked: menu.open()
         }
     }
 }

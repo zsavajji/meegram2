@@ -13,6 +13,7 @@
         <file>qml/components/SectionHeader.qml</file>
         <file>qml/components/ServiceMessageDelegate.qml</file>
         <file>qml/components/TopBar.qml</file>
+        <file>qml/components/ValueDelegate.qml</file>
         <file>qml/components/UIConstants.js</file>
         <file>qml/AccountSettingsPage.qml</file>
         <file>qml/ArchivedChatPage.qml</file>

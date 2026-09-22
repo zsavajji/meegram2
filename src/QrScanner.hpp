@@ -38,6 +38,15 @@ class QrScanner : public QDeclarativeItem
     // Whether this build and this device can scan at all.
     Q_PROPERTY(bool available READ isAvailable CONSTANT)
 
+    // How far the viewfinder is turned before it is drawn, in degrees clockwise. The N9's
+    // sensor is mounted landscape and hands over landscape frames however the phone is
+    // held, so a page locked to portrait gets a picture lying on its side - what the user
+    // sees moving vertically is the scene moving sideways.
+    //
+    // Only the preview: quirc finds a code at any rotation, so decoding does not care and
+    // a wrong value here costs nothing but a picture the wrong way up.
+    Q_PROPERTY(int frameRotation READ frameRotation WRITE setFrameRotation NOTIFY frameRotationChanged)
+
 public:
     explicit QrScanner(QDeclarativeItem *parent = nullptr);
     ~QrScanner() override;
@@ -47,6 +56,9 @@ public:
 
     bool isAvailable() const noexcept;
 
+    int frameRotation() const noexcept;
+    void setFrameRotation(int degrees);
+
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget) override;
 
 signals:
@@ -55,6 +67,7 @@ signals:
     void scanned(const QString &text);
 
     void activeChanged();
+    void frameRotationChanged();
 
     void failed(const QString &message);
 
@@ -77,6 +90,11 @@ private:
     QMutex m_frameMutex;
 
     bool m_active{false};
+
+    // 90, checked on the device: 270 came out upside down. Both stand the picture up, 180
+    // apart, and only the preview is affected - quirc reads a code at any angle. Settable
+    // from QML so a page can differ.
+    int m_frameRotation{90};
 
     // When the last decode attempt ran, so a 30fps viewfinder does not run quirc 30 times a
     // second on a single core. Aiming a phone at a screen takes longer than this anyway.

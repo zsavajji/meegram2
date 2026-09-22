@@ -521,7 +521,11 @@ Item {
                     // False means nothing is registered for the type, same as a document.
                     if (!utils.openFile(file.localPath))
                         appWindow.showInfoBanner(qsTr("ErrorOccurred"));
-                } else if (file.canBeDownloaded && !file.isDownloadingActive) {
+                } else if (file.isDownloadingActive) {
+                    // Stoppable, like a document and for the same reason - a video is the
+                    // largest thing a chat can hand you.
+                    appManager.cancelDownloadFile(file.id);
+                } else if (file.canBeDownloaded) {
                     appManager.downloadFile(file.id, 1, 0, 0, false);
                 }
             }
@@ -701,7 +705,12 @@ Item {
                     // so beats a tap that looks like it did nothing.
                     if (!utils.openFile(file.localPath))
                         appWindow.showInfoBanner(qsTr("ErrorOccurred"));
-                } else if (file.canBeDownloaded && !file.isDownloadingActive) {
+                } else if (file.isDownloadingActive) {
+                    // The same tap that started it stops it. A document has no size
+                    // ceiling and this is a metered radio, so one started by mistake has
+                    // to be stoppable without leaving the chat.
+                    appManager.cancelDownloadFile(file.id);
+                } else if (file.canBeDownloaded) {
                     appManager.downloadFile(file.id, 1, 0, 0, false);
                 }
             }
@@ -744,12 +753,14 @@ Item {
 
                         Label {
                             anchors.centerIn: parent
-                            // The spinner replaces the glyph while it runs rather than
-                            // drawing on top of it.
-                            visible: !downloadIndicator.running
-                            text: fileIcon.done ? icons.document : icons.download
+                            // Drawn in every state now. While the spinner runs this is the
+                            // cross that says a tap will stop it, sized to sit inside the
+                            // ring rather than replace it, so "working" and "stoppable"
+                            // are both on screen.
+                            text: downloadIndicator.running ? icons.close : fileIcon.done ? icons.document : icons.download
                             font.family: icons.fontFamily
-                            font.pixelSize: 28
+                            // Small enough to sit inside the spinner's ring.
+                            font.pixelSize: downloadIndicator.running ? 18 : 28
                             color: "white"
                         }
 
@@ -819,15 +830,46 @@ Item {
             Component.onCompleted: {
                 var file = model.content.file;
 
-                if (file && file.canBeDownloaded && !file.isDownloadingCompleted && !file.isDownloadingActive)
+                if (!file || listView.cancelledDownloads[file.id])
+                    return;
+
+                if (file.canBeDownloaded && !file.isDownloadingCompleted && !file.isDownloadingActive)
                     appManager.downloadFile(file.id, 1, 0, 0, false);
             }
 
             onClicked: {
                 var file = model.content.file;
 
-                if (!file || !file.isDownloadingCompleted)
+                if (!file)
                     return;
+
+                // Fetched on sight, so this is the one download the user never asked for -
+                // which is exactly why stopping it has to be possible. Tapping again
+                // starts it over, through the branch below.
+                if (file.isDownloadingActive) {
+                    appManager.cancelDownloadFile(file.id);
+
+                    // Remembered, or the auto-fetch above starts it again as soon as this
+                    // delegate is rebuilt.
+                    var stopped = listView.cancelledDownloads;
+                    stopped[file.id] = true;
+                    listView.cancelledDownloads = stopped;
+
+                    return;
+                }
+
+                if (!file.isDownloadingCompleted) {
+                    if (file.canBeDownloaded) {
+                        // Asked for by hand this time, so it is no longer "not now".
+                        var wanted = listView.cancelledDownloads;
+                        delete wanted[file.id];
+                        listView.cancelledDownloads = wanted;
+
+                        appManager.downloadFile(file.id, 1, 0, 0, false);
+                    }
+
+                    return;
+                }
 
                 // Same object drives every bubble, so starting one note is what stops
                 // whichever was already playing.
@@ -874,13 +916,16 @@ Item {
 
                         Label {
                             anchors.centerIn: parent
-                            visible: !voiceIndicator.running
-                            // Download, then play, then pause. Three states, because the
-                            // first tap on a note that has not arrived would otherwise
+                            // Download, then play, then pause - and a cross while it is
+                            // arriving, because that tap stops it. Four states, because
+                            // the first tap on a note that has not arrived would otherwise
                             // look like a play button that does nothing.
-                            text: !voiceColumn.ready ? icons.download : voiceColumn.active ? icons.pause : icons.play
+                            text: voiceIndicator.running ? icons.close
+                                : !voiceColumn.ready ? icons.download
+                                : voiceColumn.active ? icons.pause : icons.play
                             font.family: icons.fontFamily
-                            font.pixelSize: 28
+                            // Inside the spinner's ring while that is running.
+                            font.pixelSize: voiceIndicator.running ? 18 : 28
                             color: "white"
                         }
 

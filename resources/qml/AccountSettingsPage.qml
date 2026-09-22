@@ -4,14 +4,14 @@ import com.nokia.extras 1.1
 import MyComponent 1.0
 import "components"
 
-// The signed-in user's own profile. Everything here writes straight to Telegram: there is
-// no local copy and no Save button, which is what the platform asks of a settings page -
-// a field commits when it loses focus, a picker when it is accepted, and Back just leaves.
+// The signed-in user's own profile. The page *shows*; editing happens in a sheet with a
+// Save button, which is what the platform reserves for a form - a settings page saves live
+// and has no button, a composer has Cancel and a verb and no Back. This is the second: the
+// fields go to Telegram, and a half-typed name is not something to send on a focus change.
 //
-// Nothing is written optimistically either. A field shows what the account says, the change
-// goes out, and the field only moves when TDLib says it took - so a rejected username snaps
-// back to the old one with the reason in a banner, rather than showing a name that is not
-// really yours.
+// Nothing is written optimistically. Save sends the change and the row still shows what the
+// account says; it moves when TDLib answers, so a rejected username leaves the old one on
+// screen with the reason in a banner rather than a name that is not really yours.
 Page {
     id: root
 
@@ -19,13 +19,16 @@ Page {
 
     property variant account: appManager.account
 
+    // Telegram's own limit for a bio. Enforced by hand because TextArea has no
+    // maximumLength - that is TextField, which wraps a TextInput; this wraps a TextEdit.
+    // Assigning it is not a warning, it stops the page loading.
+    property int maxBioLength: 70
+
     TopBar {
         id: header
         title: qsTr("Account")
     }
 
-    // A Flickable because the software keyboard takes half the screen: without it the
-    // field being edited can end up under the panel with no way to scroll to it.
     Flickable {
         id: flickable
 
@@ -47,146 +50,43 @@ Page {
 
             SectionHeader { text: qsTr("Profile") }
 
-            Item {
-                width: parent.width
-                height: fields.height + 24
+            ValueDelegate {
+                text: qsTr("FirstName")
+                // Both names in one row: TDLib takes them in one request, and they are one
+                // thing to everybody except the API.
+                value: (root.account.firstName + " " + root.account.lastName).replace(/^ +| +$/g, "")
+                placeholder: qsTr("Set")
 
-                Column {
-                    id: fields
+                onClicked: internal.edit("name")
+            }
 
-                    anchors {
-                        left: parent.left
-                        right: parent.right
-                        top: parent.top
-                        leftMargin: 12
-                        rightMargin: 12
-                        topMargin: 12
-                    }
+            ValueDelegate {
+                text: qsTr("UserBio")
+                value: root.account.bio
+                placeholder: qsTr("Set")
 
-                    spacing: 12
-
-                    Label {
-                        text: qsTr("FirstName")
-                        font.pixelSize: 20
-                        color: appWindow.secondaryColor
-                    }
-
-                    TextField {
-                        id: firstNameField
-                        width: parent.width
-                        maximumLength: 64
-                        // Not a binding: a binding would fight the user's typing every time
-                        // an unrelated update touched the account. Seeded once, and
-                        // re-seeded by the Connections below when the server answers.
-                        Component.onCompleted: text = root.account.firstName
-                        onActiveFocusChanged: if (!activeFocus) internal.commitName()
-                    }
-
-                    Label {
-                        text: qsTr("LastName")
-                        font.pixelSize: 20
-                        color: appWindow.secondaryColor
-                    }
-
-                    TextField {
-                        id: lastNameField
-                        width: parent.width
-                        maximumLength: 64
-                        Component.onCompleted: text = root.account.lastName
-                        onActiveFocusChanged: if (!activeFocus) internal.commitName()
-                    }
-
-                    Label {
-                        // 70 characters is Telegram's own limit for this field.
-                        text: qsTr("UserBio")
-                        font.pixelSize: 20
-                        color: appWindow.secondaryColor
-                    }
-
-                    TextArea {
-                        id: bioField
-                        width: parent.width
-                        height: Math.max(80, implicitHeight)
-                        maximumLength: 70
-                        wrapMode: TextEdit.Wrap
-                        Component.onCompleted: text = root.account.bio
-                        onActiveFocusChanged: if (!activeFocus && text !== root.account.bio) root.account.setBio(text)
-                    }
-                }
+                onClicked: internal.edit("bio")
             }
 
             SectionHeader { text: qsTr("Account") }
 
-            Item {
-                width: parent.width
-                height: accountFields.height + 24
+            ValueDelegate {
+                text: qsTr("Username")
+                // The "@" is decoration for display: TDLib takes and returns the bare name.
+                value: root.account.username !== "" ? "@" + root.account.username : ""
+                placeholder: qsTr("Set")
 
-                Column {
-                    id: accountFields
-
-                    anchors {
-                        left: parent.left
-                        right: parent.right
-                        top: parent.top
-                        leftMargin: 12
-                        rightMargin: 12
-                        topMargin: 12
-                    }
-
-                    spacing: 12
-
-                    Label {
-                        text: qsTr("Username")
-                        font.pixelSize: 20
-                        color: appWindow.secondaryColor
-                    }
-
-                    TextField {
-                        id: usernameField
-                        width: parent.width
-                        maximumLength: 32
-                        placeholderText: qsTr("UsernamePlaceholder")
-                        // The "@" is decoration: TDLib takes and returns the bare name, and
-                        // typing one in would be rejected as an invalid character.
-                        inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
-                        Component.onCompleted: text = root.account.username
-                        onActiveFocusChanged: if (!activeFocus && text !== root.account.username) root.account.setUsername(text)
-                    }
-                }
+                onClicked: internal.edit("username")
             }
 
             // A date is a picker, never a typed field - the platform has a dialog for it and
             // the guidelines are explicit about not asking anyone to type one.
-            ListItem {
+            ValueDelegate {
+                text: qsTr("Birthday")
+                value: root.account.birthdateText
+                placeholder: qsTr("Set")
+
                 onClicked: internal.openBirthdatePicker()
-
-                Label {
-                    anchors {
-                        left: parent.left
-                        leftMargin: 12
-                        right: birthdateValue.left
-                        rightMargin: 12
-                        verticalCenter: parent.verticalCenter
-                    }
-                    elide: Text.ElideRight
-                    font.pixelSize: 26
-                    font.bold: true
-                    text: qsTr("Birthday")
-                }
-
-                Label {
-                    id: birthdateValue
-
-                    anchors {
-                        right: parent.right
-                        rightMargin: 16
-                        verticalCenter: parent.verticalCenter
-                    }
-                    font.pixelSize: 22
-                    color: appWindow.secondaryColor
-                    // An empty birthdate reads as an invitation rather than as a blank.
-                    text: root.account.birthdateText !== "" ? root.account.birthdateText : qsTr("Set")
-                }
             }
 
             // Read-only, and it says so when tapped rather than looking dead. Changing the
@@ -194,45 +94,19 @@ Page {
             // then checkPhoneNumberCode - and it is deliberately not built.
             // ponytail: shows the number, does not change it; the upgrade is a second page
             // modelled on CodeEnterPage.
-            ListItem {
+            ValueDelegate {
+                text: qsTr("PhoneNumber")
+                value: root.account.phoneNumber !== "" ? "+" + root.account.phoneNumber : ""
+
                 // Not qsTr: the pack has no key for this, and an absent key renders as the
                 // key itself.
                 onClicked: appWindow.showInfoBanner("Not possible on this device, sorry!")
-
-                Label {
-                    anchors {
-                        left: parent.left
-                        leftMargin: 12
-                        right: phoneValue.left
-                        rightMargin: 12
-                        verticalCenter: parent.verticalCenter
-                    }
-                    elide: Text.ElideRight
-                    font.pixelSize: 26
-                    font.bold: true
-                    text: qsTr("PhoneNumber")
-                }
-
-                Label {
-                    id: phoneValue
-
-                    anchors {
-                        right: parent.right
-                        rightMargin: 16
-                        verticalCenter: parent.verticalCenter
-                    }
-                    font.pixelSize: 22
-                    color: appWindow.secondaryColor
-                    text: root.account.phoneNumber !== "" ? "+" + root.account.phoneNumber : ""
-                }
             }
 
             SectionHeader { text: qsTr("LogOut") }
 
-            // An action, not a setting, so a plain row rather than a switch - and the only
-            // row here that does not take effect the moment it is tapped. Irreversible and
-            // it costs the session on this device, which is the case the N9 guidelines
-            // reserve a query dialog for.
+            // An action, not a setting, so a plain row - and irreversible, which is the case
+            // the N9 guidelines reserve a query dialog for.
             ListItem {
                 onClicked: logOutDialog.open()
 
@@ -254,6 +128,124 @@ Page {
     }
 
     ScrollDecorator { flickableItem: flickable }
+
+    // One sheet for all three fields rather than three sheets: they differ by which inputs
+    // are shown and what Save sends, and everything else - the bar, the buttons, the
+    // keyboard handling - is identical. `internal.editing` says which.
+    Sheet {
+        id: editSheet
+
+        acceptButtonText: qsTr("Save")
+        rejectButtonText: qsTr("Cancel")
+
+        title: Label {
+            anchors.centerIn: parent
+            font.pixelSize: 28
+            color: "white"
+            text: internal.editing === "name" ? qsTr("FirstName")
+                : internal.editing === "bio" ? qsTr("UserBio")
+                                             : qsTr("Username")
+        }
+
+        content: Item {
+            anchors.fill: parent
+
+            Column {
+                anchors {
+                    left: parent.left
+                    right: parent.right
+                    top: parent.top
+                    margins: 16
+                }
+
+                spacing: 12
+
+                // Both name fields, shown together: one request carries them, so one sheet
+                // should edit them.
+                Label {
+                    visible: internal.editing === "name"
+                    text: qsTr("FirstName")
+                    font.pixelSize: 20
+                    color: appWindow.secondaryColor
+                }
+
+                TextField {
+                    id: firstNameField
+
+                    visible: internal.editing === "name"
+                    width: parent.width
+                    maximumLength: 64
+                }
+
+                Label {
+                    visible: internal.editing === "name"
+                    text: qsTr("LastName")
+                    font.pixelSize: 20
+                    color: appWindow.secondaryColor
+                }
+
+                TextField {
+                    id: lastNameField
+
+                    visible: internal.editing === "name"
+                    width: parent.width
+                    maximumLength: 64
+                }
+
+                TextArea {
+                    id: bioField
+
+                    visible: internal.editing === "bio"
+                    width: parent.width
+                    height: 140
+                    wrapMode: TextEdit.Wrap
+
+                    onTextChanged: if (text.length > root.maxBioLength) text = text.substring(0, root.maxBioLength)
+                }
+
+                Label {
+                    visible: internal.editing === "bio"
+                    width: parent.width
+                    horizontalAlignment: Text.AlignRight
+                    font.pixelSize: 20
+                    color: appWindow.secondaryColor
+                    // Counts down rather than up: the limit is the thing worth knowing.
+                    text: (root.maxBioLength - bioField.text.length) + ""
+                }
+
+                TextField {
+                    id: usernameField
+
+                    visible: internal.editing === "username"
+                    width: parent.width
+                    maximumLength: 32
+                    placeholderText: qsTr("Username")
+
+                    // Exactly as typed. ImhNoAutoUppercase says "do not capitalise for me"
+                    // and ImhPreferLowercase asks the keyboard to *open* unshifted rather
+                    // than in Abc mode, which is what was putting a capital on the first
+                    // letter. Neither restricts anything: shift still works and a typed
+                    // capital survives.
+                    //
+                    // Deliberately **not** ImhLowercaseOnly, which forces the case and is a
+                    // different thing from not changing it.
+                    inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText | Qt.ImhPreferLowercase
+                }
+
+                Label {
+                    visible: internal.editing === "username"
+                    width: parent.width
+                    wrapMode: Text.WordWrap
+                    font.pixelSize: 20
+                    color: appWindow.secondaryColor
+                    // Not qsTr: no pack key says this, and an absent key renders as itself.
+                    text: "Letters, numbers and underscores. Leave it empty to remove it."
+                }
+            }
+        }
+
+        onAccepted: internal.save()
+    }
 
     QueryDialog {
         id: logOutDialog
@@ -278,30 +270,24 @@ Page {
         acceptButtonText: qsTr("Set")
         rejectButtonText: qsTr("Cancel")
 
+        // The defaults are currentYear - 1 to currentYear + 20, which is a range for
+        // booking things rather than for a birthday: without these, a year set below is
+        // clamped forward and the picker cannot reach anybody's.
+        minimumYear: 1900
+        // Plain JS: the dialog's own dateTime helper is internal to it.
+        maximumYear: new Date().getFullYear()
+
         // Year is kept: the picker has no way to say "no year", so an account that had one
         // without keeps whatever the dialog opened on. Clearing it altogether is the menu
-        // item below, which is the only way to get back to no birthdate at all.
+        // item, which is the only way back to no birthdate at all.
         onAccepted: root.account.setBirthdate(day, month, year)
     }
 
-    // Re-seeds the fields whenever the server answers, which is also what makes a rejected
-    // change snap back: nothing here moved when the request went out, so the field is still
-    // showing the old value and this puts the authoritative one in either way.
-    //
-    // Skips whichever field has focus, so an answer arriving mid-sentence does not rewrite
-    // what is being typed.
+    // The rows are bound straight to the account, so they follow a change on their own.
+    // This is here for the failures: a rejected request leaves the row showing the old
+    // value, which is correct, and this says why.
     Connections {
         target: root.account
-
-        onChanged: {
-            if (!firstNameField.activeFocus) firstNameField.text = root.account.firstName
-            if (!lastNameField.activeFocus) lastNameField.text = root.account.lastName
-            if (!usernameField.activeFocus) usernameField.text = root.account.username
-        }
-
-        onFullInfoChanged: {
-            if (!bioField.activeFocus) bioField.text = root.account.bio
-        }
 
         onFailed: appWindow.showInfoBanner(message)
     }
@@ -339,20 +325,46 @@ Page {
     QtObject {
         id: internal
 
-        // Both names travel in one request, so this is one function rather than two that
-        // would each undo the other's half.
-        function commitName() {
-            if (firstNameField.text === root.account.firstName && lastNameField.text === root.account.lastName)
-                return;
+        // Which field the sheet is editing: "name", "bio" or "username".
+        property string editing: ""
 
-            // Telegram requires a first name; an empty one is rejected, so it is worth
-            // saying so here rather than letting the server answer with FIRSTNAME_INVALID.
-            if (firstNameField.text === "") {
+        function edit(what) {
+            editing = what;
+
+            // Seeded on the way in, every time. The fields are deliberately not bound to
+            // the account - a binding would rewrite what is being typed the moment an
+            // unrelated update touched it - so this is what puts the current value in.
+            if (what === "name") {
                 firstNameField.text = root.account.firstName;
-                return;
+                lastNameField.text = root.account.lastName;
+            } else if (what === "bio") {
+                bioField.text = root.account.bio;
+            } else {
+                usernameField.text = root.account.username;
             }
 
-            root.account.setName(firstNameField.text, lastNameField.text);
+            editSheet.open();
+        }
+
+        function save() {
+            if (editing === "name") {
+                // Telegram requires a first name and rejects an empty one, so it is worth
+                // saying so here rather than letting the server answer FIRSTNAME_INVALID.
+                if (firstNameField.text === "") {
+                    // Not qsTr: no pack key says this.
+                    appWindow.showInfoBanner("A first name is required.");
+                    return;
+                }
+
+                if (firstNameField.text !== root.account.firstName || lastNameField.text !== root.account.lastName)
+                    root.account.setName(firstNameField.text, lastNameField.text);
+            } else if (editing === "bio") {
+                if (bioField.text !== root.account.bio)
+                    root.account.setBio(bioField.text);
+            } else {
+                if (usernameField.text !== root.account.username)
+                    root.account.setUsername(usernameField.text);
+            }
         }
 
         function openBirthdatePicker() {

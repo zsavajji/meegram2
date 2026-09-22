@@ -1,8 +1,13 @@
 # MeeGram — agent context
 
 Telegram client for the Nokia N9 (MeeGo 1.2 Harmattan). Read this first; it replaces
-reading the tree. Written 2026-09-19, updated 2026-09-21 against HEAD `ac90ef1`
-(version 0.4.0).
+reading the tree. Written 2026-09-19, updated 2026-09-21 against HEAD `9dab0fc`
+(version 0.4.5).
+
+**0.4.5 has never been run.** It was written, compiled and packaged in one session and is
+sitting on the phone uninstalled. `docs/handoff-0.4.5.md` is what to distrust in this file
+and the order to debug it in — read it before believing anything below about the chat list,
+settings, accounts, sessions or downloads.
 
 The long-form reasoning lives in `docs/` and is more complete than this file. The N9
 platform reference lives outside the repo at `../harmattan-basics/AGENTS/` (load its
@@ -46,7 +51,7 @@ is demand-loaded as of 2026-09-21 to close that; see **Status**, and measure it.
 - `-Wall -Wextra -pedantic`; Debug adds `-Werror`. Release defines `QT_NO_DEBUG_OUTPUT`,
   so use `qWarning` for anything that must reach the device log.
 - Deliberate ceilings are marked `ponytail:` in a comment naming the upgrade path.
-  There are 38 of them; `grep -rn "ponytail:" src resources/qml` is the debt ledger.
+  There are 40 of them; `grep -rn "ponytail:" src resources/qml` is the debt ledger.
 - Language-pack strings: `qsTr("Key")` resolves through `Locale::getString`; a key the
   pack lacks renders **as the key itself** with nothing in a release log. Verify new keys
   against Telegram's Android pack on device. The on-disk cache is UTF-16, so `grep` finds
@@ -151,6 +156,9 @@ meegramd (src/daemon/)                       meegram (src/)
 | `src/ChatManager.*` | `ChatInfoFormatter`, `ChatContext`, `ChatManager`; `openProfile`, `fetchChat`, `createGroup`, `searchMentions` |
 | `src/ChatModel.*`, `MessageModel.*`, `SearchModel.*`, `ChatFolderModel.*` | List models (see above) |
 | `src/Chat.*`, `Message.*`, `MessageContent.*`, `MessageService.*`, `User.*`, `BasicGroup.*`, `Supergroup*.*`, `File.*`, `ChatPosition.*` | Passive value wrappers over `td_api` |
+| `src/Account.*` | The signed-in user's own profile for the account page: name, bio, username, birthday |
+| `src/SessionModel.*` | Active sessions; terminate, terminate-others, confirm a QR login |
+| `src/QrScanner.*` | `QCamera` viewfinder + `lib/quirc`; grayscale frames, decode throttled to 350 ms |
 | `src/Utils.*` | Formatters, emoji table (`replaceEmoji`, `elideEmoji`, `emojiOnlySize`), save/open helpers |
 | `src/Localization.*`, `PluralRules.*`, `LanguagePackInfoModel.*` | Translation |
 | `src/NotificationManager.*` | In-process notifier (transport OFF only) |
@@ -170,9 +178,10 @@ main.qml (PageStackWindow; theme colours, isOnBubble(), chatPageComponent, openC
     ├── ChatPage        header, ListView<MessageDelegate>, composer, EmojiPicker, mention panel,
     │                   ContextMenu, reaction grid, VoiceNote, kept-alive Photo/File pickers
     │   └── MessageDelegate → MessageBubble (chrome) | ServiceMessageDelegate
-    ├── ProfilePage, NewChatPage, NewGroupPage, ArchivedChatPage, SettingsPage, LanguageSettingsPage,
+    ├── ProfilePage, NewChatPage, NewGroupPage, ArchivedChatPage, LanguageSettingsPage,
+    │   SettingsPage (sectioned, in a Flickable) → AccountSettingsPage, SessionsPage → QrScannerPage,
     │   PhotoViewPage (pinch zoom via resizeContent, swaps to the original when downloaded)
-    └── components/: ChatItem, ListItem, TopBar, Icons (fontello), MyCountBubble, UIConstants.js
+    └── components/: ChatItem, ListItem, TopBar, SectionHeader, Icons (fontello), MyCountBubble, UIConstants.js
 ```
 
 - Bubble vs flat layout: `model.isOutgoing` decides the side in both layouts;
@@ -295,6 +304,14 @@ progress (spinner only); custom-emoji and paid reactions; sending your own typin
 action; recents/skin tones in the emoji picker; the daemon posts blocking D-Bus from its
 receive thread.
 
+**New in 0.4.5, none of it run** (`docs/handoff-0.4.5.md`): settings split into sections;
+an Account page (name, bio, username, birthday; phone read-only); log out with confirmation,
+which also makes `meegramd` exit and be re-activated; a Devices page with session terminate
+and QR scanning to sign a desktop in (`lib/quirc` + `QCamera`); per-scope notification mute;
+cache size and clear; the nine-slice bubbles back behind "Skeumorphic bubbles"; animated
+stickers and sensitive-content switches; cancellable downloads; a restart warning on a
+language change.
+
 **The chat list is demand-loaded** (2026-09-21, unmeasured on device). `ChatModel` asks
 `getChats` for the ids in its list and `StorageManager::fetchChat` pulls each row the
 store lacks; `broadcastSplit` drops `updateNewChat`, `updateChatLastMessage` and the
@@ -318,4 +335,5 @@ path and says so.
 | Build errors, device traps, past wrong diagnoses | `docs/troubleshooting.md` |
 | Toolchain, dependencies, patches applied to `td/`, packaging | `docs/building.md` |
 | Scroll-path profiling numbers and verdicts | `docs/profiling.md` |
+| What 0.4.5 added, what has never run, and the order to debug it | `docs/handoff-0.4.5.md` |
 | N9 platform rules, theme graphics, UX guidelines, aegis, device workflow | `../harmattan-basics/AGENTS/` |

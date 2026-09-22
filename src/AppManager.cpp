@@ -636,6 +636,11 @@ void AppManager::downloadFile(int fileId, int priority, qlonglong offset, qlongl
     m_client->send(td::td_api::make_object<td::td_api::downloadFile>(fileId, priority, offset, limit, synchronous));
 }
 
+void AppManager::cancelDownloadFile(int fileId)
+{
+    m_client->send(td::td_api::make_object<td::td_api::cancelDownloadFile>(fileId, false), {});
+}
+
 void AppManager::handleChatRequested(const QString &chatId) noexcept
 {
     if (!m_qmlReady)

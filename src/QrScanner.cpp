@@ -294,6 +294,26 @@ void QrScanner::decode()
     }
 }
 
+int QrScanner::frameRotation() const noexcept
+{
+    return m_frameRotation;
+}
+
+void QrScanner::setFrameRotation(int degrees)
+{
+    // Normalised so a page can say -90 and mean the same as 270.
+    const int wrapped = ((degrees % 360) + 360) % 360;
+
+    if (m_frameRotation == wrapped)
+        return;
+
+    m_frameRotation = wrapped;
+
+    emit frameRotationChanged();
+
+    update();
+}
+
 void QrScanner::handleCameraError()
 {
 #ifdef MEEGRAM_QR_SCANNER
@@ -317,15 +337,33 @@ void QrScanner::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidg
         return;
     }
 
-    // Fitted rather than stretched: a QR code read through a distorted viewfinder is still
-    // decodable, but a viewfinder that lies about the shape of what it sees makes aiming
-    // harder than it needs to be.
+    painter->fillRect(boundingRect(), Qt::black);
+
+    // Turned a quarter before it is drawn, because the sensor is mounted landscape and
+    // hands over landscape frames whichever way the phone is held. Rotating the painter
+    // rather than the QImage: transforming 640x480 per frame on this device is a copy
+    // nobody needs, and the raster engine takes the transform for free.
+    const bool quarterTurn = m_frameRotation % 180 != 0;
+
+    // In the rotated frame of reference the item's width and height swap over, so the box
+    // the picture has to fit inside does too.
+    const QSize box = quarterTurn ? QSize(static_cast<int>(height()), static_cast<int>(width()))
+                                  : QSize(static_cast<int>(width()), static_cast<int>(height()));
+
     // QSize::scale, not QSize::scaled: the const one arrived in Qt 5 and this is 4.7.
     QSize scaled = frame.size();
-    scaled.scale(boundingRect().size().toSize(), Qt::KeepAspectRatio);
+    scaled.scale(box, Qt::KeepAspectRatio);
 
-    const QRect target(QPoint(static_cast<int>((width() - scaled.width()) / 2), static_cast<int>((height() - scaled.height()) / 2)), scaled);
+    painter->save();
 
-    painter->fillRect(boundingRect(), Qt::black);
-    painter->drawImage(target, frame);
+    // Nearest-neighbour. This is a viewfinder for aiming at a printed square, and a
+    // smooth-scaled rotation per frame is real work on an SGX-less raster path.
+    painter->setRenderHint(QPainter::SmoothPixmapTransform, false);
+
+    painter->translate(width() / 2, height() / 2);
+    painter->rotate(m_frameRotation);
+
+    painter->drawImage(QRect(QPoint(-scaled.width() / 2, -scaled.height() / 2), scaled), frame);
+
+    painter->restore();
 }

@@ -1,3 +1,33 @@
+meegram (0.4.5) unstable; urgency=low
+
+  * The chat list is fetched a screen at a time instead of being handed over whole at
+    startup. The app used to ask the background service for everything it knew - about
+    five and a half megabytes on a large account, every launch - and read all of it before
+    it could show anything or open the chat you tapped a notification for. It now asks
+    which chats are in the list and fetches each row as it needs it.
+  * A message arriving in a chat too far down the list to have been loaded now brings that
+    chat to the top, where before the message was quietly dropped until the next restart.
+  * Settings are divided into sections: General, Appearance, Notifications, Storage and
+    Account.
+  * An Account page: your name, bio, username and birthday, all editable, with your phone
+    number shown. Changing the number is not possible on this device.
+  * Log out, with a confirmation. It ends the session, destroys the local database and
+    clears the picture caches, and the background service restarts clean.
+  * A Devices page listing everywhere your account is signed in, with the ability to end
+    any of those sessions, and to sign a computer in by scanning the QR code it shows.
+  * Notifications can be silenced separately for private chats, groups and channels.
+  * Storage shows what the cache weighs and can empty it, without touching the chats and
+    messages themselves.
+  * The old drawn-on message balloons are back, behind a "Skeumorphic bubbles" switch,
+    off by default.
+  * Animated stickers can be turned off, and sensitive content shown or hidden.
+  * Downloads can be stopped while they are running - a document, a video or a voice note
+    started by mistake no longer has to finish.
+  * Changing the interface language now says that the app has to restart for it to take
+    effect, rather than appearing to do nothing.
+
+ -- Andrea Faggin <hellothere@andreafagg.in>  Sun, 21 Sep 2026 22:30:00 +0200
+
 meegram (0.4.0) unstable; urgency=low
 
   * Opening a chat is about four tenths of a second quicker. The page a chat is drawn on

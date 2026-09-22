@@ -248,6 +248,18 @@ Page {
 
         ListView {
             id: listView
+
+            // File ids whose download the user stopped by hand. Voice notes are fetched on
+            // sight, so without this a cancelled one starts again the moment its delegate
+            // is recycled - scroll away, scroll back, and the download the user just
+            // stopped is running again.
+            //
+            // Lives on the view rather than in a delegate because delegates are recycled,
+            // and it is deliberately not persisted: it means "not now", for as long as this
+            // chat is open. Mutated by copy-and-reassign, since changing a variant in place
+            // notifies nothing (docs/troubleshooting.md).
+            property variant cancelledDownloads: ({})
+
             anchors {
                 top: header.bottom
                 left: parent.left

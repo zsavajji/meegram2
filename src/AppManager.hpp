@@ -190,6 +190,15 @@ public slots:
     void setOption(const QString &name, const QVariant &value);
     void downloadFile(int fileId, int priority, qlonglong offset, qlonglong limit, bool synchronous);
 
+    // Stops a download that is already running, for the tap that started one by mistake -
+    // a document on a metered radio has no size ceiling, and the only thing worse than
+    // waiting for one is waiting for one nobody asked for.
+    //
+    // only_if_pending is false: true would cancel only a download that has not begun
+    // transferring yet, which is precisely the case the user is never looking at. What is
+    // already on disk stays there, and TDLib reports the file as downloadable again.
+    void cancelDownloadFile(int fileId);
+
     void initialize() noexcept;
 
     // The "Try again" button on MainPage's unreachable screen, and the one thing that gets
