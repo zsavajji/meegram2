@@ -314,8 +314,8 @@ PageStackWindow {
         pageStack.push(component, { chatContext: chatContext });
     }
 
-    // Lives here rather than on ChatPage so the delegate can reach it by a unique name -
-    // "root" inside MessageDelegate resolves to ChatPage's root and is easy to get wrong.
+    // Lives here rather than on ChatPage: the message rows reach it through ChatPage's
+    // rowActions, and other pages open photos too.
     //
     // original is the full-size File behind the photo, for the viewer's Save. Optional:
     // a caller with nothing to save opens a picture that simply cannot be kept.

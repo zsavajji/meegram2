@@ -60,7 +60,7 @@ Item {
                 // left behind by a hidden field is a list quietly missing chats.
                 text = "";
                 filterTimer.stop();
-                closeSoftwareInputPanel();
+                platformCloseSoftwareInputPanel();
 
                 // This handler also runs once while the item is being built, which is
                 // before an initial-property model has necessarily landed.
@@ -112,11 +112,19 @@ Item {
         // call site: two of the three set it on the ChatListView and the archived page
         // did not, so the same list clipped or not depending on how it was reached.
         clip: true
-        // height * 2 kept roughly 36 extra ChatItem delegates alive off-screen, each
-        // holding a decoded avatar. Half a screen either side is plenty of runway for
-        // flicking and costs a fraction of the memory.
+        // height * 2 kept roughly 36 extra rows alive off-screen, each holding a decoded
+        // avatar. Half a screen either side is plenty of runway for flicking and costs a
+        // fraction of the memory.
         cacheBuffer: listView.height / 2
-        delegate: ChatItem {}
+        // One painted item per chat, laid out in C++ - see ChatRow.cpp. It sets its own
+        // height.
+        delegate: ChatRow {
+            width: ListView.view.width
+            listModel: root.model
+            row: index
+            inverted: theme.inverted
+            actions: rowActions
+        }
         model: root.model
         snapMode: ListView.SnapToItem
 
@@ -133,6 +141,24 @@ Item {
         onContentYChanged: {
             if (moving && !flicking && contentY < -searchBar.expandedHeight)
                 root.searchVisible = true;
+        }
+    }
+
+    // What a ChatRow's tap and hold do. The rows call these by name, with every argument
+    // - see ChatRow.hpp for the list.
+    QtObject {
+        id: rowActions
+
+        function openChat(chatId) {
+            appWindow.openChat(chatId);
+        }
+
+        function openMenu(chatId, title, pinned, muted, unread) {
+            menuTarget.open(chatId, title, pinned, muted, unread);
+        }
+
+        function download(fileId) {
+            appManager.downloadFile(fileId, 1, 0, 0, false);
         }
     }
 

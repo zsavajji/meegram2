@@ -48,7 +48,9 @@ Page {
 
             width: flickable.width
 
-            SectionHeader { text: qsTr("Profile") }
+            // "Info" rather than "Profile": the pack has no Profile, and a missing key
+            // renders as the key itself. Decoded from the device's own cache.
+            SectionHeader { text: qsTr("Info") }
 
             ValueDelegate {
                 text: qsTr("FirstName")
@@ -82,7 +84,7 @@ Page {
             // A date is a picker, never a typed field - the platform has a dialog for it and
             // the guidelines are explicit about not asking anyone to type one.
             ValueDelegate {
-                text: qsTr("Birthday")
+                text: qsTr("EditProfileBirthdayText")
                 value: root.account.birthdateText
                 placeholder: qsTr("Set")
 
@@ -103,7 +105,10 @@ Page {
                 onClicked: appWindow.showInfoBanner("Not possible on this device, sorry!")
             }
 
-            SectionHeader { text: qsTr("LogOut") }
+            // Its own section, unnamed: the row says what it is, and a header repeating
+            // the word above it is what the device showed - "Esci" twice, once as a
+            // heading and once as the row under it.
+            SectionHeader { text: "" }
 
             // An action, not a setting, so a plain row - and irreversible, which is the case
             // the N9 guidelines reserve a query dialog for.
@@ -266,7 +271,8 @@ Page {
     DatePickerDialog {
         id: birthdatePicker
 
-        titleText: qsTr("Birthday")
+        // Telegram's key for the word; plain "Birthday" is not in the pack.
+        titleText: qsTr("EditProfileBirthdayText")
         acceptButtonText: qsTr("Set")
         rejectButtonText: qsTr("Cancel")
 
@@ -278,8 +284,10 @@ Page {
         maximumYear: new Date().getFullYear()
 
         // Year is kept: the picker has no way to say "no year", so an account that had one
-        // without keeps whatever the dialog opened on. Clearing it altogether is the menu
-        // item, which is the only way back to no birthdate at all.
+        // without keeps whatever the dialog opened on.
+        //
+        // There is no way to remove a birthday from here. Account::clearBirthdate exists
+        // and is what a row or a menu would call; the menu item was dropped as clutter.
         onAccepted: root.account.setBirthdate(day, month, year)
     }
 
@@ -292,29 +300,10 @@ Page {
         onFailed: appWindow.showInfoBanner(message)
     }
 
-    Menu {
-        id: menu
-
-        MenuLayout {
-            MenuItem {
-                // Not qsTr: the pack has no key for this, and an absent key renders as the
-                // key itself. English, like the bubble switches in Settings.
-                text: "Remove birthday"
-                visible: root.account.birthdateDay !== 0
-                onClicked: root.account.clearBirthdate()
-            }
-        }
-    }
-
     tools: ToolBarLayout {
         ToolIcon {
             platformIconId: "toolbar-back"
             onClicked: appWindow.pageStack.pop()
-        }
-
-        ToolIcon {
-            platformIconId: "toolbar-view-menu"
-            onClicked: menu.open()
         }
     }
 

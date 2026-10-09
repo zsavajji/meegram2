@@ -24,8 +24,6 @@ Page {
     property bool canSend: chatInfo ? chatInfo.canSendMessages : true
 
     // What the composer is currently doing: a plain send, a reply, or an edit.
-    // Named distinctly rather than living on the page root, because MessageBubble
-    // also uses id: root and would shadow it.
     QtObject {
         id: composeState
 
@@ -98,7 +96,65 @@ Page {
             saveName = name || "";
             albumPhotos = photos;
             albumCount = photos ? photos.length : 0;
-            messageMenu.open();
+            root.showPopup("message").open();
+        }
+    }
+
+    // What a MessageRow's taps, holds and swipes do. The rows call these by name, with
+    // every argument - see MessageRow.hpp for the list.
+    QtObject {
+        id: rowActions
+
+        function openMenu(messageId, sender, text, outgoing, file, fileName, photos) {
+            menuTarget.open(messageId, sender, text, outgoing, file, fileName, photos);
+        }
+
+        function reply(messageId, sender, preview) {
+            composeState.reply(messageId, sender, preview);
+        }
+
+        function goToMessage(messageId) {
+            listView.goToMessage(messageId);
+        }
+
+        function openLink(link) {
+            appWindow.openLink(link);
+        }
+
+        function openPhoto(path, original) {
+            appWindow.openPhoto(path, original);
+        }
+
+        function openProfile(userId) {
+            chatManager.openProfile(userId);
+        }
+
+        function download(fileId) {
+            appManager.downloadFile(fileId, 1, 0, 0, false);
+        }
+
+        function cancelDownload(fileId) {
+            appManager.cancelDownloadFile(fileId);
+        }
+
+        function showBanner(text) {
+            appWindow.showInfoBanner(text);
+        }
+
+        function isDownloadCancelled(fileId) {
+            return listView.cancelledDownloads[fileId] === true;
+        }
+
+        // Copy-and-reassign: changing a variant in place notifies nothing.
+        function setDownloadCancelled(fileId, cancelled) {
+            var ids = listView.cancelledDownloads;
+
+            if (cancelled)
+                ids[fileId] = true;
+            else
+                delete ids[fileId];
+
+            listView.cancelledDownloads = ids;
         }
     }
 
@@ -269,11 +325,25 @@ Page {
             spacing: 6
 
             clip: true
-            // These delegates are RichText, so each cached one carries a laid-out
-            // QTextDocument. Keep a modest runway rather than three screens' worth.
+            // Each cached row carries its laid-out text and decoded media. Keep a modest
+            // runway rather than three screens' worth.
             cacheBuffer: listView.height / 2
 
-            delegate: MessageDelegate {}
+            // One painted item per message, laid out in C++ - see MessageRow.cpp. It sets
+            // its own height.
+            delegate: MessageRow {
+                width: ListView.view.width
+                listModel: messageModel
+                row: index
+                inverted: theme.inverted
+                bubbles: appWindow.showBubbles
+                skeuomorphic: appWindow.skeuomorphicBubbles
+                animateStickers: appWindow.animateStickers
+                player: voice
+                actions: rowActions
+                flashMessageId: listView.flashMessageId
+                flashOpacity: listView.flashOpacity
+            }
             model: messageModel
 
             // Breathing room under the newest message, which otherwise sits hard against
@@ -725,7 +795,9 @@ Page {
                     model: ListModel { id: mentionModel }
 
                     delegate: ListItem {
-                        width: parent.width
+                        // Not parent.width: a delegate is built before it has a parent, and
+                        // that binding logged "Unable to assign undefined value" per row.
+                        width: ListView.view.width
                         height: 64
 
                         // The username first - it is what gets inserted - then the name,
@@ -941,7 +1013,7 @@ Page {
                             if (voice.recording)
                                 voice.cancelRecording();
                             else
-                                attachMenu.open();
+                                root.showPopup("attach").open();
                         }
                     }
                 }
@@ -1120,98 +1192,131 @@ Page {
         onError: appWindow.showInfoBanner(message)
     }
 
+    // The menus and dialogs below are built the first time they are wanted, not with the
+    // page. Each is a platform Popup with its own Fader and most visits to a chat never
+    // long-press anything, yet all five were paid for on every open - the 639 ms
+    // chatpage-compiled -> chatpage-completed in docs/profiling.md. Kept once built, the
+    // same trade the photo and file pickers make, and parented to the page exactly as
+    // the declared ones were.
+    property QtObject messageMenu: null
+    property QtObject reactionMenu: null
+    property QtObject attachMenu: null
+    property QtObject deleteDialog: null
+    property QtObject reactionsDialog: null
+
+    // The named popup, built on first call. One property per popup rather than a map: a
+    // QObject kept in a variant map is the conversion QML1 does not always make.
+    function showPopup(name) {
+        switch (name) {
+        case "message":
+            return messageMenu || (messageMenu = messageMenuComponent.createObject(root));
+        case "reaction":
+            return reactionMenu || (reactionMenu = reactionMenuComponent.createObject(root));
+        case "attach":
+            return attachMenu || (attachMenu = attachMenuComponent.createObject(root));
+        case "delete":
+            return deleteDialog || (deleteDialog = deleteDialogComponent.createObject(root));
+        default:
+            return reactionsDialog || (reactionsDialog = reactionsDialogComponent.createObject(root));
+        }
+    }
+
     // Harmattan action menu, raised by a long press on a bubble. Items that cannot
     // apply to the target hide rather than grey out, which is what the platform does.
-    ContextMenu {
-        id: messageMenu
+    Component {
+        id: messageMenuComponent
 
-        MenuLayout {
-            MenuItem {
-                text: qsTr("Reply")
-                // Nothing to reply into when the composer is gone. Reactions stay:
-                // subscribers can react to a channel post even though they cannot post.
-                visible: root.canSend
-                onClicked: composeState.reply(menuTarget.messageId, menuTarget.sender, menuTarget.text)
-            }
-
-            MenuItem {
-                // Reacting from the menu is the way to add one that is not on the bubble
-                // yet; a reaction already there is toggled by tapping its pill.
-                text: qsTr("Reactions")
-                onClicked: reactionMenu.open()
-            }
-
-            MenuItem {
-                // Not on your own messages: your profile is a tap away under Settings,
-                // and the entry is there to look somebody else up.
-                text: qsTr("OpenProfile")
-                visible: !menuTarget.isOutgoing && menuTarget.senderUserId !== ""
-                onClicked: chatManager.openProfile(menuTarget.senderUserId)
-            }
-
-            MenuItem {
-                // Who reacted, and with what. Asked of the model rather than passed in
-                // through menuTarget.open, which would mean another argument on all
-                // seven delegates that raise this menu.
-                text: qsTr("AllReactions")
-                visible: messageModel && messageModel.hasReactions(menuTarget.messageId)
-                onClicked: reactionsDialog.load(menuTarget.messageId)
-            }
-
-            MenuItem {
-                text: qsTr("Copy")
-                visible: menuTarget.text !== ""
-                onClicked: utils.copyToClipboard(menuTarget.text)
-            }
-
-            MenuItem {
-                text: qsTr("Edit")
-                // ponytail: outgoing text only. Telegram also refuses edits past 48h
-                // and in channels without rights; TDLib rejects those and the error is
-                // swallowed. Gate properly via getMessageProperties if it bites.
-                visible: root.canSend && menuTarget.isOutgoing && menuTarget.text !== ""
-                onClicked: composeState.edit(menuTarget.messageId, menuTarget.text)
-            }
-
-            MenuItem {
-                text: qsTr("Save")
-                visible: menuTarget.saveFile !== null
-                onClicked: appWindow.saveOriginal(menuTarget.saveFile, menuTarget.saveName)
-            }
-
-            MenuItem {
-                // The whole batch, one photo at a time. A single photo of an album is
-                // saved by opening it and using the viewer's Save.
-                //
-                // SaveToGallery, checked against the pack on the device: SaveAllPhotos was
-                // guessed and the pack has no such key, so this menu entry read
-                // "SaveAllPhotos" in every language. Telegram has no "save all" string -
-                // this is the label the official clients put on the same action, and the
-                // entry only appears for an album, with the plain Save above it for one
-                // file.
-                text: qsTr("SaveToGallery")
-                visible: menuTarget.albumCount > 1
-                onClicked: appWindow.saveAlbum(menuTarget.albumPhotos)
-            }
-
-            MenuItem {
-                text: qsTr("Delete")
-                onClicked: {
-                    deleteDialog.revoke = false;
-                    deleteDialog.open();
+        ContextMenu {
+            MenuLayout {
+                MenuItem {
+                    text: qsTr("Reply")
+                    // Nothing to reply into when the composer is gone. Reactions stay:
+                    // subscribers can react to a channel post even though they cannot post.
+                    visible: root.canSend
+                    onClicked: composeState.reply(menuTarget.messageId, menuTarget.sender, menuTarget.text)
                 }
-            }
 
-            MenuItem {
-                text: qsTr("DeleteForAll")
-                // ponytail: offered on your own messages. Telegram also allows revoking
-                // the other side's messages in a private chat for a while, and refuses
-                // past a time limit; getMessageProperties reports can_be_deleted_for_all_users
-                // properly if this turns out to be too narrow.
-                visible: menuTarget.isOutgoing
-                onClicked: {
-                    deleteDialog.revoke = true;
-                    deleteDialog.open();
+                MenuItem {
+                    // Reacting from the menu is the way to add one that is not on the bubble
+                    // yet; a reaction already there is toggled by tapping its pill.
+                    text: qsTr("Reactions")
+                    onClicked: root.showPopup("reaction").open()
+                }
+
+                MenuItem {
+                    // Not on your own messages: your profile is a tap away under Settings,
+                    // and the entry is there to look somebody else up.
+                    text: qsTr("OpenProfile")
+                    visible: !menuTarget.isOutgoing && menuTarget.senderUserId !== ""
+                    onClicked: chatManager.openProfile(menuTarget.senderUserId)
+                }
+
+                MenuItem {
+                    // Who reacted, and with what. Asked of the model rather than passed in
+                    // through menuTarget.open, which would mean another argument on all
+                    // seven delegates that raise this menu.
+                    text: qsTr("AllReactions")
+                    visible: messageModel && messageModel.hasReactions(menuTarget.messageId)
+                    onClicked: messageModel.getMessageReactions(menuTarget.messageId)
+                }
+
+                MenuItem {
+                    text: qsTr("Copy")
+                    visible: menuTarget.text !== ""
+                    onClicked: utils.copyToClipboard(menuTarget.text)
+                }
+
+                MenuItem {
+                    text: qsTr("Edit")
+                    // ponytail: outgoing text only. Telegram also refuses edits past 48h
+                    // and in channels without rights; TDLib rejects those and the error is
+                    // swallowed. Gate properly via getMessageProperties if it bites.
+                    visible: root.canSend && menuTarget.isOutgoing && menuTarget.text !== ""
+                    onClicked: composeState.edit(menuTarget.messageId, menuTarget.text)
+                }
+
+                MenuItem {
+                    text: qsTr("Save")
+                    visible: menuTarget.saveFile !== null
+                    onClicked: appWindow.saveOriginal(menuTarget.saveFile, menuTarget.saveName)
+                }
+
+                MenuItem {
+                    // The whole batch, one photo at a time. A single photo of an album is
+                    // saved by opening it and using the viewer's Save.
+                    //
+                    // SaveToGallery, checked against the pack on the device: SaveAllPhotos was
+                    // guessed and the pack has no such key, so this menu entry read
+                    // "SaveAllPhotos" in every language. Telegram has no "save all" string -
+                    // this is the label the official clients put on the same action, and the
+                    // entry only appears for an album, with the plain Save above it for one
+                    // file.
+                    text: qsTr("SaveToGallery")
+                    visible: menuTarget.albumCount > 1
+                    onClicked: appWindow.saveAlbum(menuTarget.albumPhotos)
+                }
+
+                MenuItem {
+                    text: qsTr("Delete")
+                    onClicked: {
+                        var dialog = root.showPopup("delete");
+                        dialog.revoke = false;
+                        dialog.open();
+                    }
+                }
+
+                MenuItem {
+                    text: qsTr("DeleteForAll")
+                    // ponytail: offered on your own messages. Telegram also allows revoking
+                    // the other side's messages in a private chat for a while, and refuses
+                    // past a time limit; getMessageProperties reports can_be_deleted_for_all_users
+                    // properly if this turns out to be too narrow.
+                    visible: menuTarget.isOutgoing
+                    onClicked: {
+                        var dialog = root.showPopup("delete");
+                        dialog.revoke = true;
+                        dialog.open();
+                    }
                 }
             }
         }
@@ -1220,57 +1325,61 @@ Page {
     // The reaction picker. A ContextMenu rather than a Dialog because its content property
     // takes anything - this one holds a grid of emoji instead of a MenuLayout - and it
     // brings the platform's dimming, its dismissal and its rounded corners with it.
-    ContextMenu {
-        id: reactionMenu
+    Component {
+        id: reactionMenuComponent
 
-        // Built once here rather than bound per cell: resolving twelve emoji to their
-        // assets is a table lookup each, and the list never changes while the page lives.
-        //
-        // ponytail: Telegram's standard set, the same one in every chat that has not
-        // restricted reactions. The correct list is per chat and comes from
-        // getMessageAvailableReactions - a request, a response handler and a role, for an
-        // answer that is this list nearly always. Wire it up if a restricted chat bites:
-        // TDLib rejects the add and the error is swallowed, so the tap looks like it did
-        // nothing.
-        property variant reactions: utils.quickReactions()
+        ContextMenu {
+            id: reactionPicker
 
-        Grid {
-            id: reactionGrid
+            // Built once here rather than bound per cell: resolving twelve emoji to their
+            // assets is a table lookup each, and the list never changes while the page lives.
+            //
+            // ponytail: Telegram's standard set, the same one in every chat that has not
+            // restricted reactions. The correct list is per chat and comes from
+            // getMessageAvailableReactions - a request, a response handler and a role, for an
+            // answer that is this list nearly always. Wire it up if a restricted chat bites:
+            // TDLib rejects the add and the error is swallowed, so the tap looks like it did
+            // nothing.
+            property variant reactions: utils.quickReactions()
 
-            width: parent.width
-            columns: 6
+            Grid {
+                id: reactionGrid
 
-            Repeater {
-                model: reactionMenu.reactions
+                width: parent.width
+                columns: 6
 
-                Item {
-                    width: reactionGrid.width / reactionGrid.columns
-                    // A full platform touch target, unlike the emoji panel's 48px cells:
-                    // twelve of these fit on two rows either way, so there is no reason to
-                    // make them small.
-                    height: 80
+                Repeater {
+                    model: reactionPicker.reactions
 
-                    Image {
-                        anchors.centerIn: parent
-                        // Native size. The assets are 32px, so drawing them larger to fill
-                        // the cell would only upscale them - the touch target is the Item
-                        // around this, which is full size either way.
-                        width: 32
-                        height: 32
-                        sourceSize.width: 32
-                        sourceSize.height: 32
-                        source: modelData.icon !== "" ? "qrc:/emoji/" + modelData.icon : ""
-                        asynchronous: true
-                    }
+                    Item {
+                        width: reactionGrid.width / reactionGrid.columns
+                        // A full platform touch target, unlike the emoji panel's 48px cells:
+                        // twelve of these fit on two rows either way, so there is no reason to
+                        // make them small.
+                        height: 80
 
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: {
-                            // Toggle, not add: picking the one you already gave takes it
-                            // back, which is the only way to remove a reaction whose pill
-                            // is off the bubble's single line.
-                            messageModel.toggleReaction(menuTarget.messageId, modelData.emoji);
-                            reactionMenu.close();
+                        Image {
+                            anchors.centerIn: parent
+                            // Native size. The assets are 32px, so drawing them larger to fill
+                            // the cell would only upscale them - the touch target is the Item
+                            // around this, which is full size either way.
+                            width: 32
+                            height: 32
+                            sourceSize.width: 32
+                            sourceSize.height: 32
+                            source: modelData.icon !== "" ? "qrc:/emoji/" + modelData.icon : ""
+                            asynchronous: true
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: {
+                                // Toggle, not add: picking the one you already gave takes it
+                                // back, which is the only way to remove a reaction whose pill
+                                // is off the bubble's single line.
+                                messageModel.toggleReaction(menuTarget.messageId, modelData.emoji);
+                                reactionPicker.close();
+                            }
                         }
                     }
                 }
@@ -1281,36 +1390,42 @@ Page {
     // Two pickers because the two send paths are genuinely different: a photo goes
     // through the Tracker-backed gallery and is sent compressed as a photo, anything
     // else is browsed on disk and sent as a document with its type intact.
-    ContextMenu {
-        id: attachMenu
+    Component {
+        id: attachMenuComponent
 
-        MenuLayout {
-            MenuItem {
-                text: qsTr("AttachPhoto")
-                onClicked: root.openPhotoPicker()
-            }
+        ContextMenu {
+            MenuLayout {
+                MenuItem {
+                    text: qsTr("AttachPhoto")
+                    onClicked: root.openPhotoPicker()
+                }
 
-            MenuItem {
-                text: qsTr("AttachDocument")
-                onClicked: root.openFilePicker()
+                MenuItem {
+                    text: qsTr("AttachDocument")
+                    onClicked: root.openFilePicker()
+                }
             }
         }
     }
 
-    QueryDialog {
-        id: deleteDialog
+    Component {
+        id: deleteDialogComponent
 
-        // Which of the two menu entries opened this. Deleting for everyone used to be
-        // implied by the message being yours, so your own messages could only ever be
-        // deleted for both sides.
-        property bool revoke: false
+        QueryDialog {
+            id: deleteQuery
 
-        titleText: revoke ? qsTr("DeleteForAll") : qsTr("DeleteMessage")
-        message: qsTr("AreYouSureDeleteSingleMessage")
-        acceptButtonText: qsTr("OK")
-        rejectButtonText: qsTr("Cancel")
+            // Which of the two menu entries opened this. Deleting for everyone used to be
+            // implied by the message being yours, so your own messages could only ever be
+            // deleted for both sides.
+            property bool revoke: false
 
-        onAccepted: messageModel.deleteMessage(menuTarget.messageId, revoke)
+            titleText: revoke ? qsTr("DeleteForAll") : qsTr("DeleteMessage")
+            message: qsTr("AreYouSureDeleteSingleMessage")
+            acceptButtonText: qsTr("OK")
+            rejectButtonText: qsTr("Cancel")
+
+            onAccepted: messageModel.deleteMessage(menuTarget.messageId, revoke)
+        }
     }
 
     // Who reacted to one message, and with what. Filled by the model's answer rather
@@ -1332,7 +1447,7 @@ Page {
                 reactionsModel.append(senders[i]);
 
             if (reactionsModel.count > 0)
-                reactionsDialog.open();
+                root.showPopup("reactions").open();
             else
                 appWindow.showInfoBanner(qsTr("NoReactions"));
         }
@@ -1340,75 +1455,75 @@ Page {
 
     // SelectionDialog rather than a Dialog of its own: it is the platform's titled,
     // scrollable list, and nothing here needs buttons - a tap on a row just closes it.
-    SelectionDialog {
-        id: reactionsDialog
+    Component {
+        id: reactionsDialogComponent
 
-        titleText: qsTr("Reactions")
-        model: reactionsModel
+        SelectionDialog {
+            id: reactionsList
 
-        function load(messageId) {
-            messageModel.getMessageReactions(messageId);
-        }
+            titleText: qsTr("Reactions")
+            model: reactionsModel
 
-        delegate: Component {
-            Item {
-                property Style platformStyle: SelectionDialogStyle {}
+            delegate: Component {
+                Item {
+                    property Style platformStyle: SelectionDialogStyle {}
 
-                height: platformStyle.itemHeight
-                anchors { left: parent.left; right: parent.right }
+                    height: platformStyle.itemHeight
+                    anchors { left: parent.left; right: parent.right }
 
-                MouseArea {
-                    id: reactionRowArea
+                    MouseArea {
+                        id: reactionRowArea
 
-                    anchors.fill: parent
-                    onClicked: reactionsDialog.accept()
-                }
-
-                BorderImage {
-                    anchors.fill: parent
-                    border { left: 22; top: 22; right: 22; bottom: 22 }
-                    source: reactionRowArea.pressed ? platformStyle.itemPressedBackground : platformStyle.itemBackground
-                }
-
-                Text {
-                    anchors {
-                        left: parent.left
-                        leftMargin: platformStyle.itemLeftMargin
-                        right: reactionIcon.left
-                        rightMargin: 12
-                        verticalCenter: parent.verticalCenter
+                        anchors.fill: parent
+                        onClicked: reactionsList.accept()
                     }
-                    font: platformStyle.itemFont
-                    color: platformStyle.itemTextColor
-                    elide: Text.ElideRight
-                    text: model.name
-                }
 
-                Image {
-                    id: reactionIcon
-
-                    anchors {
-                        right: parent.right
-                        rightMargin: platformStyle.itemRightMargin
-                        verticalCenter: parent.verticalCenter
+                    BorderImage {
+                        anchors.fill: parent
+                        border { left: 22; top: 22; right: 22; bottom: 22 }
+                        source: reactionRowArea.pressed ? platformStyle.itemPressedBackground : platformStyle.itemBackground
                     }
-                    // Native size, like the picker's cells - the assets are 32px and
-                    // drawing them larger would only upscale them.
-                    width: 32
-                    height: 32
-                    sourceSize.width: 32
-                    sourceSize.height: 32
-                    asynchronous: true
-                    source: model.icon !== "" ? "qrc:/emoji/" + model.icon : ""
-                }
 
-                Label {
-                    // The character itself for an emoji this build ships no asset for,
-                    // the same fallback the pills make.
-                    anchors.centerIn: reactionIcon
-                    visible: model.icon === ""
-                    text: model.emoji
-                    font.pixelSize: 24
+                    Text {
+                        anchors {
+                            left: parent.left
+                            leftMargin: platformStyle.itemLeftMargin
+                            right: reactionIcon.left
+                            rightMargin: 12
+                            verticalCenter: parent.verticalCenter
+                        }
+                        font: platformStyle.itemFont
+                        color: platformStyle.itemTextColor
+                        elide: Text.ElideRight
+                        text: model.name
+                    }
+
+                    Image {
+                        id: reactionIcon
+
+                        anchors {
+                            right: parent.right
+                            rightMargin: platformStyle.itemRightMargin
+                            verticalCenter: parent.verticalCenter
+                        }
+                        // Native size, like the picker's cells - the assets are 32px and
+                        // drawing them larger would only upscale them.
+                        width: 32
+                        height: 32
+                        sourceSize.width: 32
+                        sourceSize.height: 32
+                        asynchronous: true
+                        source: model.icon !== "" ? "qrc:/emoji/" + model.icon : ""
+                    }
+
+                    Label {
+                        // The character itself for an emoji this build ships no asset for,
+                        // the same fallback the pills make.
+                        anchors.centerIn: reactionIcon
+                        visible: model.icon === ""
+                        text: model.emoji
+                        font.pixelSize: 24
+                    }
                 }
             }
         }
@@ -1626,11 +1741,10 @@ Page {
             // been read the moment it lands.
             listView.markVisibleAsRead()
 
-            // One call was not enough. The row that just landed is a MessageDelegate
-            // whose Loader has not instantiated its bubble yet, so at this moment the
-            // list is sizing it from the running average - and contentHeight grows again
-            // as soon as the bubble is laid out, leaving the view short of the bottom
-            // with the new message off screen. Exactly the problem the opening position
+            // One call was not enough. The row that just landed has not been built yet,
+            // so at this moment the list is sizing it from the running average - and
+            // contentHeight grows again as soon as it is laid out, leaving the view short
+            // of the bottom with the new message off screen. Exactly the problem the opening position
             // already solves by repositioning a few times, so it settles the same way.
             listView.beginSettle(true)
         }

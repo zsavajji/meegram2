@@ -248,7 +248,7 @@ main.qml (PageStackWindow)     owns appManager.initialize() and the `initialized
     ├── Loader                 one binding picks the app's state:
     │   ├── busyComponent          !appWindow.initialized
     │   ├── infoComponent          initialised, no chatManager yet (signed out)
-    │   └── chat{,Tabs}Layout      chatManager exists → ChatListView → ChatItem
+    │   └── chat{,Tabs}Layout      chatManager exists → ChatListView → ChatRow (C++)
     ├── AuthenticationPage     a *sheet* over the page, never on the stack
     │   └── Loader → SignInPage / CodeEnterPage / PasswordPage / QrCodePage
     ├── ArchivedChatPage       pushed to depth 2
@@ -256,7 +256,7 @@ main.qml (PageStackWindow)     owns appManager.initialize() and the `initialized
     ├── PhotoViewPage          full-screen Flickable with pinch zoom. Pushed by
     │                          appWindow.openPhoto(), so ChatPage and ProfilePage
     │                          both reach it without owning it
-    └── ChatPage → MessageDelegate → MessageBubble / ServiceMessageDelegate
+    └── ChatPage → MessageRow (C++, every content type and service messages)
         ├── EmojiPicker        in-page panel, not a page — takes the keyboard's place
         ├── ProfilePage        pushed fresh from the header, destroyed on the way back
         ├── PhotoPickerPage    built once, then kept

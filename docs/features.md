@@ -359,7 +359,7 @@ as success rather than a copy failure.
 ::: warning Downloads on sight
 A delegate only exists for rows in view plus the cache buffer, so this is "what you
 scrolled to" rather than "the whole history" — but it ignores whether the connection is
-metered. Marked `ponytail:` in `MessageDelegate.qml`; wire it to Telegram's
+metered. Marked `ponytail:` in `src/MessageRow.cpp`; wire it to Telegram's
 auto-download settings if it bites.
 :::
 

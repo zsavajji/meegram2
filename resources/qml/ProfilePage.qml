@@ -1,5 +1,6 @@
 import QtQuick 1.1
 import com.nokia.meego 1.1
+import MyComponent 1.0
 
 // Who you are talking to, opened from the chat header, from a mention tapped inside a
 // message, or from a member of the group whose profile is already open.
@@ -52,6 +53,19 @@ Page {
             rows.push({ key: "UserBio", value: chatInfo.bio });
 
         return rows;
+    }
+
+    // What a tap on a member does. MemberList calls these by name, with every argument.
+    QtObject {
+        id: memberActions
+
+        function openProfile(userId) {
+            chatManager.openProfile(userId);
+        }
+
+        function download(fileId) {
+            appManager.downloadFile(fileId, 1, 0, 0, false);
+        }
     }
 
     Flickable {
@@ -210,7 +224,7 @@ Page {
                     // the heading is there from the start rather than the whole section
                     // appearing from nowhere when the list arrives. Both are false in a
                     // private chat and in a channel, where nothing is ever asked for.
-                    visible: chatInfo.membersLoading || chatInfo.members.length > 0
+                    visible: chatInfo.membersLoading || memberList.count > 0
 
                     Rectangle {
                         width: parent.width
@@ -241,99 +255,15 @@ Page {
                         running: visible
                     }
 
-                    Repeater {
-                        model: chatInfo.members
+                    // Painted in C++, rows laid out and avatars fetched as they come into
+                    // view - see MemberList.cpp. It sizes itself, 76px a row.
+                    MemberList {
+                        id: memberList
 
-                        Item {
-                            id: memberRow
-
-                            // Through a property first, the way the album cells take their
-                            // photo: a QObject read straight off an element of a variant
-                            // list is the conversion QML1 does not always make.
-                            property variant photo: modelData.photo
-
-                            width: info.width
-                            height: 76
-
-                            Image {
-                                id: memberPhoto
-
-                                anchors { left: parent.left; verticalCenter: parent.verticalCenter }
-                                width: 56
-                                height: 56
-
-                                // Same provider as the chat list, so it arrives cropped,
-                                // masked and cached at this size.
-                                sourceSize.width: width
-                                sourceSize.height: height
-                                asynchronous: true
-                                fillMode: Image.PreserveAspectCrop
-                                source: memberRow.photo && memberRow.photo.isDownloadingCompleted
-                                            ? "image://chatPhoto/" + memberRow.photo.localPath
-                                            : appWindow.avatarPlaceholder
-
-                                Component.onCompleted: {
-                                    var photo = memberRow.photo;
-
-                                    if (photo && photo.canBeDownloaded && !photo.isDownloadingActive && !photo.isDownloadingCompleted)
-                                        appManager.downloadFile(photo.id, 1, 0, 0, false);
-                                }
-                            }
-
-                            Column {
-                                anchors {
-                                    left: memberPhoto.right
-                                    leftMargin: 12
-                                    right: parent.right
-                                    verticalCenter: parent.verticalCenter
-                                }
-                                spacing: 2
-
-                                Item {
-                                    width: parent.width
-                                    height: memberName.height
-
-                                    Label {
-                                        id: memberName
-
-                                        anchors {
-                                            left: parent.left
-                                            right: memberTag.left
-                                            rightMargin: memberTag.visible ? 8 : 0
-                                        }
-                                        // elideEmoji, not replaceEmoji: emoji markup makes
-                                        // this rich text, and rich text ignores elide.
-                                        text: utils.elideEmoji(modelData.name, font, width)
-                                        font.pixelSize: 26
-                                    }
-
-                                    Label {
-                                        id: memberTag
-
-                                        anchors { right: parent.right; baseline: memberName.baseline }
-                                        text: modelData.tag
-                                        visible: text !== ""
-                                        color: appWindow.secondaryColor
-                                        font.pixelSize: 18
-                                        font.weight: Font.Light
-                                    }
-                                }
-
-                                Label {
-                                    width: parent.width
-                                    text: modelData.status
-                                    color: appWindow.secondaryColor
-                                    font.pixelSize: 20
-                                    font.weight: Font.Light
-                                    elide: Text.ElideRight
-                                }
-                            }
-
-                            MouseArea {
-                                anchors.fill: parent
-                                onClicked: chatManager.openProfile(modelData.userId)
-                            }
-                        }
+                        width: info.width
+                        formatter: chatInfo
+                        inverted: theme.inverted
+                        actions: memberActions
                     }
                 }
 

@@ -125,19 +125,24 @@ set(SRC_FILES
     src/ChatFolderModel.cpp
     src/ChatManager.cpp
     src/ChatModel.cpp
+    src/ChatRow.cpp
     src/ChatPhotoProvider.cpp
     src/ChatPosition.cpp
     ${MEEGRAM_CLIENT_SOURCES}
     src/CountryModel.cpp
     src/Emoji.cpp
+    src/EmojiGrid.cpp
     src/File.cpp
     src/LanguagePackInfoModel.cpp
+    src/ListRow.cpp
     src/Localization.cpp
+    src/MemberList.cpp
     src/LottieAnimation.cpp
     src/main.cpp
     src/Message.cpp
     src/MessageContent.cpp
     src/MessageModel.cpp
+    src/MessageRow.cpp
     src/MessageService.cpp
     src/OggOpus.cpp
     src/PluralRules.cpp
@@ -164,19 +169,24 @@ set(HEADER_FILES
     src/ChatFolderModel.hpp
     src/ChatManager.hpp
     src/ChatModel.hpp
+    src/ChatRow.hpp
     src/ChatPhotoProvider.hpp
     src/ChatPosition.hpp
     src/Client.hpp
     src/Common.hpp
     src/CountryModel.hpp
     src/Emoji.hpp
+    src/EmojiGrid.hpp
     src/File.hpp
     src/LanguagePackInfoModel.hpp
+    src/ListRow.hpp
     src/Localization.hpp
+    src/MemberList.hpp
     src/LottieAnimation.hpp
     src/Message.hpp
     src/MessageContent.hpp
     src/MessageModel.hpp
+    src/MessageRow.hpp
     src/MessageService.hpp
     src/OggOpus.hpp
     ${MEEGRAM_CLIENT_HEADERS}

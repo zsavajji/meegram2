@@ -1,5 +1,6 @@
 import QtQuick 1.1
 import com.nokia.meego 1.1
+import MyComponent 1.0
 
 // The emoji grid that takes the keyboard's place under the composer. Knows nothing
 // about where what it picks ends up - the caller owns the text field, and owns
@@ -31,12 +32,10 @@ Rectangle {
         currentTab = index;
 
         var tab = tabs.categories[index];
-        var list = [];
 
-        for (var c = tab.first; c <= tab.last; ++c)
-            list = list.concat(utils.emojiCategory(c));
-
-        grid.model = list;
+        grid.show(tab.first, tab.last);
+        // A new tab starts at its top, the way a GridView handed a new model did.
+        gridFlick.contentY = 0;
     }
 
     Row {
@@ -83,8 +82,10 @@ Rectangle {
         }
     }
 
-    GridView {
-        id: grid
+    // One painted item for the whole category, in a Flickable for the platform's
+    // scrolling - see EmojiGrid.cpp. It sizes itself, 48px cells, as many to a row as fit.
+    Flickable {
+        id: gridFlick
 
         anchors {
             left: parent.left
@@ -92,31 +93,15 @@ Rectangle {
             top: tabs.bottom
             bottom: parent.bottom
         }
-        // Ten to a row in portrait, on 32px assets. Below the platform's touch target,
-        // but a grid of full-size buttons fits twenty emoji on screen and turns picking
-        // one into scrolling.
-        cellWidth: 48
-        cellHeight: 48
+        contentWidth: width
+        contentHeight: grid.height
         clip: true
 
-        delegate: Item {
-            width: grid.cellWidth
-            height: grid.cellHeight
+        EmojiGrid {
+            id: grid
 
-            Image {
-                anchors.centerIn: parent
-                width: 32
-                height: 32
-                sourceSize.width: 32
-                sourceSize.height: 32
-                source: "qrc:/emoji/" + modelData.filename
-                asynchronous: true
-            }
-
-            MouseArea {
-                anchors.fill: parent
-                onClicked: root.picked(modelData.unicode)
-            }
+            width: gridFlick.width
+            onPicked: root.picked(unicode)
         }
     }
 }

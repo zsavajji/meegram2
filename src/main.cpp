@@ -31,15 +31,19 @@
 #include "Log.hpp"
 #include "Chat.hpp"
 #include "ChatManager.hpp"
+#include "ChatRow.hpp"
 #include "ChatPhotoProvider.hpp"
 #include "ChatPosition.hpp"
 #include "Client.hpp"
 #include "Common.hpp"
+#include "EmojiGrid.hpp"
 #include "File.hpp"
 #include "LanguagePackInfoModel.hpp"
 #include "Localization.hpp"
+#include "MemberList.hpp"
 #include "LottieAnimation.hpp"
 #include "Message.hpp"
+#include "MessageRow.hpp"
 #include "MessageService.hpp"
 #include "QrCodeItem.hpp"
 #include "QrScanner.hpp"
@@ -216,8 +220,8 @@ private:
 // if this Qt had it.
 void runQmlBench(int passes)
 {
-    // Both levels: entryList does not recurse, and components/ holds MessageDelegate,
-    // EmojiPicker and ChatItem, which are not small. Names are kept relative to :/qml so
+    // Both levels: entryList does not recurse, and components/ holds EmojiPicker, which is
+    // not small. Names are kept relative to :/qml so
     // the url below is the same shape for either.
     //
     // No name filter and no Filters argument. Asking for ("*.qml", QDir::Files) returned
@@ -374,7 +378,11 @@ Q_DECL_EXPORT int main(int argc, char *argv[])
 
     qRegisterMetaType<QModelIndex>("QModelIndex");
 
+    qmlRegisterType<ChatRow>("MyComponent", 1, 0, "ChatRow");
+    qmlRegisterType<EmojiGrid>("MyComponent", 1, 0, "EmojiGrid");
     qmlRegisterType<LottieAnimation>("MyComponent", 1, 0, "LottieAnimation");
+    qmlRegisterType<MemberList>("MyComponent", 1, 0, "MemberList");
+    qmlRegisterType<MessageRow>("MyComponent", 1, 0, "MessageRow");
     qmlRegisterType<QrCodeItem>("MyComponent", 1, 0, "QrCode");
     qmlRegisterType<QrScanner>("MyComponent", 1, 0, "QrScanner");
     qmlRegisterType<VoiceNote>("MyComponent", 1, 0, "VoiceNote");

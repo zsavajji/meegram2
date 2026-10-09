@@ -8,6 +8,7 @@
 #include <QFile>
 #include <QHash>
 #include <QImageReader>
+#include <QMutex>
 #include <QPainter>
 
 namespace {
@@ -163,6 +164,11 @@ void writeDiskCache(const QString &path, const QImage &image)
 QImage ChatPhotoProvider::requestImage(const QString &id, QSize *size, const QSize &requestedSize)
 {
     MEEGRAM_SCOPE("ChatPhotoProvider::requestImage");
+
+    // Two threads call in now - QML's image reader for the pages that still use
+    // image://chatPhoto, and the rows' decoder - and the caches above are plain statics.
+    static QMutex mutex;
+    QMutexLocker lock(&mutex);
 
     const auto cacheKey = QString("%1@%2x%3").arg(id, QString::number(requestedSize.width()), QString::number(requestedSize.height()));
 

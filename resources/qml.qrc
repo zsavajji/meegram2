@@ -1,17 +1,12 @@
 <RCC>
     <qresource prefix="/">
         <file>qml/components/AboutDialog.qml</file>
-        <file>qml/components/ChatItem.qml</file>
         <file>qml/components/CountryPickerDialog.qml</file>
         <file>qml/components/DrillDownDelegate.qml</file>
         <file>qml/components/EmojiPicker.qml</file>
         <file>qml/components/Icons.qml</file>
         <file>qml/components/ListItem.qml</file>
-        <file>qml/components/MessageBubble.qml</file>
-        <file>qml/components/MessageDelegate.qml</file>
-        <file>qml/components/MyCountBubble.qml</file>
         <file>qml/components/SectionHeader.qml</file>
-        <file>qml/components/ServiceMessageDelegate.qml</file>
         <file>qml/components/TopBar.qml</file>
         <file>qml/components/ValueDelegate.qml</file>
         <file>qml/components/UIConstants.js</file>

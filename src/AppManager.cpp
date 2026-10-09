@@ -394,6 +394,11 @@ const QString &AppManager::cacheSize() const noexcept
     return m_cacheSize;
 }
 
+bool AppManager::isClearingCache() const noexcept
+{
+    return m_clearingCache;
+}
+
 bool AppManager::privateChatsMuted() const noexcept
 {
     return m_scopeMuted[0];
@@ -452,6 +457,15 @@ void AppManager::requestStorageStatistics() noexcept
 
 void AppManager::setCacheBytes(qlonglong bytes) noexcept
 {
+    // Before the comparison below, which returns early when the number has not changed:
+    // a clear that frees nothing still has to stop the spinner.
+    if (m_clearingCache)
+    {
+        m_clearingCache = false;
+
+        emit clearingCacheChanged();
+    }
+
     // TDLib's files plus this app's own avatar cache, which is not in its accounting and is
     // 16 KiB per avatar per size - a few hundred chats' worth of it.
     QDir avatars(QDir::homePath() + QLatin1String("/.meegram/avatars"));
@@ -478,11 +492,39 @@ void AppManager::setCacheBytes(qlonglong bytes) noexcept
 
 void AppManager::clearCache() noexcept
 {
-    // Every zero is "no limit of this kind": no size ceiling to stay under, no age cutoff,
-    // no count cutoff, and no immunity window protecting recent files. Empty vectors are
-    // every file type and every chat. The result is "delete what can be re-downloaded".
-    auto request = td::td_api::make_object<td::td_api::optimizeStorage>(0, 0, 0, 0, std::vector<td::td_api::object_ptr<td::td_api::FileType>>(),
-                                                                       std::vector<std::int64_t>(), std::vector<std::int64_t>(), false, 0);
+    m_clearingCache = true;
+
+    emit clearingCacheChanged();
+
+    // The zeros are limits of zero, not "no limit": -1 is what asks for TDLib's defaults.
+    // Keep no bytes, keep nothing older than nothing, keep no files, and protect nothing
+    // for being recent. The result is "delete everything that can be downloaded again".
+    //
+    // The file types are listed rather than left empty, and that is the difference between
+    // this doing something and appearing not to: with an empty list TDLib deletes every
+    // type *except* thumbnails, profile photos, stickers and wallpapers - which on this
+    // app is most of the cache, since a chat list is avatars and a chat is stickers and
+    // thumbnails. Clearing the cache and watching the number barely move is what that
+    // exclusion looks like from the outside.
+    //
+    // Secret and self-destructing types are deliberately not in the list: those files are
+    // not re-downloadable, so deleting them destroys content rather than a cache.
+    std::vector<td::td_api::object_ptr<td::td_api::FileType>> fileTypes;
+
+    fileTypes.push_back(td::td_api::make_object<td::td_api::fileTypeAnimation>());
+    fileTypes.push_back(td::td_api::make_object<td::td_api::fileTypeAudio>());
+    fileTypes.push_back(td::td_api::make_object<td::td_api::fileTypeDocument>());
+    fileTypes.push_back(td::td_api::make_object<td::td_api::fileTypePhoto>());
+    fileTypes.push_back(td::td_api::make_object<td::td_api::fileTypeProfilePhoto>());
+    fileTypes.push_back(td::td_api::make_object<td::td_api::fileTypeSticker>());
+    fileTypes.push_back(td::td_api::make_object<td::td_api::fileTypeThumbnail>());
+    fileTypes.push_back(td::td_api::make_object<td::td_api::fileTypeVideo>());
+    fileTypes.push_back(td::td_api::make_object<td::td_api::fileTypeVideoNote>());
+    fileTypes.push_back(td::td_api::make_object<td::td_api::fileTypeVoiceNote>());
+    fileTypes.push_back(td::td_api::make_object<td::td_api::fileTypeWallpaper>());
+
+    auto request = td::td_api::make_object<td::td_api::optimizeStorage>(0, 0, 0, 0, std::move(fileTypes), std::vector<std::int64_t>(),
+                                                                       std::vector<std::int64_t>(), false, 0);
 
     m_client->send(std::move(request), [this](auto &&) {
         // Whatever it says, ask again rather than guessing: the answer is a storageStatistics

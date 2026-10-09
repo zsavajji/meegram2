@@ -299,13 +299,22 @@ Page {
                 }
             }
 
-            SectionHeader { text: qsTr("Storage") }
+            // DataSettings is Telegram's own name for this section ("Dati e archivio");
+            // there is no "Storage" key, and a missing key renders as itself.
+            SectionHeader { text: qsTr("DataSettings") }
 
-            // TDLib's downloaded files plus this app's avatar cache. Not the databases: those
-            // are the chat list and the history, and clearing them would cost a resync rather
-            // than free a cache.
+            // One row, not two. It used to be a size row above a clear row, and the size row
+            // carried the key "LocalDatabase" - which is Telegram's label for *deleting* the
+            // database, so in Italian it read "delete local database" and did nothing but
+            // re-read the number. The action and the number it acts on belong together.
+            //
+            // What it clears is TDLib's downloaded files plus this app's avatar cache. Not
+            // the databases: those are the chat list and the history, and dropping them
+            // would cost a resync rather than free a cache.
             ListItem {
-                onClicked: appManager.requestStorageStatistics()
+                // Not while one is already running: the request takes about ten seconds on
+                // a full cache and a second tap would ask again mid-flight.
+                onClicked: if (!appManager.clearingCache) clearCacheDialog.open()
 
                 Label {
                     anchors {
@@ -318,39 +327,42 @@ Page {
                     elide: Text.ElideRight
                     font.pixelSize: 26
                     font.bold: true
-                    text: qsTr("LocalDatabase")
+                    text: qsTr("ClearCache")
                 }
 
-                Label {
-                    id: cacheValue
+                // Takes the number's place while the clear runs, which on a full cache is
+                // about ten seconds - long enough that a number sitting there unchanged
+                // reads as a tap that did nothing.
+                BusyIndicator {
+                    id: clearIndicator
 
                     anchors {
                         right: parent.right
                         rightMargin: 16
                         verticalCenter: parent.verticalCenter
                     }
-                    font.pixelSize: 22
-                    color: appWindow.secondaryColor
-                    // Empty until the answer lands, which on a cold cache is also the truth.
-                    text: appManager.cacheSize
-                }
-            }
 
-            ListItem {
-                onClicked: clearCacheDialog.open()
+                    running: appManager.clearingCache
+                    visible: running
+                }
 
                 Label {
+                    id: cacheValue
+
                     anchors {
-                        left: parent.left
-                        leftMargin: 12
-                        right: parent.right
-                        rightMargin: 12
+                        right: clearIndicator.visible ? clearIndicator.left : parent.right
+                        rightMargin: 16
                         verticalCenter: parent.verticalCenter
                     }
-                    elide: Text.ElideRight
-                    font.pixelSize: 26
-                    font.bold: true
-                    text: qsTr("ClearCache")
+                    visible: !clearIndicator.visible
+                    font.pixelSize: 22
+                    color: appWindow.secondaryColor
+                    // No width binding on purpose: bound to its own implicitWidth with elide
+                    // set, a Text feeds its elided layout back into that width and settles
+                    // far narrower than the string. The label on the left elides instead.
+                    //
+                    // Empty until the answer lands, which on a cold cache is also the truth.
+                    text: appManager.cacheSize
                 }
             }
 
@@ -377,9 +389,9 @@ Page {
         id: clearCacheDialog
 
         titleText: qsTr("ClearCache")
-        // Nothing is lost that cannot come back: the files re-download when they are next
-        // looked at, which is what makes this a cache rather than storage.
-        message: qsTr("AreYouSureClearCache")
+        // Not qsTr: the pack has no AreYouSureClearCache, so the key rendered on screen.
+        // Says what survives, because that is the question somebody about to tap it has.
+        message: "Downloaded photos, stickers and files are deleted. Your chats and messages stay."
         acceptButtonText: qsTr("ClearCache")
         rejectButtonText: qsTr("Cancel")
 

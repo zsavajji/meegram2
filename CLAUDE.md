@@ -99,6 +99,13 @@ is demand-loaded as of 2026-09-21 to close that; see **Status**, and measure it.
     ignores `elide` (use `utils.elideEmoji`); `QList` has no initializer-list ctor.
 13. Every segfault so far was object lifetime or a cross-thread model mutation, and each
     fired only after another fix made the path run. Suspect lifetime before logic.
+14. **No `qreal` `Q_PROPERTY`.** Qt 4's moc writes its type as `QMetaType::QReal << 24`;
+    on ARM qreal is float (135), which lands in the sign bit, and GCC 14 rejects the
+    narrowing into moc's `uint` table. Declare the property `double`.
+15. **Never measure a gesture in scene coordinates.** Harmattan draws a portrait app by
+    rotating the window's content (`Window.qml`'s `Rotation`), so the scene stays in the
+    panel's landscape frame: a sideways swipe is a scene-vertical move. Map into an item's
+    coordinates (`parentItem()->mapFromScene(...)`, as MouseArea's drag does).
 
 ## Architecture in one screen
 
@@ -142,7 +149,9 @@ meegramd (src/daemon/)                       meegram (src/)
 - **`Locale`** is a `QTranslator` backing every `tr()`; loads a disk cache of the pack
   before the QML scene is built (QML1 never retranslates); memoises `getString`.
 - **Threads**: GUI + one reader thread per `Client`; daemon has poll loop + receive
-  thread. Image decode and rlottie run on the GUI thread.
+  thread. The rows decode images on `ImageLoader`'s one thread, which shares
+  `ChatPhotoProvider`/`StickerProvider` with QML's image reader (both now take a mutex);
+  rlottie runs on the GUI thread.
 
 ### File → role
 
@@ -159,6 +168,9 @@ meegramd (src/daemon/)                       meegram (src/)
 | `src/Account.*` | The signed-in user's own profile for the account page: name, bio, username, birthday |
 | `src/SessionModel.*` | Active sessions; terminate, terminate-others, confirm a QR login |
 | `src/QrScanner.*` | `QCamera` viewfinder + `lib/quirc`; grayscale frames, decode throttled to 350 ms |
+| `src/ListRow.*` | Base of the two painted list rows: model-row binding, press / hold / click, `ImageLoader` (one decode thread + 8 MB cache), `TextBlock` (QTextLayout for plain, QTextDocument for rich), the C++ copy of appWindow's palette, theme pixmaps |
+| `src/ChatRow.*`, `src/MessageRow.*` | The chat list and message list delegates, painted in C++; see **QML** below |
+| `src/MemberList.*`, `src/EmojiGrid.*` | ProfilePage's member section and the emoji picker's grid, each one painted item drawing only its exposed rows/cells (`PressItem` base from `ListRow.hpp`) |
 | `src/Utils.*` | Formatters, emoji table (`replaceEmoji`, `elideEmoji`, `emojiOnlySize`), save/open helpers |
 | `src/Localization.*`, `PluralRules.*`, `LanguagePackInfoModel.*` | Translation |
 | `src/NotificationManager.*` | In-process notifier (transport OFF only) |
@@ -175,23 +187,34 @@ meegramd (src/daemon/)                       meegram (src/)
 main.qml (PageStackWindow; theme colours, isOnBubble(), chatPageComponent, openChat/openProfilePage/openPhoto, save plumbing)
 └── MainPage         root, Loader: spinner | unreachable | welcome | ChatListView | tabs of ChatListView
     ├── AuthenticationPage   a sheet, never on the stack → SignIn/CodeEnter/Password/QrCode/SignUp
-    ├── ChatPage        header, ListView<MessageDelegate>, composer, EmojiPicker, mention panel,
-    │                   ContextMenu, reaction grid, VoiceNote, kept-alive Photo/File pickers
-    │   └── MessageDelegate → MessageBubble (chrome) | ServiceMessageDelegate
+    ├── ChatPage        header, ListView<MessageRow>, composer, EmojiPicker (EmojiGrid in a Flickable),
+    │                   mention panel, VoiceNote; the three ContextMenus, the delete QueryDialog and
+    │                   the reactions SelectionDialog are Components built on first use
+    │                   (`showPopup(name)`), like the kept-alive Photo/File pickers
     ├── ProfilePage, NewChatPage, NewGroupPage, ArchivedChatPage, LanguageSettingsPage,
     │   SettingsPage (sectioned, in a Flickable) → AccountSettingsPage, SessionsPage → QrScannerPage,
     │   PhotoViewPage (pinch zoom via resizeContent, swaps to the original when downloaded)
-    └── components/: ChatItem, ListItem, TopBar, SectionHeader, Icons (fontello), MyCountBubble, UIConstants.js
+    └── components/: ListItem, TopBar, SectionHeader, Icons (fontello), UIConstants.js
 ```
 
-- Bubble vs flat layout: `model.isOutgoing` decides the side in both layouts;
-  `appWindow.isOnBubble(model.isOutgoing)` decides colour, because white reads only on
-  the accent balloon. The balloon is a `Rectangle { radius: 13 }` since 0.3.8; the
-  nine-slice PNGs are back behind Settings → "Skeumorphic bubbles", off by default, as a
-  `BorderImage` child of that rectangle whose offsets put the asset's ink on the
-  rectangle's own edges. Swipe **left** to reply.
+- **The chat list and message list rows are C++** (`ChatRow`, `MessageRow`, 2026-10-09;
+  they replaced ChatItem.qml, MessageDelegate.qml, MessageBubble.qml,
+  ServiceMessageDelegate.qml and MyCountBubble.qml, whose geometry they keep number for
+  number). One painted `QDeclarativeItem` per row inside the unchanged QML `ListView`s:
+  it binds `listModel` + `row: index`, reads roles in C++, lays text out once, and
+  re-reads on `dataChanged`/`layoutChanged`/`fileChanged` - not on an `index` change that
+  only renumbers the same id. Everything a tap does outside the model goes through the
+  page's `rowActions` QtObject, called **by name with every argument** (QML functions
+  resolve by exact arity); a wrong name or count is a `qWarning`, not an error. The
+  function lists are in `ChatRow.hpp` / `MessageRow.hpp`.
+- Bubble vs flat layout: `isOutgoing` decides the side in both layouts; "outgoing and
+  bubbles on" decides colour, because white reads only on the accent balloon. The
+  balloon is a radius-13 rounded rect; the nine-slice PNGs are behind Settings →
+  "Skeumorphic bubbles", off by default, drawn so the asset's ink lands on the
+  rectangle's own edges. Swipe **left** to reply (the row moves its own `x`).
 - Dark theme: `theme.inverted` from `Settings::invertedTheme`; app colours are
-  properties on `appWindow`; theme glyphs use `-inverse` assets via `themeIcon()`; the
+  properties on `appWindow` **and, for the rows, `rows::Palette` in `ListRow.cpp` - keep
+  the two in step**; theme glyphs use `-inverse` assets via `themeIcon()`; the
   composer field background is regenerated by `tools/make_inverted_assets.py`.
 - `ChatPage.qml` is compiled once and kept on `appWindow.chatPageComponent`; `MainPage`
   warms it 3 s after the chat list shows so the first tap does not pay the ~1 s compile.

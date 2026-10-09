@@ -4,6 +4,7 @@
 
 #include <QCache>
 #include <QFile>
+#include <QMutex>
 
 #include <webp/decode.h>
 
@@ -32,6 +33,11 @@ QCache<QString, QImage> &stickerCache()
 QImage StickerProvider::requestImage(const QString &id, QSize *size, const QSize &requestedSize)
 {
     MEEGRAM_SCOPE("StickerProvider::requestImage");
+
+    // Called from QML's image reader and from the rows' decoder, and the cache is a
+    // plain static. See ChatPhotoProvider.
+    static QMutex mutex;
+    QMutexLocker lock(&mutex);
 
     const auto cacheKey = QString("%1@%2x%3").arg(id, QString::number(requestedSize.width()), QString::number(requestedSize.height()));
 

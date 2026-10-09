@@ -83,6 +83,11 @@ class AppManager : public QObject
     // would be lying about. Empty until requestStorageStatistics has answered.
     Q_PROPERTY(QString cacheSize READ cacheSize NOTIFY cacheSizeChanged)
 
+    // True from the moment a clear is asked for until the new size is in. Measured on
+    // device at about ten seconds for a full cache, which with only a static number on
+    // screen is indistinguishable from a tap that did nothing.
+    Q_PROPERTY(bool clearingCache READ isClearingCache NOTIFY clearingCacheChanged)
+
     // Whether each notification scope is muted. Three of them because Telegram keeps three,
     // and a phone wants groups silent far more often than it wants everything silent.
     // False until loadNotificationSettings has answered, which is also what they read as
@@ -121,6 +126,7 @@ public:
     LanguagePackInfoModel *languagePackInfoModel() const noexcept;
 
     const QString &cacheSize() const noexcept;
+    bool isClearingCache() const noexcept;
 
     bool privateChatsMuted() const noexcept;
     bool groupChatsMuted() const noexcept;
@@ -139,6 +145,7 @@ signals:
     void connectionStateChanged();
 
     void cacheSizeChanged();
+    void clearingCacheChanged();
     void notificationSettingsChanged();
 
     void appInitialized();
@@ -341,6 +348,8 @@ private:
     QString m_connectionStateString;
 
     QString m_cacheSize;
+
+    bool m_clearingCache{false};
 
     // Indexed by the same 0/1/2 the QML side uses. std::array rather than three members
     // because every path through them is the same three lines with one index changed.

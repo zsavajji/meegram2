@@ -37,10 +37,13 @@ Page {
         active: root.status === PageStatus.Active && !root.handled
 
         // The sensor is mounted landscape, so the preview needs a quarter turn to stand up
-        // in a portrait page. 90 rather than 270, checked on the device - 270 was upside
-        // down. Only the preview: quirc reads a code at any angle, so the scanner worked
-        // either way. The menu still turns it over, for the next person holding a phone
-        // whose camera is mounted differently.
+        // in a portrait page. 90 rather than 270, settled on the device - 270 came out
+        // upside down. Only the preview is affected: quirc reads a code at any angle, so
+        // the scanner worked either way.
+        //
+        // frameRotation stays a property rather than becoming a constant, because it is
+        // what a differently-mounted camera would need; there is just no setting for it,
+        // which was clutter for a value nobody changes twice.
         frameRotation: 90
 
         onScanned: {
@@ -48,7 +51,9 @@ Page {
             // camera will happily read a poster on the wall behind the screen.
             if (root.handled || text.indexOf("tg://login") !== 0) {
                 if (text.indexOf("tg://login") !== 0)
-                    appWindow.showInfoBanner(qsTr("AuthAnotherClientNotQr"))
+                    // Not qsTr: AuthAnotherClientNotQr was invented, and the pack has no key
+                    // for it - it rendered as the key. English, like the others here.
+                    appWindow.showInfoBanner("That is not a Telegram login code.")
 
                 return;
             }
@@ -97,28 +102,10 @@ Page {
         }
     }
 
-    Menu {
-        id: menu
-
-        MenuLayout {
-            MenuItem {
-                // Not qsTr: no pack key for it, and an absent key renders as the key.
-                text: "Turn preview over"
-                onClicked: scanner.frameRotation = scanner.frameRotation + 180
-            }
-        }
-    }
-
     tools: ToolBarLayout {
         ToolIcon {
             platformIconId: "toolbar-back"
             onClicked: appWindow.pageStack.pop()
-        }
-
-        ToolIcon {
-            platformIconId: "toolbar-view-menu"
-            visible: scanner.available
-            onClicked: menu.open()
         }
     }
 }
