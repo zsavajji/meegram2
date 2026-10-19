@@ -4,6 +4,7 @@
 #include "Common.hpp"
 #include "Localization.hpp"
 #include "StorageManager.hpp"
+#include "Supergroup.hpp"
 #include "Utils.hpp"
 
 #include <QApplication>
@@ -590,13 +591,16 @@ void disposeLater(std::unique_ptr<T> &owner) noexcept
 
 }  // namespace
 
-ChatContext::ChatContext(int token, std::shared_ptr<Chat> chat, std::unique_ptr<ChatInfoFormatter> info,
-                         std::unique_ptr<MessageModel> messageModel, QObject *parent)
+ChatContext::ChatContext(int token, std::shared_ptr<Chat> chat, std::unique_ptr<ChatInfoFormatter> info, std::unique_ptr<MessageModel> messageModel,
+                         std::unique_ptr<ForumTopicModel> topicModel, int forumTopicId, QString topicName, QObject *parent)
     : QObject(parent)
     , m_token(token)
     , m_chat(std::move(chat))
     , m_info(std::move(info))
     , m_messageModel(std::move(messageModel))
+    , m_topicModel(std::move(topicModel))
+    , m_forumTopicId(forumTopicId)
+    , m_topicName(std::move(topicName))
 {
 }
 
@@ -623,6 +627,21 @@ QObject *ChatContext::info() const noexcept
 QObject *ChatContext::messageModel() const noexcept
 {
     return m_messageModel.get();
+}
+
+QObject *ChatContext::topicModel() const noexcept
+{
+    return m_topicModel.get();
+}
+
+int ChatContext::forumTopicId() const noexcept
+{
+    return m_forumTopicId;
+}
+
+QString ChatContext::topicName() const noexcept
+{
+    return m_topicName;
 }
 
 bool ChatContext::isReading() const noexcept
@@ -745,15 +764,42 @@ void ChatManager::setOpenChat(qlonglong chatId) noexcept
 
 QObject *ChatManager::pushChat(const QString &chatId) noexcept
 {
-    return pushContext(chatId, true);
+    return pushContext(chatId, PushChat, 0, QString());
 }
 
 QObject *ChatManager::pushProfile(const QString &chatId) noexcept
 {
-    return pushContext(chatId, false);
+    return pushContext(chatId, PushProfile, 0, QString());
 }
 
-ChatContext *ChatManager::pushContext(const QString &rawChatId, bool reading) noexcept
+QObject *ChatManager::pushTopics(const QString &chatId) noexcept
+{
+    return pushContext(chatId, PushTopicList, 0, QString());
+}
+
+QObject *ChatManager::pushTopic(const QString &chatId, const QString &topicId, const QString &topicName) noexcept
+{
+    // toInt, not toId: a forum topic id is an int32 in td_api, the one id in this
+    // codebase that is.
+    return pushContext(chatId, PushTopic, topicId.toInt(), topicName);
+}
+
+bool ChatManager::isForum(const QString &chatId) const noexcept
+{
+    const auto chat = m_storage->chat(toId(chatId));
+
+    // Only a supergroup can be one. A channel carries the same flag in td_api and never
+    // has it set, and a chat that is not in store yet is not something to guess about -
+    // the open path fetches it and comes back here.
+    if (!chat || chat->type() != Chat::Supergroup)
+        return false;
+
+    const auto supergroup = m_storage->supergroup(chat->typeId());
+
+    return supergroup && supergroup->isForum();
+}
+
+ChatContext *ChatManager::pushContext(const QString &rawChatId, PushKind kind, int forumTopicId, const QString &topicName) noexcept
 {
     const auto chatId = toId(rawChatId);
 
@@ -783,17 +829,25 @@ ChatContext *ChatManager::pushContext(const QString &rawChatId, bool reading) no
     // the open has been processed does not reach the other clients. Only tell it at all
     // once the context is going to be handed out - sent earlier, a push that could not
     // happen left the server believing a chat was open that never was.
+    const bool reading = kind == PushChat || kind == PushTopic;
+
     if (reading)
         setOpenChat(chatId);
 
     auto info = std::make_unique<ChatInfoFormatter>(chat, m_locale, m_storage);
-    auto messageModel = reading ? std::make_unique<MessageModel>(chat, m_locale, m_storage) : nullptr;
+
+    // A topic's model is scoped to it, which is what makes ChatPage show one topic's
+    // messages and send into the same one without knowing that forums exist.
+    auto messageModel = reading ? std::make_unique<MessageModel>(chat, m_locale, m_storage, forumTopicId) : nullptr;
+
+    auto topicModel = kind == PushTopicList ? std::make_unique<ForumTopicModel>(chat, m_locale, m_storage) : nullptr;
 
     // Parented, so the context is never a candidate for QML's collector: an object QML
     // owns goes away on the collector's schedule, and this codebase does not bet object
     // lifetime on that. popContext() is what actually frees it, and the formatter and
     // model go with it.
-    auto context = std::make_unique<ChatContext>(++m_nextToken, std::move(chat), std::move(info), std::move(messageModel), this);
+    auto context = std::make_unique<ChatContext>(++m_nextToken, std::move(chat), std::move(info), std::move(messageModel), std::move(topicModel),
+                                                 forumTopicId, topicName, this);
 
     auto *pushed = context.get();
 

@@ -3,6 +3,7 @@
 #include <td/telegram/td_api.h>
 
 #include <QAbstractListModel>
+#include <QStringList>
 #include <QTimer>
 
 #include <atomic>
@@ -25,8 +26,19 @@ class MessageModel : public QAbstractListModel
     Q_PROPERTY(int count READ count NOTIFY countChanged)
     Q_PROPERTY(bool loading READ loading NOTIFY loadingChanged)
 
+    // The hits of the last searchMessages(), newest first, as decimal strings - see the
+    // note on ids in Chat.hpp. A QStringList is the one list type that crosses into QML1
+    // as a plain array.
+    //
+    // Deliberately not a second model and not a results page: ChatPage already knows how
+    // to jump the list to a message that is not loaded yet (listView.goToMessage), so the
+    // message list *is* the result view, the way the official clients walk hits with an
+    // up and a down arrow.
+    Q_PROPERTY(QStringList searchResults READ searchResults NOTIFY searchResultsChanged)
+
 public:
-    explicit MessageModel(std::shared_ptr<Chat> chat, std::shared_ptr<Locale> locale, std::shared_ptr<StorageManager> storage);
+    explicit MessageModel(std::shared_ptr<Chat> chat, std::shared_ptr<Locale> locale, std::shared_ptr<StorageManager> storage,
+                          int forumTopicId = 0);
     ~MessageModel() override;
 
     enum Role {
@@ -113,6 +125,12 @@ public:
     int count() const noexcept;
     bool loading() const noexcept;
 
+    QStringList searchResults() const noexcept;
+
+    // The forum topic this model is scoped to, or 0 for the whole chat. Read by the page
+    // that has to send into the same topic it is reading.
+    int forumTopicId() const noexcept;
+
     Q_INVOKABLE void getChatHistory(const QString &fromMessageId, int offset, int limit, bool fetchPrevious = false) noexcept;
     // Reports the newest message on screen as read. Nothing ever called the old
     // QStringList version, which is why the other side only saw a message go read
@@ -175,6 +193,17 @@ public:
 
     Q_INVOKABLE void fetchMoreBack() noexcept;
 
+    // Tells the other side something is being typed. Called from the composer on every
+    // keystroke and throttled here rather than there: TDLib expects the action repeated
+    // while it continues and the server expires it after six seconds, so one request
+    // every five covers a continuous typist and a burst of keystrokes costs nothing.
+    Q_INVOKABLE void sendTypingAction() noexcept;
+
+    // In-chat search, scoped to this model's topic when it has one. Answers on
+    // searchResultsChanged; an empty query clears the hits.
+    Q_INVOKABLE void searchMessages(const QString &query) noexcept;
+    Q_INVOKABLE void clearSearch() noexcept;
+
     // Row of the last read message, or count() when it is not in the loaded slice.
     Q_INVOKABLE int lastMessageIndex() const noexcept;
 
@@ -186,6 +215,8 @@ public:
 signals:
     void countChanged();
     void loadingChanged();
+
+    void searchResultsChanged();
 
     void fetchedPosition(int numItems);
 
@@ -213,6 +244,9 @@ private slots:
     // same void* terms as handleHistoryResponse - it resolves names through StorageManager,
     // which belongs to the GUI thread.
     void handleAddedReactions(void *responseObject) noexcept;
+
+    // The searchChatMessages reply, on the same void* terms and for the same reason.
+    void handleSearchResponse(void *responseObject) noexcept;
 
     // The getChatAdministrators reply, on the same terms - it fills m_admins and drops the
     // formatting cache, both of which the GUI thread reads.
@@ -258,6 +292,10 @@ private:
     // take the id as a string - see toId() in Common.hpp. Internal callers already
     // hold a qlonglong and have no reason to round-trip it through one.
     void requestHistory(qlonglong fromMessageId, int offset, int limit, bool fetchPrevious = false) noexcept;
+
+    // This model's topic as td_api wants it on a request, or null for the whole chat -
+    // which is what every non-forum chat passes and what td_api reads as "no topic".
+    td::td_api::object_ptr<td::td_api::MessageTopic> topicId() const noexcept;
 
     // Swaps any File the content built for itself for StorageManager's canonical one,
     // so the download reaches the object the delegate is bound to. Must run before
@@ -340,6 +378,15 @@ private:
     std::shared_ptr<std::atomic_bool> m_alive{std::make_shared<std::atomic_bool>(true)};
 
     std::shared_ptr<Chat> m_chat;
+
+    // The forum topic being read, or 0 for the whole chat. Decides which history request
+    // goes out, which topic a send names, and which new messages belong here at all.
+    int m_forumTopicId{0};
+
+    // When a typing action last went out, for the throttle in sendTypingAction.
+    qint64 m_lastTypingActionAt{0};
+
+    QStringList m_searchResults;
 
     bool m_loading{true};
     bool m_backFetching{true};

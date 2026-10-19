@@ -1,5 +1,6 @@
 import QtQuick 1.1
 import com.nokia.meego 1.1
+import MyComponent 1.0
 import "components"
 
 // A name and the people to put in it. The list is the same SearchModel the new-chat page
@@ -74,67 +75,32 @@ Page {
         cacheBuffer: listView.height / 2
         model: root.model
 
-        delegate: ListItem {
-            // The tick lives in the model, so it survives this delegate being rebuilt when
-            // the query changes - which is exactly what picking several people involves.
-            isSelected: model.selected
+        // One painted item per contact, laid out in C++ - see ContactRow.cpp. selectable
+        // is what puts the tick on it; the tick's state still lives in the model, so it
+        // survives the query changing, which is exactly what picking several people
+        // involves.
+        delegate: ContactRow {
+            width: ListView.view.width
+            listModel: root.model
+            row: index
+            inverted: theme.inverted
+            selectable: true
+            actions: rowActions
+        }
+    }
 
-            Image {
-                id: profilePhotoImage
+    // What a ContactRow's tap does. The rows call these by name, with every argument -
+    // see ContactRow.hpp for the list. A tap means "choose this person" here and "open a
+    // chat with them" on NewChatPage; the row reports it the same way either way.
+    QtObject {
+        id: rowActions
 
-                anchors { left: parent.left; leftMargin: 12; verticalCenter: parent.verticalCenter }
-                width: 64
-                height: 64
+        function activate(contactId) {
+            root.model.toggleSelection(contactId);
+        }
 
-                sourceSize.width: width
-                sourceSize.height: height
-                asynchronous: true
-                fillMode: Image.PreserveAspectCrop
-
-                source: model.photo && model.photo.isDownloadingCompleted ?
-                            "image://chatPhoto/" + model.photo.localPath :
-                            appWindow.avatarPlaceholder
-            }
-
-            Column {
-                anchors {
-                    left: profilePhotoImage.right
-                    leftMargin: 16
-                    right: tick.left
-                    rightMargin: 12
-                    verticalCenter: parent.verticalCenter
-                }
-
-                Label {
-                    width: parent.width
-                    font.pixelSize: 26
-                    font.bold: true
-                    elide: Text.ElideRight
-                    text: model.title
-                }
-
-                Label {
-                    width: parent.width
-                    font.pixelSize: 20
-                    font.family: "Nokia Pure Light"
-                    elide: Text.ElideRight
-                    text: model.username
-                    visible: text !== ""
-                }
-            }
-
-            Image {
-                id: tick
-
-                anchors { right: parent.right; rightMargin: 12; verticalCenter: parent.verticalCenter }
-                // The same pair LanguageSettingsPage uses, which are known to exist in the
-                // Harmattan theme.
-                source: model.selected
-                    ? "image://theme/meegotouch-button-radiobutton-background-selected"
-                    : "image://theme/meegotouch-button-checkbox-background"
-            }
-
-            onClicked: root.model.toggleSelection(model.id)
+        function download(fileId) {
+            appManager.downloadFile(fileId, 1, 0, 0, false);
         }
     }
 

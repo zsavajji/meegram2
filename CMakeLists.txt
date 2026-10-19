@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 # C as well as C++ since lib/quirc, the QR decoder, is C99. The toolchain file already
 # names a C compiler; nothing else in this project uses one.
-project(MeeGram VERSION 0.4.5 LANGUAGES CXX C)
+project(MeeGram VERSION 0.5.0 LANGUAGES CXX C)
 
 # Without this an unset CMAKE_BUILD_TYPE means no -O flag at all, i.e. -O0.
 # This codebase leans on std::ranges views and templates, which -O0 punishes hard.
@@ -128,11 +128,13 @@ set(SRC_FILES
     src/ChatRow.cpp
     src/ChatPhotoProvider.cpp
     src/ChatPosition.cpp
+    src/ContactRow.cpp
     ${MEEGRAM_CLIENT_SOURCES}
     src/CountryModel.cpp
     src/Emoji.cpp
     src/EmojiGrid.cpp
     src/File.cpp
+    src/ForumTopicModel.cpp
     src/LanguagePackInfoModel.cpp
     src/ListRow.cpp
     src/Localization.cpp
@@ -155,6 +157,7 @@ set(SRC_FILES
     src/StorageManager.cpp
     src/SupergroupFullInfo.cpp
     src/Supergroup.cpp
+    src/TopicRow.cpp
     src/User.cpp
     src/Utils.cpp
     src/VoiceNote.cpp

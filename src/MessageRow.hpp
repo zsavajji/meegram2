@@ -132,6 +132,14 @@ private:
     void paintContent(QPainter *painter, const rows::Palette &palette) const;
     void paintSpinner(QPainter *painter, const QPointF &center) const;
 
+    // The download indicator: the platform spinner until the first chunk lands, then a
+    // determinate arc. The spinner alone looks the same at 2% as at 98%, which on a
+    // phone downloading a 40 MB video over 3G is the whole complaint.
+    void paintProgress(QPainter *painter, const QPointF &center) const;
+
+    // The line under a document's name: its size, counting up while it downloads.
+    QString fileSubtitle() const;
+
     bool m_bubbles{true};
     bool m_skeuomorphic{false};
     bool m_animateStickers{true};

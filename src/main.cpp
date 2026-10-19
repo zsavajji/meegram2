@@ -36,8 +36,10 @@
 #include "ChatPosition.hpp"
 #include "Client.hpp"
 #include "Common.hpp"
+#include "ContactRow.hpp"
 #include "EmojiGrid.hpp"
 #include "File.hpp"
+#include "ForumTopicModel.hpp"
 #include "LanguagePackInfoModel.hpp"
 #include "Localization.hpp"
 #include "MemberList.hpp"
@@ -53,6 +55,7 @@
 #include "Settings.hpp"
 #include "StickerProvider.hpp"
 #include "StorageManager.hpp"
+#include "TopicRow.hpp"
 #include "Utils.hpp"
 
 namespace {
@@ -379,10 +382,12 @@ Q_DECL_EXPORT int main(int argc, char *argv[])
     qRegisterMetaType<QModelIndex>("QModelIndex");
 
     qmlRegisterType<ChatRow>("MyComponent", 1, 0, "ChatRow");
+    qmlRegisterType<ContactRow>("MyComponent", 1, 0, "ContactRow");
     qmlRegisterType<EmojiGrid>("MyComponent", 1, 0, "EmojiGrid");
     qmlRegisterType<LottieAnimation>("MyComponent", 1, 0, "LottieAnimation");
     qmlRegisterType<MemberList>("MyComponent", 1, 0, "MemberList");
     qmlRegisterType<MessageRow>("MyComponent", 1, 0, "MessageRow");
+    qmlRegisterType<TopicRow>("MyComponent", 1, 0, "TopicRow");
     qmlRegisterType<QrCodeItem>("MyComponent", 1, 0, "QrCode");
     qmlRegisterType<QrScanner>("MyComponent", 1, 0, "QrScanner");
     qmlRegisterType<VoiceNote>("MyComponent", 1, 0, "VoiceNote");
@@ -405,6 +410,7 @@ Q_DECL_EXPORT int main(int argc, char *argv[])
     qmlRegisterUncreatableType<Message>("MyComponent", 1, 0, "Message", "Message cannot be created from QML.");
     qmlRegisterUncreatableType<Supergroup>("MyComponent", 1, 0, "Supergroup", "Supergroup cannot be created from QML.");
     qmlRegisterUncreatableType<SupergroupFullInfo>("MyComponent", 1, 0, "SupergroupFullInfo", "SupergroupFullInfo cannot be created from QML.");
+    qmlRegisterUncreatableType<ForumTopicModel>("MyComponent", 1, 0, "ForumTopicModel", "ForumTopicModel cannot be created from QML.");
     qmlRegisterUncreatableType<User>("MyComponent", 1, 0, "User", "User cannot be created from QML.");
 
     qmlRegisterUncreatableType<MessageText>("MyComponent", 1, 0, "MessageText", "MessageText cannot be created from QML.");

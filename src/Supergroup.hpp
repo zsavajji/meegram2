@@ -15,6 +15,10 @@ class Supergroup : public QObject
     Q_PROPERTY(bool hasLocation READ hasLocation CONSTANT)
     Q_PROPERTY(bool isChannel READ isChannel CONSTANT)
 
+    // A supergroup whose messages are filed under topics. Such a chat opens into its
+    // topic list rather than straight into a message list - see ChatManager::isForum.
+    Q_PROPERTY(bool isForum READ isForum CONSTANT)
+
 public:
     explicit Supergroup(td::td_api::object_ptr<td::td_api::supergroup> group, QObject *parent = nullptr);
 
@@ -25,6 +29,7 @@ public:
     int memberCount() const;
     bool hasLocation() const;
     bool isChannel() const;
+    bool isForum() const;
 
     QStringList activeUsernames() const;
 
@@ -36,6 +41,7 @@ private:
     int m_memberCount;
     bool m_hasLocation;
     bool m_isChannel;
+    bool m_isForum;
 
     QStringList m_activeUsernames;
 };

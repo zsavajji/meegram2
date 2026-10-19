@@ -18,6 +18,16 @@
 
 namespace {
 
+// The forum topic a message belongs to, or 0 for a message outside one. A forum delivers
+// every topic's messages on the one chat, so this is what a topic-scoped model filters on.
+int forumTopicOf(const td::td_api::message &message) noexcept
+{
+    if (message.topic_id_ && message.topic_id_->get_id() == td::td_api::messageTopicForum::ID)
+        return static_cast<const td::td_api::messageTopicForum &>(*message.topic_id_).forum_topic_id_;
+
+    return 0;
+}
+
 // One photo, ready to be sent - on its own or as one item of an album.
 td::td_api::object_ptr<td::td_api::inputMessagePhoto> makeInputPhoto(const QString &filePath, const QString &caption)
 {
@@ -53,6 +63,14 @@ constexpr int MaxAlbumSize = 10;
 
 // One page of "who reacted", which is as far as the dialog goes.
 constexpr int MaxAddedReactions = 50;
+
+// How often a typing action may go out while somebody keeps typing. The server expires
+// an action after six seconds, so this re-sends just inside that.
+constexpr qint64 TypingActionInterval = 5000;
+
+// Hits one in-chat search asks for. One screenful of walking is what the arrows are for;
+// nobody steps through 500 matches on a phone.
+constexpr int SearchLimit = 50;
 
 // The emoji of one reaction, or an empty string for the kinds this client cannot draw.
 //
@@ -105,11 +123,12 @@ QString senderColor(qlonglong senderId) noexcept
 
 }  // namespace
 
-MessageModel::MessageModel(std::shared_ptr<Chat> chat, std::shared_ptr<Locale> locale, std::shared_ptr<StorageManager> storage)
+MessageModel::MessageModel(std::shared_ptr<Chat> chat, std::shared_ptr<Locale> locale, std::shared_ptr<StorageManager> storage, int forumTopicId)
     : m_client(storage->client())
     , m_locale(std::move(locale))
     , m_storage(std::move(storage))
     , m_chat(std::move(chat))
+    , m_forumTopicId(forumTopicId)
 {
     connect(m_client.get(), SIGNAL(result(td::td_api::Object *)), SLOT(handleResult(td::td_api::Object *)));
 
@@ -633,6 +652,24 @@ bool MessageModel::loading() const noexcept
     return m_loading || m_backFetching;
 }
 
+QStringList MessageModel::searchResults() const noexcept
+{
+    return m_searchResults;
+}
+
+int MessageModel::forumTopicId() const noexcept
+{
+    return m_forumTopicId;
+}
+
+td::td_api::object_ptr<td::td_api::MessageTopic> MessageModel::topicId() const noexcept
+{
+    if (m_forumTopicId == 0)
+        return nullptr;
+
+    return td::td_api::make_object<td::td_api::messageTopicForum>(m_forumTopicId);
+}
+
 void MessageModel::getChatHistory(const QString &fromMessageId, int offset, int limit, bool fetchPrevious) noexcept
 {
     requestHistory(toId(fromMessageId), offset, limit, fetchPrevious);
@@ -640,12 +677,34 @@ void MessageModel::getChatHistory(const QString &fromMessageId, int offset, int 
 
 void MessageModel::requestHistory(qlonglong fromMessageId, int offset, int limit, bool fetchPrevious) noexcept
 {
-    auto request = td::td_api::make_object<td::td_api::getChatHistory>();
-    request->chat_id_ = m_chat->id();
-    request->from_message_id_ = fromMessageId;
-    request->offset_ = offset;
-    request->limit_ = limit;
-    request->only_local_ = false;
+    // Built as a Function so the two requests share the one callback below. Both answer
+    // with `messages`, so handleHistoryResponse needs to know nothing about topics.
+    td::td_api::object_ptr<td::td_api::Function> request;
+
+    if (m_forumTopicId != 0)
+    {
+        // getChatHistory in a forum answers with every topic's messages mixed together,
+        // which is not what a topic page is showing.
+        auto topicRequest = td::td_api::make_object<td::td_api::getForumTopicHistory>();
+        topicRequest->chat_id_ = m_chat->id();
+        topicRequest->forum_topic_id_ = m_forumTopicId;
+        topicRequest->from_message_id_ = fromMessageId;
+        topicRequest->offset_ = offset;
+        topicRequest->limit_ = limit;
+
+        request = std::move(topicRequest);
+    }
+    else
+    {
+        auto chatRequest = td::td_api::make_object<td::td_api::getChatHistory>();
+        chatRequest->chat_id_ = m_chat->id();
+        chatRequest->from_message_id_ = fromMessageId;
+        chatRequest->offset_ = offset;
+        chatRequest->limit_ = limit;
+        chatRequest->only_local_ = false;
+
+        request = std::move(chatRequest);
+    }
 
     m_client->send(std::move(request), [this, fetchPrevious, alive = m_alive](auto &&response) {
         // Runs on the TDLib worker thread, and the model may already be gone: leaving a
@@ -777,6 +836,7 @@ void MessageModel::send(td::td_api::object_ptr<td::td_api::InputMessageContent> 
     auto request = td::td_api::make_object<td::td_api::sendMessage>();
 
     request->chat_id_ = m_chat->id();
+    request->topic_id_ = topicId();
 
     if (replyToMessageId != 0)
     {
@@ -862,6 +922,7 @@ void MessageModel::sendPhotos(const QString &filePaths, const QString &caption, 
     auto request = td::td_api::make_object<td::td_api::sendMessageAlbum>();
 
     request->chat_id_ = m_chat->id();
+    request->topic_id_ = topicId();
 
     if (const auto replyTo = toId(replyToMessageId); replyTo != 0)
     {
@@ -914,6 +975,91 @@ void MessageModel::sendVoiceNote(const QString &filePath, int duration, const QS
     content->caption_->text_ = caption.toStdString();
 
     send(std::move(content), toId(replyToMessageId));
+}
+
+void MessageModel::sendTypingAction() noexcept
+{
+    const auto now = QDateTime::currentMSecsSinceEpoch();
+
+    // Five seconds against the server's six, so a continuous typist is never briefly
+    // shown as having stopped.
+    if (now - m_lastTypingActionAt < TypingActionInterval)
+        return;
+
+    m_lastTypingActionAt = now;
+
+    auto request = td::td_api::make_object<td::td_api::sendChatAction>();
+
+    request->chat_id_ = m_chat->id();
+    request->topic_id_ = topicId();
+    request->action_ = td::td_api::make_object<td::td_api::chatActionTyping>();
+
+    m_client->send(std::move(request));
+}
+
+void MessageModel::searchMessages(const QString &query) noexcept
+{
+    if (query.trimmed().isEmpty())
+    {
+        clearSearch();
+        return;
+    }
+
+    auto request = td::td_api::make_object<td::td_api::searchChatMessages>();
+
+    request->chat_id_ = m_chat->id();
+    request->topic_id_ = topicId();
+    request->query_ = query.toStdString();
+    request->from_message_id_ = 0;
+    request->offset_ = 0;
+    request->limit_ = SearchLimit;
+    request->filter_ = td::td_api::make_object<td::td_api::searchMessagesFilterEmpty>();
+
+    m_client->send(std::move(request), [this, alive = m_alive](auto &&response) {
+        // Same guard, same hop and the same void* handover as the history reply: this
+        // writes members the GUI thread reads.
+        if (!alive->load())
+            return;
+
+        QMetaObject::invokeMethod(this, "handleSearchResponse", Qt::QueuedConnection, Q_ARG(void *, response.release()));
+    });
+}
+
+void MessageModel::clearSearch() noexcept
+{
+    if (m_searchResults.isEmpty())
+        return;
+
+    m_searchResults.clear();
+
+    emit searchResultsChanged();
+}
+
+void MessageModel::handleSearchResponse(void *responseObject) noexcept
+{
+    td::td_api::object_ptr<td::td_api::Object> response(static_cast<td::td_api::Object *>(responseObject));
+
+    if (!response || response->get_id() != td::td_api::foundChatMessages::ID)
+        return;
+
+    const auto &found = static_cast<const td::td_api::foundChatMessages &>(*response);
+
+    m_searchResults.clear();
+
+    // Ids as strings, in the order TDLib answered - newest first, which is the order the
+    // page walks them in. See the note on ids in Chat.hpp.
+    //
+    // The messages themselves are dropped: the page jumps the list to each hit, and the
+    // list loads what it lands on. ponytail: no paging past the first SearchLimit hits,
+    // and a hit older than ChatPage's twelve-page jump budget cannot be reached. Ask with
+    // next_from_message_id if that bites.
+    for (const auto &message : found.messages_)
+    {
+        if (message)
+            m_searchResults.append(QString::number(message->id_));
+    }
+
+    emit searchResultsChanged();
 }
 
 void MessageModel::fetchMoreBack() noexcept
@@ -1366,6 +1512,15 @@ void MessageModel::handleResult(td::td_api::Object *object) noexcept
 void MessageModel::handleNewMessage(td::td_api::object_ptr<td::td_api::message> &&message) noexcept
 {
     if (m_chat->id() != message->chat_id_)
+        return;
+
+    // In a forum every topic's messages arrive on the same chat, so without this one
+    // topic's page shows the whole group. Strict on purpose: a message whose topic does
+    // not match is dropped, which means that if the General topic turns out to deliver
+    // its messages with no topic at all, General reads as empty rather than every other
+    // topic reading as polluted - the first is one obvious symptom, the second is a
+    // confusing one. **Unverified on device**: check General first.
+    if (m_forumTopicId != 0 && forumTopicOf(*message) != m_forumTopicId)
         return;
 
     auto messageId = message->id_;

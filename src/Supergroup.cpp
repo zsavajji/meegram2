@@ -7,6 +7,7 @@ Supergroup::Supergroup(td::td_api::object_ptr<td::td_api::supergroup> group, QOb
     , m_memberCount(group->member_count_)
     , m_hasLocation(group->has_location_)
     , m_isChannel(group->is_channel_)
+    , m_isForum(group->is_forum_)
 {
     if (group->usernames_)
     {
@@ -40,6 +41,11 @@ bool Supergroup::hasLocation() const
 bool Supergroup::isChannel() const
 {
     return m_isChannel;
+}
+
+bool Supergroup::isForum() const
+{
+    return m_isForum;
 }
 
 QStringList Supergroup::activeUsernames() const

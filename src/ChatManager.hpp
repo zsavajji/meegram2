@@ -2,6 +2,7 @@
 
 #include "ChatFolderModel.hpp"
 #include "ChatModel.hpp"
+#include "ForumTopicModel.hpp"
 #include "MessageModel.hpp"
 #include "SearchModel.hpp"
 
@@ -168,8 +169,22 @@ class ChatContext : public QObject
     Q_PROPERTY(QObject *info READ info CONSTANT)
 
     // Null on a context pushed for a profile page: it shows no messages, and building a
-    // model for it would start a history fetch nobody reads.
+    // model for it would start a history fetch nobody reads. Null on a topic list too,
+    // which shows topics.
     Q_PROPERTY(QObject *messageModel READ messageModel CONSTANT)
+
+    // The forum's topics. Only on a context pushed for a TopicListPage; null everywhere
+    // else, for the same reason messageModel is.
+    Q_PROPERTY(QObject *topicModel READ topicModel CONSTANT)
+
+    // The topic this context reads, or 0 for the whole chat. An int32 in td_api, so
+    // unlike every other id here it crosses into QML as a number safely - see the note on
+    // ids in Chat.hpp.
+    Q_PROPERTY(int forumTopicId READ forumTopicId CONSTANT)
+
+    // The topic's name, for the header of the page reading it. Empty outside a topic.
+    // Carried rather than looked up: a topic is in no store to look it up in.
+    Q_PROPERTY(QString topicName READ topicName CONSTANT)
 
     // Handed back to popContext() when the page is destroyed. An int rather than the
     // context itself: the page holds it in a `property variant`, and a variant that has
@@ -179,14 +194,17 @@ class ChatContext : public QObject
     Q_PROPERTY(int token READ token CONSTANT)
 
 public:
-    ChatContext(int token, std::shared_ptr<Chat> chat, std::unique_ptr<ChatInfoFormatter> info,
-                std::unique_ptr<MessageModel> messageModel, QObject *parent = nullptr);
+    ChatContext(int token, std::shared_ptr<Chat> chat, std::unique_ptr<ChatInfoFormatter> info, std::unique_ptr<MessageModel> messageModel,
+                std::unique_ptr<ForumTopicModel> topicModel, int forumTopicId, QString topicName, QObject *parent = nullptr);
 
     int token() const noexcept;
     Chat *chat() const noexcept;
     QString chatId() const noexcept;
     QObject *info() const noexcept;
     QObject *messageModel() const noexcept;
+    QObject *topicModel() const noexcept;
+    int forumTopicId() const noexcept;
+    QString topicName() const noexcept;
 
     // True when this context is a chat being read rather than a profile being looked at -
     // which is to say, when it has a message model. What decides whether it takes part in
@@ -207,6 +225,10 @@ private:
     // ChatPage's ListView reading the next chat's messages.
     std::unique_ptr<ChatInfoFormatter> m_info;
     std::unique_ptr<MessageModel> m_messageModel;
+    std::unique_ptr<ForumTopicModel> m_topicModel;
+
+    int m_forumTopicId{0};
+    QString m_topicName;
 };
 
 class ChatManager : public QObject
@@ -262,6 +284,22 @@ public:
     // popContext() when its page is destroyed.
     Q_INVOKABLE QObject *pushChat(const QString &chatId) noexcept;
     Q_INVOKABLE QObject *pushProfile(const QString &chatId) noexcept;
+
+    // A forum supergroup: one whose messages are filed under topics, and which therefore
+    // opens into its topic list rather than straight into a message list. False for every
+    // chat that is not a forum, and for one not in store yet - in which case the open path
+    // fetches it and asks again.
+    Q_INVOKABLE bool isForum(const QString &chatId) const noexcept;
+
+    // A context for a TopicListPage: the forum's topics, and no message model, since the
+    // page shows no messages. The same pairing rule as the other two - every context
+    // handed out must come back through popContext().
+    Q_INVOKABLE QObject *pushTopics(const QString &chatId) noexcept;
+
+    // A context for a ChatPage reading one topic of a forum: an ordinary chat context
+    // whose message model is scoped to that topic, so the page itself needs to know
+    // nothing about forums. The name is carried because a topic is in no store.
+    Q_INVOKABLE QObject *pushTopic(const QString &chatId, const QString &topicId, const QString &topicName) noexcept;
 
     // Retires the context a page was given, called from that page's destruction with the
     // token it was handed. By token rather than by depth: PageStack is not the only thing
@@ -358,8 +396,12 @@ private:
     void updateFolderModels() noexcept;
     void fetchChat(qlonglong chatId) noexcept;
 
-    // The two pushes above, which differ only in whether the context reads its chat.
-    ChatContext *pushContext(const QString &rawChatId, bool reading) noexcept;
+    // What a push is for. Chat and Topic read their chat and get a message model, Topic's
+    // scoped to one topic; TopicList gets the forum's topic model; Profile gets neither.
+    enum PushKind { PushChat, PushProfile, PushTopicList, PushTopic };
+
+    // The four pushes above, which differ only in that.
+    ChatContext *pushContext(const QString &rawChatId, PushKind kind, int forumTopicId, const QString &topicName) noexcept;
 
     // The topmost context being read, or null when nothing on the stack is a ChatPage.
     // Scanned from the top rather than tracked in a member: a profile pushed over a chat

@@ -129,6 +129,11 @@ PageStackWindow {
     // as undefined (docs/troubleshooting.md).
     property variant chatPageComponent: null
 
+    // Kept for the life of the process like chatPageComponent, so a second forum does not
+    // recompile the page. Much smaller than ChatPage, so this is thrift rather than the
+    // ~1 s that one costs.
+    property variant topicListPageComponent: null
+
     function ensureChatPageComponent() {
         if (!chatPageComponent)
             chatPageComponent = Qt.createComponent("ChatPage.qml");
@@ -481,6 +486,15 @@ PageStackWindow {
         // so a second ChatPage on the stack no longer rebinds the first one onto the new
         // conversation. It is taken before the compile below so the first history request
         // is already on the socket while ChatPage is being compiled.
+        // A forum supergroup has no single message list: it opens into its topics, and one
+        // of those is what a ChatPage ends up reading. A chat not in store yet answers
+        // false here, which is harmless - pushChat below refuses it, a fetch starts, and
+        // onChatAvailable comes back through this same function with the chat present.
+        if (manager.isForum(chatId)) {
+            openTopicList(chatId);
+            return;
+        }
+
         var chatContext = manager.pushChat(chatId);
 
         if (!chatContext)
@@ -490,13 +504,18 @@ PageStackWindow {
         // C++ side opening the chat and kicking off the first history fetch.
         utils.mark("chat-selected")
 
+        pushChatPage(chatContext);
+    }
+
+    // The ChatPage push itself, shared by opening a chat and opening one topic of a
+    // forum. Gives the context back if the page cannot be built: one left behind holds an
+    // open chat and a live message model.
+    function pushChatPage(chatContext) {
         var component = ensureChatPageComponent();
 
         if (component.status !== Component.Ready) {
             console.debug("Error loading component:", component.errorString());
-            // Give the context back rather than leaving one on the stack for a page that
-            // will never exist - it holds an open chat and a live message model.
-            manager.popContext(chatContext.token);
+            appManager.chatManager.popContext(chatContext.token);
             // And forget the component, so the next open compiles afresh rather than
             // handing back the same error for the life of the process.
             chatPageComponent = null;
@@ -512,6 +531,47 @@ PageStackWindow {
         pageStack.push(component, { chatContext: chatContext });
 
         utils.mark("chatpage-pushed")
+    }
+
+    // The topic list of a forum, pushed where a ChatPage would otherwise go.
+    function openTopicList(chatId) {
+        var manager = appManager.chatManager;
+
+        if (!manager)
+            return;
+
+        var chatContext = manager.pushTopics(chatId);
+
+        if (!chatContext)
+            return;
+
+        if (!topicListPageComponent)
+            topicListPageComponent = Qt.createComponent("TopicListPage.qml");
+
+        if (topicListPageComponent.status !== Component.Ready) {
+            console.debug("Error loading component:", topicListPageComponent.errorString());
+            manager.popContext(chatContext.token);
+            topicListPageComponent = null;
+            return;
+        }
+
+        pageStack.push(topicListPageComponent, { chatContext: chatContext });
+    }
+
+    // One topic of a forum, as an ordinary ChatPage whose message model is scoped to it.
+    // Called by a TopicRow through TopicListPage's rowActions.
+    function openTopic(chatId, topicId, topicName) {
+        var manager = appManager.chatManager;
+
+        if (!manager)
+            return;
+
+        var chatContext = manager.pushTopic(chatId, topicId, topicName);
+
+        if (!chatContext)
+            return;
+
+        pushChatPage(chatContext);
     }
 
     Component.onCompleted: {

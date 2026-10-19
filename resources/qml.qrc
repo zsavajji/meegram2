@@ -31,6 +31,7 @@
         <file>qml/SettingsPage.qml</file>
         <file>qml/SignInPage.qml</file>
         <file>qml/SignUpPage.qml</file>
+        <file>qml/TopicListPage.qml</file>
         <file>qml/ChatListView.qml</file>
     </qresource>
 </RCC>

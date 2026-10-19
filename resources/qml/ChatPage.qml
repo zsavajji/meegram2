@@ -18,6 +18,11 @@ Page {
     property variant chatInfo: chatContext.info
     property variant messageModel: chatContext.messageModel
 
+    // Set when this page is reading one topic of a forum rather than a whole chat. The
+    // topic is then what the header names, and the group's own title takes the line
+    // underneath - where a chat's status sits everywhere else.
+    property string topicName: chatContext.topicName
+
     // A channel you are only subscribed to takes no replies, so the composer goes
     // entirely - Column skips invisible children, so hiding them collapses the holder
     // and the message list takes the space back on its own.
@@ -163,6 +168,40 @@ Page {
 
     property bool loading: true
 
+    // In-chat search. The hits live on the model as ids; this walks them and lets the
+    // list do the jumping, which it already knows how to do for a message that is not
+    // loaded yet - see MessageModel::searchResults.
+    property bool searchVisible: false
+    property int searchIndex: -1
+
+    function toggleSearch() {
+        searchVisible = !searchVisible;
+
+        if (searchVisible) {
+            searchField.forceActiveFocus();
+            return;
+        }
+
+        // A query left behind by a closed bar is a chat quietly holding a stale hit list.
+        searchField.text = "";
+        searchTimer.stop();
+        searchIndex = -1;
+        messageModel.clearSearch();
+        platformCloseSoftwareInputPanel();
+    }
+
+    function searchStep(delta) {
+        var hits = messageModel.searchResults;
+
+        if (hits.length === 0)
+            return;
+
+        // Wraps: with three hits, walking off the end is otherwise two dead taps out of
+        // three. The list is newest first, so +1 is further back.
+        searchIndex = (searchIndex + delta + hits.length) % hits.length;
+        listView.goToMessage(hits[searchIndex]);
+    }
+
     property QtObject platformStyle: SheetStyle {}
 
     Item {
@@ -255,14 +294,14 @@ Page {
                         Label {
                             // elideEmoji, not replaceEmoji: emoji markup makes this rich
                             // text, and rich text ignores the elide below.
-                            text: utils.elideEmoji(chatInfo.title, font, width)
+                            text: utils.elideEmoji(root.topicName !== "" ? root.topicName : chatInfo.title, font, width)
                             font.bold: true
                             elide: Text.ElideRight
                             width: chatInfoRow.width - profilePhotoImage.width - chatInfoRow.spacing
                         }
 
                         Label {
-                            text: chatInfo.status
+                            text: root.topicName !== "" ? chatInfo.title : chatInfo.status
                             font {
                                 weight: Font.Light
                                 pixelSize: 20
@@ -280,6 +319,122 @@ Page {
                     anchors.fill: chatInfoRow
                     onClicked: root.openProfile()
                 }
+            }
+        }
+
+        // A sibling of the list rather than its header: setting a header on a ListView
+        // rebuilds it on every model reset, which here would wipe the field and its focus
+        // mid-query. Same arrangement, and the same reason, as ChatListView's.
+        Item {
+            id: searchBar
+
+            property int expandedHeight: 72
+
+            anchors { top: header.bottom; left: parent.left; right: parent.right }
+            height: root.searchVisible ? expandedHeight : 0
+            clip: true
+            visible: height > 0
+
+            Behavior on height { NumberAnimation { duration: 150 } }
+
+            TextField {
+                id: searchField
+
+                anchors {
+                    left: parent.left
+                    leftMargin: 12
+                    right: searchControls.left
+                    rightMargin: 8
+                    verticalCenter: parent.verticalCenter
+                }
+                height: 56
+                placeholderText: qsTr("Search")
+                inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
+
+                // Coalesced the way ChatListView's filter is - and more to the point here,
+                // where every keystroke is a request to the server rather than a local scan.
+                onTextChanged: searchTimer.restart()
+            }
+
+            Row {
+                id: searchControls
+
+                anchors { right: parent.right; rightMargin: 12; verticalCenter: parent.verticalCenter }
+                spacing: 8
+
+                Label {
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: appWindow.secondaryColor
+                    font.pixelSize: 20
+                    // Nothing before the first query, the no-result string for an empty
+                    // answer, "3/17" once there are hits - rather than a bare 0/0, which
+                    // reads as broken.
+                    text: {
+                        if (searchField.text === "")
+                            return "";
+
+                        var total = messageModel.searchResults.length;
+
+                        if (total === 0)
+                            return qsTr("NoResult");
+
+                        return (root.searchIndex + 1) + "/" + total;
+                    }
+                }
+
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: icons.up
+                    font.family: icons.fontFamily
+                    font.pixelSize: 32
+                    color: messageModel.searchResults.length > 0 ? appWindow.accentColor : appWindow.secondaryColor
+
+                    MouseArea {
+                        // The glyph is smaller than a fingertip; the margins are the
+                        // touch target, not the artwork.
+                        anchors { fill: parent; margins: -10 }
+                        onClicked: root.searchStep(1)
+                    }
+                }
+
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: icons.down
+                    font.family: icons.fontFamily
+                    font.pixelSize: 32
+                    color: messageModel.searchResults.length > 0 ? appWindow.accentColor : appWindow.secondaryColor
+
+                    MouseArea {
+                        anchors { fill: parent; margins: -10 }
+                        onClicked: root.searchStep(-1)
+                    }
+                }
+            }
+
+            Rectangle {
+                anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                height: 1
+                opacity: 0.5
+                color: appWindow.separatorColor
+            }
+        }
+
+        Timer {
+            id: searchTimer
+
+            interval: 400
+            onTriggered: messageModel.searchMessages(searchField.text)
+        }
+
+        // Lands on the newest hit as soon as an answer arrives, so one query is one tap
+        // rather than a tap and then an arrow.
+        Connections {
+            target: messageModel || null
+            ignoreUnknownSignals: true
+
+            onSearchResultsChanged: {
+                root.searchIndex = -1;
+                root.searchStep(1);
             }
         }
 
@@ -317,7 +472,7 @@ Page {
             property variant cancelledDownloads: ({})
 
             anchors {
-                top: header.bottom
+                top: searchBar.bottom
                 left: parent.left
                 right: parent.right
                 bottom: inputPanelHolder.top
@@ -963,7 +1118,15 @@ Page {
                         emojiPanel.open = false;
                 }
 
-                onTextChanged: root.updateMentions()
+                onTextChanged: {
+                    root.updateMentions()
+
+                    // Only while there is something there: this also fires when the field
+                    // is cleared after a send, and "typing" is the wrong thing to report
+                    // for that. The throttle lives in the model.
+                    if (text !== "")
+                        messageModel.sendTypingAction()
+                }
                 onCursorPositionChanged: root.updateMentions()
             }
 
@@ -1754,6 +1917,11 @@ Page {
         ToolIcon {
             platformIconId: "toolbar-back"
             onClicked: pageStack.pop()
+        }
+
+        ToolIcon {
+            platformIconId: "toolbar-search"
+            onClicked: root.toggleSearch()
         }
     }
 

@@ -667,6 +667,10 @@ void ListRow::watch(File *file)
 
     m_files.append(file);
     connect(file, SIGNAL(fileChanged()), this, SLOT(handleFileChanged()), Qt::UniqueConnection);
+    // Progress has a signal of its own so fileChanged can stay narrow - see File.hpp. A
+    // row drawing a download ring wants both, and only a row bound to a file that is
+    // actually downloading is ever told twice.
+    connect(file, SIGNAL(progressChanged()), this, SLOT(handleFileChanged()), Qt::UniqueConnection);
 }
 
 void ListRow::unwatchFiles()

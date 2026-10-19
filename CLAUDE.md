@@ -51,7 +51,7 @@ is demand-loaded as of 2026-09-21 to close that; see **Status**, and measure it.
 - `-Wall -Wextra -pedantic`; Debug adds `-Werror`. Release defines `QT_NO_DEBUG_OUTPUT`,
   so use `qWarning` for anything that must reach the device log.
 - Deliberate ceilings are marked `ponytail:` in a comment naming the upgrade path.
-  There are 40 of them; `grep -rn "ponytail:" src resources/qml` is the debt ledger.
+  There are 44 of them; `grep -rn "ponytail:" src resources/qml` is the debt ledger.
 - Language-pack strings: `qsTr("Key")` resolves through `Locale::getString`; a key the
   pack lacks renders **as the key itself** with nothing in a release log. Verify new keys
   against Telegram's Android pack on device. The on-disk cache is UTF-16, so `grep` finds
@@ -164,12 +164,13 @@ meegramd (src/daemon/)                       meegram (src/)
 | `src/StorageManager.*` | Entity cache + fan-out; `registerFile`; `loadUserFullInfo` |
 | `src/ChatManager.*` | `ChatInfoFormatter`, `ChatContext`, `ChatManager`; `openProfile`, `fetchChat`, `createGroup`, `searchMentions` |
 | `src/ChatModel.*`, `MessageModel.*`, `SearchModel.*`, `ChatFolderModel.*` | List models (see above) |
+| `src/ForumTopicModel.*` | The topics of one forum supergroup, for `TopicListPage`. Real offset paging, unlike `getChats` |
 | `src/Chat.*`, `Message.*`, `MessageContent.*`, `MessageService.*`, `User.*`, `BasicGroup.*`, `Supergroup*.*`, `File.*`, `ChatPosition.*` | Passive value wrappers over `td_api` |
 | `src/Account.*` | The signed-in user's own profile for the account page: name, bio, username, birthday |
 | `src/SessionModel.*` | Active sessions; terminate, terminate-others, confirm a QR login |
 | `src/QrScanner.*` | `QCamera` viewfinder + `lib/quirc`; grayscale frames, decode throttled to 350 ms |
 | `src/ListRow.*` | Base of the two painted list rows: model-row binding, press / hold / click, `ImageLoader` (one decode thread + 8 MB cache), `TextBlock` (QTextLayout for plain, QTextDocument for rich), the C++ copy of appWindow's palette, theme pixmaps |
-| `src/ChatRow.*`, `src/MessageRow.*` | The chat list and message list delegates, painted in C++; see **QML** below |
+| `src/ChatRow.*`, `src/MessageRow.*`, `src/ContactRow.*`, `src/TopicRow.*` | The chat, message, contact-search and forum-topic delegates, painted in C++; see **QML** below |
 | `src/MemberList.*`, `src/EmojiGrid.*` | ProfilePage's member section and the emoji picker's grid, each one painted item drawing only its exposed rows/cells (`PressItem` base from `ListRow.hpp`) |
 | `src/Utils.*` | Formatters, emoji table (`replaceEmoji`, `elideEmoji`, `emojiOnlySize`), save/open helpers |
 | `src/Localization.*`, `PluralRules.*`, `LanguagePackInfoModel.*` | Translation |
@@ -191,6 +192,8 @@ main.qml (PageStackWindow; theme colours, isOnBubble(), chatPageComponent, openC
     │                   mention panel, VoiceNote; the three ContextMenus, the delete QueryDialog and
     │                   the reactions SelectionDialog are Components built on first use
     │                   (`showPopup(name)`), like the kept-alive Photo/File pickers
+    ├── TopicListPage   a forum opens into this; picking a topic pushes a ChatPage
+    │                   whose MessageModel is scoped to it (ListView<TopicRow>)
     ├── ProfilePage, NewChatPage, NewGroupPage, ArchivedChatPage, LanguageSettingsPage,
     │   SettingsPage (sectioned, in a Flickable) → AccountSettingsPage, SessionsPage → QrScannerPage,
     │   PhotoViewPage (pinch zoom via resizeContent, swaps to the original when downloaded)
@@ -322,10 +325,9 @@ measured profiling with the two real wins (avatar cache 64→256, `replaceEmojiS
 memo) applied.
 
 **Not done**: `Authorization` still runs in the UI (a first login needs the app open);
-forwarding; message search; location/contact/poll delegates; inline video; download
-progress (spinner only); custom-emoji and paid reactions; sending your own typing
-action; recents/skin tones in the emoji picker; the daemon posts blocking D-Bus from its
-receive thread.
+forwarding; location/contact/poll delegates; inline video; custom-emoji and paid
+reactions; recents/skin tones in the emoji picker; the daemon posts blocking D-Bus from
+its receive thread.
 
 **New in 0.4.5, none of it run** (`docs/handoff-0.4.5.md`): settings split into sections;
 an Account page (name, bio, username, birthday; phone read-only); log out with confirmation,
@@ -334,6 +336,49 @@ and QR scanning to sign a desktop in (`lib/quirc` + `QCamera`); per-scope notifi
 cache size and clear; the nine-slice bubbles back behind "Skeumorphic bubbles"; animated
 stickers and sensitive-content switches; cancellable downloads; a restart warning on a
 language change.
+
+**New in this pass (2026-10-19), compiled and packaged but never run.** The phone was
+unreachable all session, so none of the five has executed anywhere:
+
+- **Download progress.** `File` gained `progress` (0-1) and `downloadedSize` on a *new*
+  `progressChanged` signal - not `fileChanged`, whose narrow guard is a measured 46%
+  suppression while media downloads. Quantised to whole percent to bound repaints.
+  `MessageRow::paintProgress` draws a determinate arc once bytes land and falls back to
+  the spinner before that; a document's subtitle counts "1.4 MB / 6.2 MB".
+- **Typing action.** `MessageModel::sendTypingAction`, throttled to 5 s against the
+  server's 6 s expiry, driven from the composer's `onTextChanged` while non-empty. The
+  receiving half already existed in `ChatInfoFormatter`.
+- **Message search.** `searchChatMessages` scoped to the model's topic;
+  `MessageModel::searchResults` is a `QStringList` of ids. No results model and no
+  results page: ChatPage's bar walks the hits with up/down through the existing
+  `listView.goToMessage`, which already pages back to an unloaded message.
+- **Forum topics.** `Supergroup::isForum`; `ForumTopicModel` (`getForumTopics`,
+  `updateForumTopicInfo`, `updateForumTopic`); painted `TopicRow`;
+  `ChatManager::isForum`/`pushTopics`/`pushTopic`; `TopicListPage.qml`; `main.qml`
+  routes a forum there instead of to a ChatPage. The hinge is that a topic is just a
+  `MessageModel` with a `forumTopicId`, so ChatPage reads and sends into one topic
+  without knowing forums exist.
+- **`ContactRow`.** The `SearchModel` lists on `NewChatPage` and `NewGroupPage` were the
+  last long, avatar-bearing, scrolled QML delegates: ~8 items and ~25 bindings a row,
+  now one painted item. `selectable` draws the picker's tick.
+
+**What to distrust first, in order:**
+
+1. **The General topic.** `MessageModel::handleNewMessage` drops a message whose
+   `forum_topic_id` is not this model's. If General turns out to deliver its messages
+   with no topic at all, General reads as *empty* - the symptom was chosen to be obvious
+   rather than to pollute every other topic. Check General before anything else.
+2. **QML parses.** Five pages changed and one is new; QML1 compiles at runtime, so a
+   typo in `TopicListPage`, the ChatPage search bar, or either contact page is invisible
+   until that page is opened.
+3. **Topic history.** `getForumTopicHistory` is a different request from
+   `getChatHistory` and shares `handleHistoryResponse`; both answer with `messages`, but
+   the retry/`MinLoadedMessages` path has only ever seen the other one.
+4. **The progress arc** at 32px, and whether `progressChanged` repaints the row without
+   making a download feel heavier than the old spinner did.
+5. **`ContactRow` geometry** against the `ListItem` it replaced - the row is 88px and the
+   text column is centred as a block, so a contact with no username should sit centred
+   rather than high.
 
 **The chat list is demand-loaded** (2026-09-21, unmeasured on device). `ChatModel` asks
 `getChats` for the ids in its list and `StorageManager::fetchChat` pulls each row the

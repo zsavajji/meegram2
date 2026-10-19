@@ -1,3 +1,24 @@
+meegram (0.5.0) unstable; urgency=low
+
+  * Groups that use topics now open to their list of topics, instead of to one long
+    conversation with every topic mixed into it. Picking a topic shows that topic's
+    messages and nothing else, and what you write there is sent to that topic.
+  * Messages can be searched inside a chat, from the magnifier in the toolbar. The arrows
+    beside the field step back through the older matches and forward again, and the list
+    jumps to each one - fetching further back on its own when the match is older than
+    what has been loaded.
+  * Downloads show how far along they are, rather than only that something is happening.
+    A document counts the megabytes up as they arrive, which is the number worth having
+    when the connection is slow.
+  * The people you are writing to now see that you are typing.
+  * The two lists of contacts - the one for starting a chat and the one for choosing who
+    goes into a new group - are now drawn the way the chat list and the message list have
+    been since the last release: as one piece per row instead of a dozen. They were the
+    last long lists in the app still built the slow way, and the ones where it showed
+    most, since nearly every row is waiting for a picture it has never seen before.
+
+ -- Andrea Faggin <hellothere@andreafagg.in>  Mon, 19 Oct 2026 12:00:00 +0200
+
 meegram (0.4.5) unstable; urgency=low
 
   * The chat list is fetched a screen at a time instead of being handed over whole at

@@ -726,7 +726,7 @@ qreal MessageRow::layoutContent(const QVariant &content, qreal top, qreal avatar
 
         const qreal left = contentLeft(contentWidth);
         const qreal rowHeight =
-            layoutFileRow(left, top, contentWidth, m_fileName.isEmpty() ? tr("AttachDocument") : m_fileName, m_file ? m_file->size() : QString());
+            layoutFileRow(left, top, contentWidth, m_fileName.isEmpty() ? tr("AttachDocument") : m_fileName, fileSubtitle());
 
         return rowHeight + layoutCaption(m_text, left, top + rowHeight + 6, contentWidth);
     }
@@ -786,6 +786,20 @@ qreal MessageRow::layoutCaption(const QString &caption, qreal x, qreal y, qreal 
     m_captionPos = QPointF(x, y);
 
     return m_caption.isEmpty() ? 0 : 6 + m_caption.height();
+}
+
+QString MessageRow::fileSubtitle() const
+{
+    if (!m_file)
+        return QString();
+
+    // "1.4 MB / 6.2 MB" while it arrives, the total on its own otherwise. The ring says
+    // how far along it is; this says how big the wait actually is, which is the number
+    // worth having on a metered connection.
+    if (m_file->isDownloadingActive() && !m_file->downloadedSize().isEmpty())
+        return m_file->downloadedSize() + QLatin1String(" / ") + m_file->size();
+
+    return m_file->size();
 }
 
 qreal MessageRow::layoutFileRow(qreal x, qreal top, qreal width, const QString &title, const QString &subtitle)
@@ -1221,6 +1235,43 @@ void MessageRow::paintSpinner(QPainter *painter, const QPointF &center) const
     painter->drawPixmap(QPointF(center.x() - frame.width() / 2.0, center.y() - frame.height() / 2.0), frame);
 }
 
+void MessageRow::paintProgress(QPainter *painter, const QPointF &center) const
+{
+    const double progress = m_file ? m_file->progress() : 0.0;
+
+    // Nothing has arrived yet, so there is no fraction to draw and the turning spinner is
+    // the only thing that says the request is alive.
+    if (progress <= 0.0)
+    {
+        paintSpinner(painter, center);
+        return;
+    }
+
+    // The spinner's own footprint, so the ring lands where the glyph expects it and the
+    // small cross drawn inside it still reads.
+    constexpr qreal Ring = 32;
+    constexpr int Thickness = 3;
+
+    const QRectF ring(center.x() - Ring / 2, center.y() - Ring / 2, Ring, Ring);
+
+    const PainterGuard guard(painter);
+
+    painter->setRenderHint(QPainter::Antialiasing);
+    painter->setBrush(Qt::NoBrush);
+
+    QPen pen(QColor(255, 255, 255, 0x60));
+    pen.setWidth(Thickness);
+    painter->setPen(pen);
+    painter->drawEllipse(ring);
+
+    pen.setColor(Qt::white);
+    painter->setPen(pen);
+
+    // Sixteenths of a degree, from twelve o'clock, clockwise - which is negative in Qt's
+    // anticlockwise convention.
+    painter->drawArc(ring, 90 * 16, -static_cast<int>(progress * 360 * 16));
+}
+
 void MessageRow::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget)
 {
     Q_UNUSED(option);
@@ -1419,7 +1470,7 @@ void MessageRow::paintContent(QPainter *painter, const Palette &palette) const
             if (!isFileReady())
             {
                 painter->fillRect(m_frame, scrim);
-                paintSpinner(painter, m_frame.center());
+                paintProgress(painter, m_frame.center());
             }
             else
             {
@@ -1466,7 +1517,7 @@ void MessageRow::paintContent(QPainter *painter, const Palette &palette) const
 
             if (isFileActive())
             {
-                paintSpinner(painter, button.center());
+                paintProgress(painter, button.center());
             }
             else
             {
@@ -1516,7 +1567,7 @@ void MessageRow::paintContent(QPainter *painter, const Palette &palette) const
             painter->drawText(m_iconRect, Qt::AlignCenter, QString(glyph));
 
             if (isFileActive())
-                paintSpinner(painter, m_iconRect.center());
+                paintProgress(painter, m_iconRect.center());
 
             m_nameText.draw(painter, m_namePos, text);
 

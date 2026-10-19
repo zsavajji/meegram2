@@ -1,5 +1,6 @@
 import QtQuick 1.1
 import com.nokia.meego 1.1
+import MyComponent 1.0
 import "components"
 
 // Starting a conversation with somebody who is not in the chat list yet: contacts you
@@ -81,60 +82,30 @@ Page {
         cacheBuffer: listView.height / 2
         model: root.model
 
-        delegate: ListItem {
-            Image {
-                id: profilePhotoImage
+        // One painted item per contact, laid out in C++ - see ContactRow.cpp. It sets its
+        // own height.
+        delegate: ContactRow {
+            width: ListView.view.width
+            listModel: root.model
+            row: index
+            inverted: theme.inverted
+            actions: rowActions
+        }
+    }
 
-                anchors { left: parent.left; leftMargin: 12; verticalCenter: parent.verticalCenter }
-                width: 64
-                height: 64
+    // What a ContactRow's tap does. The rows call these by name, with every argument -
+    // see ContactRow.hpp for the list.
+    QtObject {
+        id: rowActions
 
-                sourceSize.width: width
-                sourceSize.height: height
-                asynchronous: true
-                fillMode: Image.PreserveAspectCrop
-
-                // Bound to the File itself, which notifies when its download finishes -
-                // which is what most rows here are waiting for, unlike the chat list where
-                // the avatar is long since cached. isDownloadingCompleted, not localPath:
-                // TDLib fills the path in as soon as the download starts.
-                source: model.photo && model.photo.isDownloadingCompleted ?
-                            "image://chatPhoto/" + model.photo.localPath :
-                            appWindow.avatarPlaceholder
-            }
-
-            Column {
-                anchors {
-                    left: profilePhotoImage.right
-                    leftMargin: 16
-                    right: parent.right
-                    rightMargin: 12
-                    verticalCenter: parent.verticalCenter
-                }
-
-                Label {
-                    width: parent.width
-                    font.pixelSize: 26
-                    font.bold: true
-                    elide: Text.ElideRight
-                    text: model.title
-                }
-
-                Label {
-                    width: parent.width
-                    font.pixelSize: 20
-                    font.family: "Nokia Pure Light"
-                    elide: Text.ElideRight
-                    text: model.username
-                    // A contact reached by phone number has none, and Column leaves out
-                    // what it cannot see rather than an empty line.
-                    visible: text !== ""
-                }
-            }
-
+        function activate(contactId) {
             // Left on the stack rather than popped: the chat is pushed on top, so Back
             // returns to these results, which is what a mistyped username needs.
-            onClicked: appWindow.openChat(model.id)
+            appWindow.openChat(contactId);
+        }
+
+        function download(fileId) {
+            appManager.downloadFile(fileId, 1, 0, 0, false);
         }
     }
 
