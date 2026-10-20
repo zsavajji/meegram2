@@ -375,6 +375,13 @@ changes, and porting it turned up two bugs this tree shares, fixed there and sti
 the field's), and `TopicRow` takes `m_name.left(1)` as the topic's initial (half an emoji when
 the name starts with one).
 
+**0.5.2 (2026-10-20)**: `ForumTopicModel::refresh` merges the re-read first page into the rows
+on screen (in place, new topics where the server lists them) instead of resetting, so coming
+back from a topic keeps the list and its scroll position. `AppVersion` (About, and the
+`application_version` the server lists under Devices) is `MEEGRAM_VERSION`, defined from
+`project()` in CMakeLists.txt; it was a literal stuck at "0.4.5". Bump `project()` and
+`debian/changelog` together.
+
 **What to distrust first, in order:**
 
 1. **The General topic.** `MessageModel::handleNewMessage` drops a message whose

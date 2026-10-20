@@ -7,6 +7,7 @@
 #include "StorageManager.hpp"
 #include "Utils.hpp"
 
+#include <algorithm>
 #include <iterator>
 
 namespace {
@@ -135,20 +136,13 @@ void ForumTopicModel::loadMore()
 
 void ForumTopicModel::refresh()
 {
-    beginResetModel();
-    m_rows.clear();
-    endResetModel();
-
-    m_listFullyLoaded = false;
-    m_nextOffsetDate = 0;
-    m_nextOffsetMessageId = 0;
-    m_nextOffsetTopicId = 0;
-
-    // Anything already out belongs to the list that was just emptied.
+    // Re-reads the first page and merges it into the rows on screen (handleTopics), rather
+    // than emptying the list first: that flashed the spinner and threw away the scroll
+    // position every time the user came back from a topic. Anything already out is
+    // superseded by this.
     ++m_requestId;
     m_requestPending = false;
-
-    emit countChanged();
+    m_listFullyLoaded = false;
 
     requestTopics(false);
 }
@@ -176,7 +170,7 @@ void ForumTopicModel::requestTopics(bool more)
         request->offset_forum_topic_id_ = m_nextOffsetTopicId;
     }
 
-    m_client->send(std::move(request), [this, requestId = m_requestId, alive = m_alive](auto &&response) {
+    m_client->send(std::move(request), [this, requestId = m_requestId, more, alive = m_alive](auto &&response) {
         // Runs on the TDLib worker thread, and the model may already be gone: leaving the
         // topic list destroys it while this is still out.
         if (!alive->load())
@@ -185,11 +179,12 @@ void ForumTopicModel::requestTopics(bool more)
         // Nothing else is touched here. Same hop and the same void* handover as
         // MessageModel's history reply, and for the same reason: everything below writes
         // containers the GUI thread reads in data().
-        QMetaObject::invokeMethod(this, "handleTopics", Qt::QueuedConnection, Q_ARG(int, requestId), Q_ARG(void *, response.release()));
+        QMetaObject::invokeMethod(this, "handleTopics", Qt::QueuedConnection, Q_ARG(int, requestId), Q_ARG(bool, more),
+                                  Q_ARG(void *, response.release()));
     });
 }
 
-void ForumTopicModel::handleTopics(int requestId, void *responseObject) noexcept
+void ForumTopicModel::handleTopics(int requestId, bool more, void *responseObject) noexcept
 {
     // Ownership arrives here, on the GUI thread - taken before the staleness test below,
     // so an abandoned answer is freed rather than leaked.
@@ -217,15 +212,13 @@ void ForumTopicModel::handleTopics(int requestId, void *responseObject) noexcept
     if (static_cast<int>(topics.topics_.size()) < TopicSliceLimit)
         m_listFullyLoaded = true;
 
-    std::vector<Row> incoming;
+    bool inserted = false;
 
-    for (auto &topic : topics.topics_)
+    for (int i = 0; i < static_cast<int>(topics.topics_.size()); ++i)
     {
-        if (!topic || !topic->info_)
-            continue;
+        auto &topic = topics.topics_[i];
 
-        // Already held: a page re-requested after a refresh must not double the list.
-        if (indexOfTopic(topic->info_->forum_topic_id_) >= 0)
+        if (!topic || !topic->info_)
             continue;
 
         Row row;
@@ -243,28 +236,38 @@ void ForumTopicModel::handleTopics(int requestId, void *responseObject) noexcept
         if (topic->last_message_)
             row.lastMessage = std::make_unique<Message>(std::move(topic->last_message_));
 
-        incoming.push_back(std::move(row));
+        // Already held - a refresh, or a page asked for again: the row is updated where it
+        // is. Its last message is replaced, which is safe because no role hands the Message
+        // itself to a delegate, only the preview and date formatted from it.
+        if (const int index = indexOfTopic(row.id); index >= 0)
+        {
+            m_rows[index] = std::move(row);
+
+            const auto modelIndex = createIndex(index, 0);
+
+            emit dataChanged(modelIndex, modelIndex);
+            continue;
+        }
+
+        // New. A page further down goes on the end, in the order the server gave it - pinned
+        // first, then the topic's own order - so this model never sorts. On the first page
+        // (the opening load, or a refresh) it goes where the server listed it, which for a
+        // topic created since is near the top.
+        //
+        // ponytail: rows already held never move, so a topic that received a message keeps
+        // its place. getForumTopics answers with an order per topic; sort on it if a busy
+        // forum ever makes the fixed order annoying.
+        const int at = more ? static_cast<int>(m_rows.size()) : std::min(i, static_cast<int>(m_rows.size()));
+
+        beginInsertRows(QModelIndex(), at, at);
+        m_rows.insert(m_rows.begin() + at, std::move(row));
+        endInsertRows();
+
+        inserted = true;
     }
 
-    if (incoming.empty())
-        return;
-
-    // Appended in the order the server gave them, which is pinned first and then by the
-    // topic's own order - so this model never sorts. The one thing that follows is that a
-    // topic receiving a message keeps its place until the page is reopened.
-    //
-    // ponytail: no re-sort on activity. getForumTopics answers with an order per topic;
-    // sort on it if a busy forum ever makes the fixed order annoying.
-    const int first = static_cast<int>(m_rows.size());
-
-    beginInsertRows(QModelIndex(), first, first + static_cast<int>(incoming.size()) - 1);
-
-    for (auto &row : incoming)
-        m_rows.push_back(std::move(row));
-
-    endInsertRows();
-
-    emit countChanged();
+    if (inserted)
+        emit countChanged();
 }
 
 void ForumTopicModel::handleResult(td::td_api::Object *object) noexcept

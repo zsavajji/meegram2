@@ -1,7 +1,11 @@
 cmake_minimum_required(VERSION 3.20)
 # C as well as C++ since lib/quirc, the QR decoder, is C99. The toolchain file already
 # names a C compiler; nothing else in this project uses one.
-project(MeeGram VERSION 0.5.1 LANGUAGES CXX C)
+project(MeeGram VERSION 0.5.2 LANGUAGES CXX C)
+# The one version number: the About dialog and the application_version the server lists
+# under Devices read it (src/Common.hpp). The package's comes from debian/changelog; keep
+# the two in step.
+add_compile_definitions(MEEGRAM_VERSION="${PROJECT_VERSION}")
 
 # Without this an unset CMAKE_BUILD_TYPE means no -O flag at all, i.e. -O0.
 # This codebase leans on std::ranges views and templates, which -O0 punishes hard.

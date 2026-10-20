@@ -27,7 +27,9 @@ inline qlonglong toId(const QString &value) noexcept
 }
 
 constexpr auto AppName = "MeeGram";
-constexpr auto AppVersion = "0.4.5";
+// From CMakeLists.txt's project(). It was a literal here, and stayed "0.4.5" through two
+// releases.
+constexpr auto AppVersion = MEEGRAM_VERSION;
 
 constexpr auto ApiId = 142713;
 constexpr auto ApiHash = "9e9e687a70150c6436afe3a2b6bfd7d7";

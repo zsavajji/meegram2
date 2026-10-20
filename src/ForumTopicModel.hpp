@@ -79,8 +79,9 @@ private slots:
     // The getForumTopics reply, handed over from the TDLib worker thread. Takes ownership
     // of the raw pointer; void* because a queued Q_ARG needs a registered metatype and
     // td_api::object_ptr is move-only - the same handover
-    // MessageModel::handleHistoryResponse documents, and for the same reason.
-    void handleTopics(int requestId, void *responseObject) noexcept;
+    // MessageModel::handleHistoryResponse documents, and for the same reason. `more` says
+    // whether it answers a page further down or the first page.
+    void handleTopics(int requestId, bool more, void *responseObject) noexcept;
 
 private:
     struct Row
