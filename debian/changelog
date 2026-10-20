@@ -1,3 +1,16 @@
+meegram (0.5.1) unstable; urgency=low
+
+  * Chat folders are picked from the title bar: it shows the folder you are in with a small
+    arrow, and a tap lists the others. They used to be a row of tabs across the top of the
+    chat list, taking space from it on every screen, and the row appeared even on an
+    account with no folders at all - where it held a single tab.
+  * Send is greyed out until there is something to send.
+  * Scrolling up into older messages keeps your place. As each page of history arrived the
+    list used to slide away from where you were reading, toward the oldest message of the
+    page that had just loaded.
+
+ -- Andrea Faggin <hellothere@andreafagg.in>  Tue, 20 Oct 2026 15:30:00 +0200
+
 meegram (0.5.0) unstable; urgency=low
 
   * Groups that use topics now open to their list of topics, instead of to one long

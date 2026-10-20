@@ -42,9 +42,11 @@ is demand-loaded as of 2026-09-21 to close that; see **Status**, and measure it.
   reconfigure. `build/` belongs to `tools/setup-dependencies.sh` (zlib, OpenSSL, TDLib,
   rlottie, webp, ogg, opus trees and their skip-stamps). The `dpkg -i` is the user's:
   `user` cannot become root over ssh. Land the `.deb` in `/home/user/MyDocs`, not `/tmp`
-  (4 MB tmpfs), and hand over `killall meegram meegramd` with the install — `invoker
-  --single-instance` re-focuses the old process otherwise and the change looks unshipped.
-  Say plainly what was not verified.
+  (4 MB tmpfs). **`debian/postinst` already runs `killall meegram meegramd` on configure**,
+  so `dpkg -i` is the whole install — this file used to ask for a second killall by hand,
+  which is redundant. It is only wanted if dpkg unpacks but fails to configure, since then
+  postinst never ran and `invoker --single-instance` re-focuses the old process, making the
+  change look unshipped. Say plainly what was not verified.
 - Comments in this codebase explain *why*, often with the measured number and the bug
   that motivated the line. Keep that style. clang-format: Google base, 160 columns,
   braces on their own line, 4-space indent.
@@ -186,7 +188,8 @@ meegramd (src/daemon/)                       meegram (src/)
 
 ```
 main.qml (PageStackWindow; theme colours, isOnBubble(), chatPageComponent, openChat/openProfilePage/openPhoto, save plumbing)
-└── MainPage         root, Loader: spinner | unreachable | welcome | ChatListView | tabs of ChatListView
+└── MainPage         root, Loader: spinner | unreachable | welcome | ChatListView | one ChatListView per folder,
+                     picked from the TopBar (dropDown + SelectionDialog; only when chatFolderModel.count > 0)
     ├── AuthenticationPage   a sheet, never on the stack → SignIn/CodeEnter/Password/QrCode/SignUp
     ├── ChatPage        header, ListView<MessageRow>, composer, EmojiPicker (EmojiGrid in a Flickable),
     │                   mention panel, VoiceNote; the three ContextMenus, the delete QueryDialog and
@@ -361,6 +364,16 @@ unreachable all session, so none of the five has executed anywhere:
 - **`ContactRow`.** The `SearchModel` lists on `NewChatPage` and `NewGroupPage` were the
   last long, avatar-bearing, scrolled QML delegates: ~8 items and ~25 bindings a row,
   now one painted item. `selectable` draws the picker's tick.
+
+**0.5.1 (2026-10-20)**, packaged, not yet installed: chat folders are picked from the TopBar
+(the folder's name with the theme's drop-down arrow, a tap opens a `SelectionDialog` of
+`ChatFolderModel::titles`) instead of a 48px tab strip, which also showed on an account with no
+folders; Send is disabled while the composer is empty; the settle fix for a page of older
+history (`onFetchedPosition` now settles at `ListView.Beginning`). The Qt 5 port carries the same
+changes, and porting it turned up two bugs this tree shares, fixed there and still unfixed here:
+`toggleSearch()` calls `platformCloseSoftwareInputPanel()` unqualified (a ReferenceError: close
+the field's), and `TopicRow` takes `m_name.left(1)` as the topic's initial (half an emoji when
+the name starts with one).
 
 **What to distrust first, in order:**
 

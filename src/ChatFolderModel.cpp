@@ -91,3 +91,13 @@ int ChatFolderModel::count() const noexcept
 {
     return static_cast<int>(m_chatFolders.size());
 }
+
+QStringList ChatFolderModel::titles() const
+{
+    QStringList titles;
+
+    for (const auto &folder : m_chatFolders)
+        titles.append(folder ? folder->title() : QString());
+
+    return titles;
+}

@@ -8,6 +8,10 @@ Item {
     property string title
     property bool isArchived: false
 
+    // Marks the bar as the switch between views (MainPage's chat folders): the whole bar
+    // stays the button, this only says so.
+    property bool dropDown: false
+
     // The accent at full strength is a band of saturated blue against a near-black page,
     // which is the single biggest source of glare in the dark theme - it is the largest
     // coloured area on screen. Darkened rather than replaced, so it still follows
@@ -45,7 +49,7 @@ Item {
             left: parent.left
             right: parent.right
             leftMargin: 16
-            rightMargin: 16
+            rightMargin: root.dropDown ? 16 + indicator.width + 8 : 16
         }
         height: 32
 
@@ -54,6 +58,15 @@ Item {
         color: "#ffffff"
         elide: Text.ElideRight
         text: getTitle()
+    }
+
+    // Harmattan's own drop-down arrow, the white one for a coloured header.
+    Image {
+        id: indicator
+
+        anchors { right: parent.right; rightMargin: 16; verticalCenter: label.verticalCenter }
+        visible: root.dropDown
+        source: visible ? "image://theme/meegotouch-combobox-indicator-inverted" : ""
     }
 
     MouseArea {

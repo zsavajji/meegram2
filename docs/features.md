@@ -114,6 +114,19 @@ Message text is not searched. That means a `searchMessages` call and a second mo
 marked `ponytail:` in `ChatModel.cpp`.
 :::
 
+### Folders
+
+Picked from the title bar rather than a tab strip (0.5.1): `TopBar.dropDown` puts the theme's
+`meegotouch-combobox-indicator-inverted` beside the current folder's name and a tap opens a
+`SelectionDialog` - all chats first, then `ChatFolderModel::titles` in the server's order, so
+row *i* is `MainPage.currentFolder` *i*. One `ChatListView` per folder sits stacked under the
+header, only the picked one visible, each built the first time it shows. Shown only when
+`chatFolderModel.count > 0`: the strip it replaced tested `folderChatModels.count`, which a
+`QList<QObject *>` does not have on Qt 5, and showed a single tab on an account with no
+folders. A change to the folder list goes back to all chats. ponytail: no unread count per
+folder (`updateUnreadChatCount` is not handled anywhere yet); add it to `ChatFolderModel` if
+the picker should say where the unread messages are.
+
 ### Chat actions
 
 Long press a row for a Harmattan `ContextMenu`:

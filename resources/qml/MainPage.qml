@@ -18,9 +18,27 @@ Page {
     property variant mainChatModel: appManager.chatManager ? appManager.chatManager.mainModel : null
     property variant folderChatModels: appManager.chatManager ? appManager.chatManager.folderModels : null
 
+    // The account has chat folders. Asked of the folder model's count rather than of
+    // folderChatModels, a QList<QObject *> that Qt 5 hands QML as a plain array, with no
+    // count. `!!` because a variant holding null reads back undefined in QML1.
+    property bool hasFolders: !!chatFolderModel && chatFolderModel.count > 0
+
+    // Which list shows: 0 for all chats, i for folder i - 1.
+    property int currentFolder: 0
+
+    // The header is the folder switch, Harmattan's way of changing views (Mail's account
+    // header): the folder's name with a drop-down mark, a tap for the list. It replaced a
+    // strip of tab buttons that cost 48px of every screen of the chat list.
     TopBar {
         id: header
-        title: "MeeGram"
+        title: !root.hasFolders ? "MeeGram"
+             : root.currentFolder === 0 ? "FilterAllChats"
+             : chatFolderModel.titles[root.currentFolder - 1] || ""
+        dropDown: root.hasFolders
+        onClicked: {
+            if (root.hasFolders)
+                root.openFolderPicker()
+        }
     }
 
     // The whole app in one binding: still starting up, started but signed out, signed in.
@@ -50,8 +68,8 @@ Page {
         sourceComponent: !appWindow.initialized ? (appManager.serviceUnreachable ? unreachableComponent : busyComponent)
                        : appManager.signedOut ? infoComponent
                        : !appManager.chatManager ? busyComponent
-                       : folderChatModels.count === 0 ? chatLayoutComponent
-                                                      : chatTabsLayoutComponent
+                       : !root.hasFolders ? chatLayoutComponent
+                                          : chatFoldersLayoutComponent
 
         // The end of the startup timeline: the busy indicator is gone and the real chat
         // layout has been built. Fires on every swap, so a run shows the busy component
@@ -67,7 +85,7 @@ Page {
                      : sourceComponent === unreachableComponent ? "unreachable-shown"
                                                                 : "chat-layout-loaded")
 
-            if (sourceComponent === chatLayoutComponent || sourceComponent === chatTabsLayoutComponent)
+            if (sourceComponent === chatLayoutComponent || sourceComponent === chatFoldersLayoutComponent)
                 chatPageWarmup.restart()
         }
     }
@@ -228,144 +246,96 @@ Page {
         }
     }
 
+    // One list per folder, stacked, only the picked one visible - picked from the header,
+    // see openFolderPicker.
     Component {
-        id: chatTabsLayoutComponent
+        id: chatFoldersLayoutComponent
 
         Item {
-            id: chatTabsLayout
-
-            property alias tabFlickable: tabRowFlickable
-
             anchors.fill: parent
-            Flickable {
-                id: tabRowFlickable
-                contentWidth: tabButtonRow.width
-                height: 48
-                flickableDirection: Flickable.HorizontalFlick
-                clip: true
-                anchors {
-                    left: parent.left
-                    right: parent.right
-                    top: parent.top
-                }
 
-                Row {
-                    id: tabButtonRow
-                    property int buttonMargin: 1
-                    anchors.verticalCenter: parent.verticalCenter
+            Item {
+                anchors.fill: parent
+                visible: root.currentFolder === 0
 
-                    TabButton {
-                        id: allChatsTabButton
-                        text: qsTr("FilterAllChats")
-                        tab: allChatsTab
-                        checked: tabGroup.currentTab === allChatsTab
-                        onClicked: {
-                            tabGroup.currentTab = allChatsTab;
-                            root.ensureVisible(allChatsTabButton);
-                        }
-                        width: allChatsTabText.width + tabButtonRow.buttonMargin * 2
-
-                        Text {
-                            id: allChatsTabText
-                            text: parent.text
-                            visible: false // Invisible, used only for width calculation
-                        }
-                    }
-
-                    Repeater {
-                        model: chatFolderModel
-
-                        TabButton {
-                            id: folderTabButton
-                            text: model.name
-                            checked: tabGroup.currentTab === tabGroup.children[index + 1]
-                            onClicked: {
-                                tabGroup.currentTab = tabGroup.children[index + 1];
-                                root.ensureVisible(folderTabButton);
-                            }
-                            width: folderTabText.width + tabButtonRow.buttonMargin * 2
-
-                            Text {
-                                id: folderTabText
-                                text: parent.text
-                                visible: false // Invisible, used only for width calculation
-                            }
-                        }
-                    }
-                }
-
-                function smoothScrollTo(targetX) {
-                    contentXAnimation.to = targetX;
-                    contentXAnimation.running = true;
-                }
-
-                NumberAnimation {
-                    id: contentXAnimation
-                    target: tabRowFlickable
-                    property: "contentX"
-                    duration: 300
-                    easing.type: Easing.InOutQuad
-                }
+                ChatListView { model: mainChatModel }
             }
 
-            TabGroup {
-                id: tabGroup
-                currentTab: allChatsTab
-                anchors {
-                    top: tabRowFlickable.bottom
-                    left: parent.left
-                    right: parent.right
-                    bottom: parent.bottom
-                }
+            Repeater {
+                model: folderChatModels
 
                 Item {
-                    id: allChatsTab
+                    id: folderPage
                     anchors.fill: parent
+                    visible: root.currentFolder === index + 1
 
-                    ChatListView { model: mainChatModel }
-                }
+                    // Captured here so the lazily-created ChatListView below does
+                    // not have to resolve modelData from the Repeater scope.
+                    property variant folderModel: modelData
 
-                Repeater {
-                    model: folderChatModels
-
-                    Item {
-                        id: folderTabPage
+                    // Repeater is eager: without this, opening the chats page built
+                    // a ChatListView for every folder, each running model.refresh()
+                    // and its own 200ms populate timer, while only one is ever
+                    // visible. Build a folder's list the first time it shows.
+                    Loader {
+                        id: folderListLoader
                         anchors.fill: parent
-
-                        // Captured here so the lazily-created ChatListView below does
-                        // not have to resolve modelData from the Repeater scope.
-                        property variant folderModel: modelData
-
-                        // Repeater is eager: without this, opening the chats page built
-                        // a ChatListView for every folder, each running model.refresh()
-                        // and its own 200ms populate timer, while only one tab is ever
-                        // visible. Build a folder's list the first time its tab shows.
-                        Loader {
-                            id: folderListLoader
-                            anchors.fill: parent
-                        }
-
-                        Component {
-                            id: folderListComponent
-
-                            ChatListView { model: folderTabPage.folderModel }
-                        }
-
-                        function ensureLoaded() {
-                            if (visible && !folderListLoader.sourceComponent)
-                                folderListLoader.sourceComponent = folderListComponent;
-                        }
-
-                        onVisibleChanged: ensureLoaded()
-                        Component.onCompleted: ensureLoaded()
                     }
-                }
 
-                onCurrentTabChanged: {
+                    Component {
+                        id: folderListComponent
 
+                        ChatListView { model: folderPage.folderModel }
+                    }
+
+                    function ensureLoaded() {
+                        if (visible && !folderListLoader.sourceComponent)
+                            folderListLoader.sourceComponent = folderListComponent;
+                    }
+
+                    onVisibleChanged: ensureLoaded()
+                    Component.onCompleted: ensureLoaded()
                 }
             }
         }
+    }
+
+    // Built on first use, like the ChatPage popups: most launches never switch folder.
+    Component {
+        id: folderDialogComponent
+
+        SelectionDialog {
+            titleText: qsTr("Filters")
+            onAccepted: root.currentFolder = selectedIndex
+        }
+    }
+
+    property variant folderDialog: null
+
+    function openFolderPicker() {
+        if (!folderDialog)
+            folderDialog = folderDialogComponent.createObject(root);
+
+        // All chats, then the folders in the server's order: row i is currentFolder i.
+        // Pushed one by one rather than concat'ed: the QStringList is a real array in QML1
+        // but a sequence wrapper in Qt 5, which concat would append as a single element.
+        var names = [qsTr("FilterAllChats")];
+        var titles = chatFolderModel.titles;
+
+        for (var i = 0; i < titles.length; ++i)
+            names.push(titles[i]);
+
+        folderDialog.model = names;
+        folderDialog.selectedIndex = root.currentFolder;
+        folderDialog.open();
+    }
+
+    // A folder list that changed under the picker may no longer have the picked row, so
+    // a change goes back to all chats. setItems emits countChanged on every update.
+    Connections {
+        target: chatFolderModel || null
+        ignoreUnknownSignals: true
+        onCountChanged: root.currentFolder = 0
     }
 
     Menu {
@@ -447,15 +417,6 @@ Page {
             anchors.right: (parent !== undefined) ? parent.right : undefined
             visible: !!appManager.chatManager
             onClicked: (myMenu.status === DialogStatus.Closed) ? myMenu.open() : myMenu.close()
-        }
-    }
-
-    function ensureVisible(item) {
-        if (layoutLoader.item && layoutLoader.item.tabFlickable) {
-            var flickable = layoutLoader.item.tabFlickable;
-            var targetContentX = item.x + item.width / 2 - flickable.width / 2;
-            var clampedContentX = Math.max(0, Math.min(targetContentX, flickable.contentWidth - flickable.width));
-            flickable.smoothScrollTo(clampedContentX);
         }
     }
 }

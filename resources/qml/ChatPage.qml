@@ -615,7 +615,7 @@ Page {
                 flashTimer.restart()
                 // Through the settle rather than a single call: the row was very likely
                 // built moments ago, and one positionViewAtIndex lands on an estimate.
-                beginSettleAt(index)
+                beginSettleAt(index, ListView.Center)
             }
 
             Timer {
@@ -692,12 +692,18 @@ Page {
                 // settle is chasing one of the other two.
                 property int toIndex: -1
 
+                // Where toIndex should land. Center for a jump from a quote - the message
+                // is the thing being looked at. Beginning for a page of older history,
+                // where the row is an anchor rather than the subject: it was at the top of
+                // the screen before the page arrived and has to stay there.
+                property int toMode: ListView.Center
+
                 interval: 60
                 repeat: true
 
                 onTriggered: {
                     if (toIndex >= 0)
-                        listView.positionViewAtIndex(toIndex, ListView.Center)
+                        listView.positionViewAtIndex(toIndex, settleTimer.toMode)
                     else if (toEnd)
                         listView.positionViewAtEnd()
                     else
@@ -722,8 +728,9 @@ Page {
                 settleTimer.restart()
             }
 
-            function beginSettleAt(index) {
+            function beginSettleAt(index, mode) {
                 settleTimer.toIndex = index
+                settleTimer.toMode = mode
                 settleTimer.ticks = 0
                 settleTimer.restart()
             }
@@ -1273,6 +1280,9 @@ Page {
                     width: 120
                     platformStyle: ButtonStyle { inverted: true }
                     text: composeState.editId !== 0 ? qsTr("Save") : qsTr("Send")
+                    // Greyed out until there is something to send - the same whitespace
+                    // test the handler makes, which is now only a backstop.
+                    enabled: textArea.text.trim() !== ""
                     onClicked: {
                         // Whitespace-only counts as empty: TDLib rejects such a
                         // message, so there is nothing to gain by sending it.
@@ -1883,7 +1893,28 @@ Page {
         onLoadingChanged: listView.settleIfLoaded()
 
         onFetchedPosition: {
+            // numItems is where the row that was at the top of the screen has moved to, so
+            // holding it at Beginning is what keeps the reader where they were.
+            //
+            // Immediately *and* through the settle, and it has to be both. This signal is
+            // emitted from inside insertMessages, synchronously from endInsertRows, when
+            // not one of the prepended rows has been created yet - so a QML1 ListView is
+            // still sizing them from its running average. The call below therefore lands
+            // close but wrong, and as the rows are built and MessageRow's real laid-out
+            // heights replace the estimates the view slides off toward the oldest message
+            // of the page that just landed; the settle is what walks it back, the same
+            // bounded retry onMessageAppended uses.
+            //
+            // Leaving the immediate call out and relying on the settle alone is visibly
+            // worse, not better: the first settle pass is 60 ms away, and until it fires
+            // the view sits wherever the insert left it. Snap first, converge after.
+            //
+            // Do not be tempted to drive the convergence from onContentHeightChanged
+            // instead - see the note above goToInitialPosition. It does not converge and
+            // it hangs the app.
             listView.positionViewAtIndex(numItems, ListView.Beginning);
+            listView.beginSettleAt(numItems, ListView.Beginning);
+
             // Keep pulling while the loaded slice still does not fill the screen.
             // Deferred; see fillTimer for why calling it directly is a no-op.
             listView.beginFill();

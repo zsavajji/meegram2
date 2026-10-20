@@ -3,6 +3,7 @@
 #include <td/telegram/td_api.h>
 
 #include <QAbstractListModel>
+#include <QStringList>
 
 #include <memory>
 #include <vector>
@@ -30,6 +31,11 @@ class ChatFolderModel : public QAbstractListModel
     Q_OBJECT
 
     Q_PROPERTY(int count READ count NOTIFY countChanged)
+
+    // The folder names in order, for MainPage's folder picker: a QStringList is the one list
+    // type that crosses into QML (1 and 2) as a plain array. Notified with count, which
+    // setItems emits on every update of the folder list.
+    Q_PROPERTY(QStringList titles READ titles NOTIFY countChanged)
 public:
     ChatFolderModel(QObject *parent = nullptr);
 
@@ -44,6 +50,7 @@ public:
     Q_INVOKABLE QVariant get(int index) const noexcept;
 
     int count() const noexcept;
+    QStringList titles() const;
 
 signals:
     void countChanged();
